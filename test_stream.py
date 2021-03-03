@@ -15,6 +15,11 @@ from cudf_subword_helper import tokenize_text_series, Feature
 import tensorrt as trt
 import numpy as np
 import cupy as cp
+import queue
+import threading
+import pycuda.autoinit
+import pycuda.driver as cuda
+
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 
 # from tornado.ioloop import IOLoop
@@ -65,30 +70,63 @@ def process_batch(messages: cudf.DataFrame):
 
     return tokenized
 
-'''
-This is a helper function to do some data pre-processing.
-This also prints out the word count for each batch.
-'''
-def process_message(message: dict):
+inf_queue = queue.Queue()
 
-    # Turn dict message into 
+max_seq_length = 128
 
-    # return batch_df
-    print("Received {} messages".format(len(messages)))
+# Create the thread for running inference
+def inference_worker():
 
-    # Filter out null data columns and only return data
-    messages = messages[~messages.data.isnull()]
-    return messages
+    pyc_dev = pycuda.autoinit.device
+    pyc_ctx = pyc_dev.retain_primary_context()
+    pyc_ctx.push()
 
-with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine:
-
-    with engine.create_execution_context() as context:
+    with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128-b1-b4-b8.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine, engine.create_execution_context() as context:
 
         stream = cp.cuda.Stream(non_blocking=True)
-        output_shape = tuple(context.get_binding_shape(3))
-        output_size = trt.volume(output_shape) * trt.float32.itemsize
 
-        def do_inference(batch: Feature):
+        # Stores the best profile for the batch size
+        bs_to_profile = {}
+        previous_bs = 0
+
+        while True:
+
+            # Get the next work item
+            batch: Feature = inf_queue.get(block=True)
+
+            batch_size = batch.input_ids.shape[0]
+            batch_size = 1
+
+            # Now set the profile specific settings if the batch size changed
+            if (batch_size != previous_bs):
+                if (batch_size not in bs_to_profile):
+                    # select engine profile
+                    selected_profile = -1
+                    num_binding_per_profile = engine.num_bindings // engine.num_optimization_profiles
+                    for idx in range(engine.num_optimization_profiles):
+                        profile_shape = engine.get_profile_shape(profile_index = idx, binding = idx * num_binding_per_profile)
+                        if profile_shape[0][1] <= batch_size and profile_shape[2][1] >= batch_size and profile_shape[0][0] <= max_seq_length and profile_shape[2][0] >= max_seq_length:
+                            selected_profile = idx
+                            break
+                    if selected_profile == -1:
+                        raise RuntimeError("Could not find any profile that can run batch size {}.".format(batch_size))
+
+                    bs_to_profile[batch_size] = selected_profile
+
+                # Set the actual profile
+                context.active_optimization_profile = bs_to_profile[batch_size]
+                binding_idx_offset = bs_to_profile[batch_size] * num_binding_per_profile
+
+                # Specify input shapes. These must be within the min/max bounds of the active profile
+                # Note that input shapes can be specified on a per-inference basis, but in this case, we only have a single shape.
+                input_shape = (max_seq_length, batch_size)
+                input_nbytes = trt.volume(input_shape) * trt.int32.itemsize
+                for binding in range(3):
+                    context.set_binding_shape(binding_idx_offset + binding, input_shape)
+                assert context.all_binding_shapes_specified
+
+                previous_bs = batch_size
+
 
             d_inputs = [
                 batch.input_ids.ravel().data.ptr,
@@ -96,11 +134,24 @@ with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_la
                 batch.input_mask.ravel().data.ptr,
             ]
 
+            output_shape = tuple(context.get_binding_shape(binding_idx_offset + 3))
+            output_size = trt.volume(output_shape) * trt.float32.itemsize
+
             d_output = cp.empty(output_shape, dtype=np.float32)
 
-            context.execute_async_v2(bindings=[int(d_inp) for d_inp in d_inputs] + [d_output.ravel().data.ptr], stream_handle=stream.ptr)
+            d_inputs = [cuda.mem_alloc(input_nbytes) for binding in range(3)]
 
-            h_output_pinmem = cp.cuda.alloc_pinned_memory(d_output.size)
+            # Allocate output buffer by querying the size from the context. This may be different for different input shapes.
+            h_output = cuda.pagelocked_empty(tuple(context.get_binding_shape(binding_idx_offset + 3)), dtype=np.float32)
+            d_output = cuda.mem_alloc(h_output.nbytes)
+
+            stream = cuda.Stream()
+
+            context.execute_async_v2(bindings=[0] * binding_idx_offset + [int(d_inp) for d_inp in d_inputs] + [int(d_output)], stream_handle=stream.handle)
+
+            stream.synchronize()
+
+            h_output_pinmem = cp.cuda.alloc_pinned_memory(d_output.nbytes)
 
             h_output = np.frombuffer(h_output_pinmem, np.float32, d_output.size).reshape(d_output.shape)
 
@@ -108,29 +159,22 @@ with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_la
 
             stream.synchronize()
 
+            inf_queue.task_done()
 
-        # Preprocess each batch
-        stream_df = source.map(filter_empty_data) \
-                        .filter(lambda x: len(x) > 0) \
-                        .map(process_batch)
+def queue_batch(messages: Feature):
 
-        stream_df.sink(do_inference)
+    inf_queue.put(messages)
 
-# Now sink it to a trt engine
+# Preprocess each batch
+stream_df = source.map(filter_empty_data) \
+                .filter(lambda x: len(x) > 0) \
+                .map(process_batch)
 
-# # Create a streamz dataframe to get stateful word count
-# sdf = DataFrame(stream_df, example=cudf.DataFrame({'word':[], 'count':[]}))
+# Queue the inference work
+stream_df.sink(queue_batch)
 
-# # Formatting the print statements
-# def print_format(sdf):
-#     print("\nGlobal Word Count:")
-#     return sdf
-
-# # Print cumulative word count from the start of the stream, after every batch. 
-# # One can also sink the output to a list.
-# sdf.groupby('word').sum().stream.gather().map(print_format).sink(print)
-
-stream_df.sink(print)
+# turn-on the worker thread
+threading.Thread(target=inference_worker, daemon=True).start()
 
 # IOLoop.current().start()
 def run_asyncio_loop():
