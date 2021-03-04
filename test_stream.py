@@ -4,33 +4,37 @@ You can refer to https://kafka.apache.org/quickstart to start a local Kafka clus
 Below is an example snippet to start a stream from Kafka.
 '''
 import asyncio
-import tqdm
-from functools import reduce
-from collections import deque, defaultdict
+import dataclasses
 import io
-import cudf
-from distributed.client import wait
-from streamz import Stream, Source
-from streamz.dataframe import DataFrame
-import time
 import json
-from cudf_subword_helper import tokenize_text_series, Feature
-import tensorrt as trt
-import numpy as np
-import cupy as cp
 import queue
 import threading
+import time
+import typing
+from collections import defaultdict, deque
+from ctypes import c_void_p
+from functools import reduce
+
+import cudf
+import cupy as cp
 # import pycuda.autoinit
 # import pycuda.driver as cuda
 import docker
-from ctypes import c_void_p
+import numpy as np
+import streamz
+import tensorrt as trt
 import torch
+import tqdm
+from distributed.client import wait
+from streamz import Source, Stream
+from streamz.dataframe import DataFrame
 from torch.utils.dlpack import from_dlpack, to_dlpack
-import dataclasses
-import typing
 from tornado import gen
 
+from cudf_subword_helper import Feature, tokenize_text_series
+
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
+
 
 @dataclasses.dataclass
 class Request:
@@ -65,56 +69,15 @@ class Request:
         return remain
 
     def from_feature(in_feature: Feature, in_df: cudf.Series):
-        return Request(
-            count=in_feature.input_ids.shape[0],
-            input_ids=in_feature.input_ids,
-            input_mask=in_feature.input_mask,
-            segment_ids=in_feature.segment_ids,
-            input_str=in_df.to_arrow().to_pylist()
-        )
+        return Request(count=in_feature.input_ids.shape[0],
+                       input_ids=in_feature.input_ids,
+                       input_mask=in_feature.input_mask,
+                       segment_ids=in_feature.segment_ids,
+                       input_str=in_df.to_arrow().to_pylist())
+
 
 @Stream.register_api()
 class partition_batch(Stream):
-    """ Partition stream into tuples of equal size
-
-    Parameters
-    ----------
-    n: int
-        Maximum partition size
-    timeout: int or float, optional
-        Number of seconds after which a partition will be emitted,
-        even if its size is less than ``n``. If ``None`` (default),
-        a partition will be emitted only when its size reaches ``n``.
-    key: hashable or callable, optional
-        Emit items with the same key together as a separate partition.
-        If ``key`` is callable, partition will be identified by ``key(x)``,
-        otherwise by ``x[key]``. Defaults to ``None``.
-
-    Examples
-    --------
-    >>> source = Stream()
-    >>> source.partition(3).sink(print)
-    >>> for i in range(10):
-    ...     source.emit(i)
-    (0, 1, 2)
-    (3, 4, 5)
-    (6, 7, 8)
-
-    >>> source = Stream()
-    >>> source.partition(2, key=lambda x: x % 2).sink(print)
-    >>> for i in range(4):
-    ...     source.emit(i)
-    (0, 2)
-    (1, 3)
-
-    >>> from time import sleep
-    >>> source = Stream()
-    >>> source.partition(5, timeout=1).sink(print)
-    >>> for i in range(3):
-    ...     source.emit(i)
-    >>> sleep(1)
-    (0, 1, 2)
-    """
     _graphviz_shape = 'diamond'
 
     def __init__(self, upstream, n, timeout=None, key=None, **kwargs):
@@ -153,8 +116,6 @@ class partition_batch(Stream):
 
         self._release_refs(metadata)
 
-            
-
     @gen.coroutine
     def update(self, x, who=None, metadata=None):
         self._retain_refs(metadata)
@@ -165,14 +126,13 @@ class partition_batch(Stream):
         metadata_buffer.append(metadata)
 
         if self._count(buffer) >= self.n:
-            if self._timeout is not None and self.n > 1:
+            if key in self._callbacks is not None and self.n > 1:
                 self._callbacks[key].cancel()
+                del self._callbacks[key]
             yield self._flush(key)
             return
         if len(buffer) == 1 and self._timeout is not None:
-            self._callbacks[key] = self.loop.call_later(
-                self._timeout, self._flush, key
-            )
+            self._callbacks[key] = self.loop.call_later(self._timeout, self._flush, key)
 
     def _count(self, buffer: typing.List[Request]):
         return reduce(lambda x, y: x + y.count, buffer, 0)
@@ -188,24 +148,6 @@ class partition_batch(Stream):
         # Are we too big
         if (buffer[0].count > self.n):
             # Chop the top off
-            # remain_count = buffer[0].count - self.n
-
-            # remain = Request(
-            #     count=buffer[0].count - self.n,
-            #     input_ids=buffer[0].input_ids[self.n:, :],
-            #     input_mask=buffer[0].input_mask[self.n:, :],
-            #     segment_ids=buffer[0].segment_ids[self.n:, :],
-            #     input_str=buffer[0].input_str[self.n:],
-            # )
-
-            # # reduce
-            # output = Request(
-            #     count=self.n,
-            #     input_ids=buffer[0].input_ids[:self.n, :],
-            #     input_mask=buffer[0].input_mask[:self.n, :],
-            #     segment_ids=buffer[0].segment_ids[:self.n, :],
-            #     input_str=buffer[0].input_str[:self.n],
-            # )
             output = buffer[0]
             remain = output.split(self.n)
 
@@ -255,16 +197,6 @@ class partition_batch(Stream):
 
 queue_progress = tqdm.tqdm(desc="Input Stream Rate", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0)
 
-
-# from tornado.ioloop import IOLoop
-
-# from tornado.platform.asyncio import AsyncIOMainLoop
-# AsyncIOMainLoop().install()
-
-# source = Stream.from_textfile('pcap_dump_small.json')  # doctest: +SKIP
-# source.map(json.loads).sink(print)  # doctest: +SKIP
-# source.start()  # doctest: +SKIP
-
 max_batch_size = 16
 
 kafka_compose_name = "kafka-docker"
@@ -279,7 +211,8 @@ kafka_net = docker_client.networks.get(kafka_compose_name + "_default")
 bootstrap_servers = '172.17.0.1:49156,172.17.0.1:49157'
 
 # Automatically determine the ports. Comment this if manual setup is desired
-bootstrap_servers = ",".join([c.ports["9092/tcp"][0]["HostIp"] + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
+bootstrap_servers = ",".join(
+    [c.ports["9092/tcp"][0]["HostIp"] + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
 
 # Use this version to specify the bridge IP instead
 bootstrap_servers = ",".join([bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
@@ -288,24 +221,40 @@ bootstrap_servers = ",".join([bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort
 topic = "test_pcap"
 
 # Kafka consumer configuration
-consumer_conf = {'bootstrap.servers': bootstrap_servers,
-                 'group.id': 'custreamz',
-                 'session.timeout.ms': "60000"}
-
+consumer_conf = {'bootstrap.servers': bootstrap_servers, 'group.id': 'custreamz', 'session.timeout.ms': "60000"}
 '''
 If you changed Dask=True, please ensure you have a Dask cluster up and running. Refer to this for Dask API: https://docs.dask.org/en/latest/
 If the input data is high throughput, we recommend using Dask, and starting appropriate number of Dask workers.
 In case of high-throughput processing jobs, please set appropriate number of Kafka topic partitions to ensure parallelism.
 To leverage the custreamz' accelerated Kafka reader (note that data in Kafka must be JSON format), use engine="cudf".
 '''
-# source: Stream = Stream.from_kafka_batched(topic, consumer_conf, npartitions=None, start=True,
-#                                    asynchronous=False, dask=False, engine="cudf", max_batch_size=max_batch_size)
+# source: Stream = Stream.from_kafka_batched(topic,
+#                                            consumer_conf,
+#                                            npartitions=None,
+#                                            start=True,
+#                                            asynchronous=False,
+#                                            dask=False,
+#                                            engine="cudf",
+#                                            max_batch_size=max_batch_size)
+
+# with open("true_pii_as_records.json", "r") as f:
+#     data = json.load(f)
+
+
+# # Adjust data
+
+# with open("true_pii_as_records-fixed.json", "w") as f2:
+#     for d in data:
+#         json.dump(d, f2)
+#         f2.write("\n")
+
 
 def json_to_cudf(in_str: str):
     df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
     return df
 
-source: Stream = Stream.from_textfile("pcap_dump.json", start=True).rate_limit(1/10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+source: Stream = Stream.from_textfile("true_pii_as_records-fixed.json", start=True, asynchronous=True).rate_limit(1/10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+
 
 def update_progress(x):
     if (isinstance(x, str)):
@@ -315,23 +264,28 @@ def update_progress(x):
     else:
         queue_progress.update(len(x))
 
+
 source.sink(update_progress)
+
 
 def filter_empty_data(messages):
     # Filter out null data columns and only return data
     messages = messages[~messages.data.isnull()]
     return messages
 
+
 def to_cpu_dicts(messages):
     return messages.to_pandas().to_dict('records')
+
 
 def process_batch(messages: cudf.DataFrame):
 
     data_series = messages["data"]
 
-    tokenized = tokenize_text_series(data_series,128, 1, 'vocab_hash.txt')
+    tokenized = tokenize_text_series(data_series, 128, 1, 'vocab_hash.txt')
 
     return Request.from_feature(tokenized, data_series)
+
 
 def process_batch_pytorch(messages: cudf.DataFrame):
     """
@@ -352,14 +306,12 @@ def process_batch_pytorch(messages: cudf.DataFrame):
     token_ids = token_ids.reshape(-1, max_seq_len)
     mask = mask.reshape(-1, max_seq_len)
     meta_data = meta_data.reshape(-1, 3)
-    
+
     return Request(count=token_ids.shape[0],
                    input_ids=token_ids,
                    input_mask=mask,
                    segment_ids=meta_data,
                    input_str=data_series.to_arrow().to_pylist())
-
-    # return input_ids.type(torch.long), attention_mask.type(torch.long), meta_data.reshape(-1,3)
 
 inf_queue = queue.Queue()
 
@@ -380,7 +332,7 @@ def inference_worker():
         stream = cp.cuda.Stream(non_blocking=True)
 
         input_shape_max = (max_seq_length, max_batch_size)
-        input_nbytes_max = trt.volume(input_shape_max) * trt.int32.itemsize  
+        input_nbytes_max = trt.volume(input_shape_max) * trt.int32.itemsize
 
         # Allocate device memory for inputs.
         # d_inputs = [cuda.mem_alloc(input_nbytes_max) for _ in range(3)]
@@ -416,8 +368,9 @@ def inference_worker():
                     selected_profile = -1
                     num_binding_per_profile = engine.num_bindings // engine.num_optimization_profiles
                     for idx in range(engine.num_optimization_profiles):
-                        profile_shape = engine.get_profile_shape(profile_index = idx, binding = idx * num_binding_per_profile)
-                        if profile_shape[0][1] <= batch_size and profile_shape[2][1] >= batch_size and profile_shape[0][0] <= max_seq_length and profile_shape[2][0] >= max_seq_length:
+                        profile_shape = engine.get_profile_shape(profile_index=idx, binding=idx * num_binding_per_profile)
+                        if profile_shape[0][1] <= batch_size and profile_shape[2][1] >= batch_size and profile_shape[0][
+                                0] <= max_seq_length and profile_shape[2][0] >= max_seq_length:
                             selected_profile = idx
                             break
                     if selected_profile == -1:
@@ -428,7 +381,6 @@ def inference_worker():
                 # Set the actual profile
                 context.active_optimization_profile = bs_to_profile[batch_size]
                 binding_idx_offset = bs_to_profile[batch_size] * num_binding_per_profile
-
 
                 for binding in range(3):
                     context.set_binding_shape(binding_idx_offset + binding, input_shape)
@@ -444,7 +396,6 @@ def inference_worker():
             # cuda.memcpy_htod_async(d_inputs[0], input_ids, stream)
             # cuda.memcpy_htod_async(d_inputs[1], segment_ids, stream)
             # cuda.memcpy_htod_async(d_inputs[2], input_mask, stream)
-
 
             # cuda.memcpy_dtod_async(d_inputs[0], int(batch.input_ids.data.ptr), batch.input_ids.nbytes, stream)
             # cuda.memcpy_dtod_async(d_inputs[1], int(batch.segment_ids.data.ptr), batch.segment_ids.nbytes, stream)
@@ -474,6 +425,7 @@ def inference_worker():
 
             progress.update(n=batch_size)
 
+
 def inference_worker_pytorch():
 
     # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
@@ -487,12 +439,8 @@ def inference_worker_pytorch():
         batch: Request = inf_queue.get(block=True)
 
         # convert from cupy to torch tensor using dlpack
-        input_ids = from_dlpack(
-            batch.input_ids.astype(cp.float).toDlpack()
-        ).type(torch.long)
-        attention_mask = from_dlpack(
-            batch.input_mask.astype(cp.float).toDlpack()
-        ).type(torch.long)
+        input_ids = from_dlpack(batch.input_ids.astype(cp.float).toDlpack()).type(torch.long)
+        attention_mask = from_dlpack(batch.input_mask.astype(cp.float).toDlpack()).type(torch.long)
 
         with torch.no_grad():
             logits = model(input_ids, token_type_ids=None, attention_mask=attention_mask)[0]
@@ -507,17 +455,17 @@ def inference_worker_pytorch():
                     progress.write("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
 
 
-
 def queue_batch(messages: Request):
 
     # queue_progress.update(messages.count)
 
     inf_queue.put(messages)
 
+
 # Preprocess each batch
 stream_df = source.map(filter_empty_data) \
                 .filter(lambda x: len(x) > 0) \
-                .map(process_batch) \
+                .map(process_batch_pytorch) \
                 .partition_batch(max_batch_size, timeout=1)
 
 # source.sink(lambda x: queue_progress.update())
@@ -526,7 +474,8 @@ stream_df = source.map(filter_empty_data) \
 stream_df.sink(queue_batch)
 
 # turn-on the worker thread
-threading.Thread(target=inference_worker, daemon=True).start()
+threading.Thread(target=inference_worker_pytorch, daemon=True).start()
+
 
 # IOLoop.current().start()
 def run_asyncio_loop():
@@ -538,5 +487,6 @@ def run_asyncio_loop():
     finally:
         loop.close()
         print("Exited")
+
 
 run_asyncio_loop()
