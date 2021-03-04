@@ -21,8 +21,27 @@ import threading
 # import pycuda.driver as cuda
 import docker
 from ctypes import c_void_p
+import torch
+from torch.utils.dlpack import from_dlpack, to_dlpack
+import dataclasses
+import typing
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
+
+@dataclasses.dataclass
+class Request:
+    input_ids: cp.ndarray
+    input_mask: cp.ndarray
+    segment_ids: cp.ndarray
+    input_str: typing.List[str]
+
+    def from_feature(in_feature: Feature, in_df: cudf.Series):
+        return Request(
+            input_ids=in_feature.input_ids,
+            input_mask=in_feature.input_mask,
+            segment_ids=in_feature.segment_ids,
+            input_str=in_df.to_arrow().to_pylist()
+        )
 
 # from tornado.ioloop import IOLoop
 
@@ -83,7 +102,34 @@ def process_batch(messages: cudf.DataFrame):
 
     tokenized = tokenize_text_series(data_series,128, 1, 'vocab_hash.txt')
 
-    return tokenized
+    return Request.from_feature(tokenized, data_series)
+
+def process_batch_pytorch(messages: cudf.DataFrame):
+    """
+    converts cudf.Series of strings to two torch tensors and meta_data- token ids and attention mask with padding
+    """
+    data_series = messages["data"]
+
+    max_seq_len = 512
+    num_strings = len(data_series)
+    token_ids, mask, meta_data = data_series.str.subword_tokenize(
+        "bert-base-cased-hash.txt",
+        max_length=max_seq_len,
+        stride=500,
+        do_lower=False,
+        do_truncate=True,
+    )
+
+    token_ids = token_ids.reshape(-1, max_seq_len)
+    mask = mask.reshape(-1, max_seq_len)
+    meta_data = meta_data.reshape(-1, 3)
+    
+    return Request(input_ids=token_ids,
+                   input_mask=mask,
+                   segment_ids=meta_data,
+                   input_str=data_series.to_arrow().to_pylist())
+
+    # return input_ids.type(torch.long), attention_mask.type(torch.long), meta_data.reshape(-1,3)
 
 inf_queue = queue.Queue()
 
@@ -121,7 +167,7 @@ def inference_worker():
         while True:
 
             # Get the next work item
-            batch: Feature = inf_queue.get(block=True)
+            batch: Request = inf_queue.get(block=True)
 
             batch_size = batch.input_ids.shape[0]
             binding_idx_offset = 0
@@ -158,18 +204,6 @@ def inference_worker():
 
                 previous_bs = batch_size
 
-
-            # d_inputs = [
-            #     batch.input_ids.ravel().data.ptr,
-            #     batch.segment_ids.ravel().data.ptr,
-            #     batch.input_mask.ravel().data.ptr,
-            # ]
-
-            # output_shape = tuple(context.get_binding_shape(binding_idx_offset + 3))
-            # output_size = trt.volume(output_shape) * trt.float32.itemsize
-
-            # d_output = cp.empty(output_shape, dtype=np.float32)
-
             # ### Go via numpy array
             # input_ids = cuda.register_host_memory(np.ascontiguousarray(batch.input_ids.ravel().get()))
             # segment_ids = cuda.register_host_memory(np.ascontiguousarray(batch.segment_ids.ravel().get()))
@@ -190,6 +224,7 @@ def inference_worker():
 
             bindings = [0] * binding_idx_offset + [int(d_inp) for d_inp in d_inputs] + [int(d_output)]
 
+            # context.execute_async_v2(bindings=bindings, stream_handle=stream.handle)
             context.execute_async_v2(bindings=bindings, stream_handle=stream.ptr)
 
             # h_output_pinmem = cp.cuda.alloc_pinned_memory(d_output.nbytes)
@@ -205,6 +240,34 @@ def inference_worker():
 
             inf_queue.task_done()
 
+def inference_worker_pytorch():
+
+    # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
+    model = torch.load("placeholder_pii2").to('cuda')
+
+    while True:
+
+        # Get the next work item
+        batch: Request = inf_queue.get(block=True)
+
+        # convert from cupy to torch tensor using dlpack
+        input_ids = from_dlpack(
+            batch.input_ids.astype(cp.float).toDlpack()
+        ).type(torch.long)
+        attention_mask = from_dlpack(
+            batch.input_mask.astype(cp.float).toDlpack()
+        ).type(torch.long)
+
+        with torch.no_grad():
+            logits = model(input_ids, token_type_ids=None, attention_mask=attention_mask)[0]
+            probs = torch.sigmoid(logits[:, 1])
+            preds = probs.ge(0.5)
+
+        if (preds.any().item()):
+            for i, val in enumerate(preds.tolist()):
+                if (val):
+                    print("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
+
 def queue_batch(messages: Feature):
 
     inf_queue.put(messages)
@@ -212,13 +275,13 @@ def queue_batch(messages: Feature):
 # Preprocess each batch
 stream_df = source.map(filter_empty_data) \
                 .filter(lambda x: len(x) > 0) \
-                .map(process_batch)
+                .map(process_batch_pytorch)
 
 # Queue the inference work
 stream_df.sink(queue_batch)
 
 # turn-on the worker thread
-threading.Thread(target=inference_worker, daemon=True).start()
+threading.Thread(target=inference_worker_pytorch, daemon=True).start()
 
 # IOLoop.current().start()
 def run_asyncio_loop():
