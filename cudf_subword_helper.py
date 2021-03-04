@@ -76,7 +76,7 @@ def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
     
     output_f=Feature(input_ids=tokens,
             input_mask =attention_masks,
-            segment_ids = segment_ids)    
+            segment_ids = metadata)    
 
    
         

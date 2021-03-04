@@ -4,7 +4,10 @@ You can refer to https://kafka.apache.org/quickstart to start a local Kafka clus
 Below is an example snippet to start a stream from Kafka.
 '''
 import asyncio
+import tqdm
 from functools import reduce
+from collections import deque, defaultdict
+import io
 import cudf
 from distributed.client import wait
 from streamz import Stream, Source
@@ -25,23 +28,233 @@ import torch
 from torch.utils.dlpack import from_dlpack, to_dlpack
 import dataclasses
 import typing
+from tornado import gen
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 
 @dataclasses.dataclass
 class Request:
+    count: int
     input_ids: cp.ndarray
     input_mask: cp.ndarray
     segment_ids: cp.ndarray
     input_str: typing.List[str]
 
+    def split(self, n: int):
+
+        assert n < self.count
+
+        # Chop the top off
+        remain_count = self.count - n
+
+        remain = Request(
+            count=self.count - n,
+            input_ids=self.input_ids[n:, :],
+            input_mask=self.input_mask[n:, :],
+            segment_ids=self.segment_ids[n:, :],
+            input_str=self.input_str[n:],
+        )
+
+        # reduce
+        self.count = n
+        self.input_ids = self.input_ids[:n, :]
+        self.input_mask = self.input_mask[:n, :]
+        self.segment_ids = self.segment_ids[:n, :]
+        self.input_str = self.input_str[:n]
+
+        return remain
+
     def from_feature(in_feature: Feature, in_df: cudf.Series):
         return Request(
+            count=in_feature.input_ids.shape[0],
             input_ids=in_feature.input_ids,
             input_mask=in_feature.input_mask,
             segment_ids=in_feature.segment_ids,
             input_str=in_df.to_arrow().to_pylist()
         )
+
+@Stream.register_api()
+class partition_batch(Stream):
+    """ Partition stream into tuples of equal size
+
+    Parameters
+    ----------
+    n: int
+        Maximum partition size
+    timeout: int or float, optional
+        Number of seconds after which a partition will be emitted,
+        even if its size is less than ``n``. If ``None`` (default),
+        a partition will be emitted only when its size reaches ``n``.
+    key: hashable or callable, optional
+        Emit items with the same key together as a separate partition.
+        If ``key`` is callable, partition will be identified by ``key(x)``,
+        otherwise by ``x[key]``. Defaults to ``None``.
+
+    Examples
+    --------
+    >>> source = Stream()
+    >>> source.partition(3).sink(print)
+    >>> for i in range(10):
+    ...     source.emit(i)
+    (0, 1, 2)
+    (3, 4, 5)
+    (6, 7, 8)
+
+    >>> source = Stream()
+    >>> source.partition(2, key=lambda x: x % 2).sink(print)
+    >>> for i in range(4):
+    ...     source.emit(i)
+    (0, 2)
+    (1, 3)
+
+    >>> from time import sleep
+    >>> source = Stream()
+    >>> source.partition(5, timeout=1).sink(print)
+    >>> for i in range(3):
+    ...     source.emit(i)
+    >>> sleep(1)
+    (0, 1, 2)
+    """
+    _graphviz_shape = 'diamond'
+
+    def __init__(self, upstream, n, timeout=None, key=None, **kwargs):
+        self.n = n
+        self._timeout = timeout
+        self._key = key
+        self._buffer = defaultdict(lambda: [])
+        self._metadata_buffer = defaultdict(lambda: [])
+        self._callbacks = {}
+        kwargs["ensure_io_loop"] = True
+        Stream.__init__(self, upstream, **kwargs)
+
+    def _get_key(self, x):
+        if self._key is None:
+            return None
+        if callable(self._key):
+            return self._key(x)
+        return x[self._key]
+
+    @gen.coroutine
+    def _flush(self, key):
+        # Clear the current buffer
+        result, self._buffer[key] = self._buffer[key], []
+        metadata_result, self._metadata_buffer[key] = self._metadata_buffer[key], []
+
+        # Break up the current results into n sized chunks
+        output, remaining_buffer, metadata, remaining_metadata = self._to_batch(result, metadata_result)
+
+        assert len(remaining_buffer) == len(remaining_metadata)
+
+        yield self._emit(output, metadata=metadata)
+
+        # Requeue any remaining
+        for i in range(len(remaining_buffer)):
+            self.update(remaining_buffer[i], metadata=remaining_metadata[i])
+
+        self._release_refs(metadata)
+
+            
+
+    @gen.coroutine
+    def update(self, x, who=None, metadata=None):
+        self._retain_refs(metadata)
+        key = self._get_key(x)
+        buffer = self._buffer[key]
+        metadata_buffer = self._metadata_buffer[key]
+        buffer.append(x)
+        metadata_buffer.append(metadata)
+
+        if self._count(buffer) >= self.n:
+            if self._timeout is not None and self.n > 1:
+                self._callbacks[key].cancel()
+            yield self._flush(key)
+            return
+        if len(buffer) == 1 and self._timeout is not None:
+            self._callbacks[key] = self.loop.call_later(
+                self._timeout, self._flush, key
+            )
+
+    def _count(self, buffer: typing.List[Request]):
+        return reduce(lambda x, y: x + y.count, buffer, 0)
+
+    def _to_batch(self, buffer: typing.List[Request], metadata: list):
+
+        # Quick exit if we only have one and its too small
+        if (len(buffer) == 1 and buffer[0].count <= self.n):
+            return buffer[0], [], metadata[0], []
+        elif (buffer[0].count == self.n):
+            return buffer[0], buffer[1:], metadata[0], metadata[1:]
+
+        # Are we too big
+        if (buffer[0].count > self.n):
+            # Chop the top off
+            # remain_count = buffer[0].count - self.n
+
+            # remain = Request(
+            #     count=buffer[0].count - self.n,
+            #     input_ids=buffer[0].input_ids[self.n:, :],
+            #     input_mask=buffer[0].input_mask[self.n:, :],
+            #     segment_ids=buffer[0].segment_ids[self.n:, :],
+            #     input_str=buffer[0].input_str[self.n:],
+            # )
+
+            # # reduce
+            # output = Request(
+            #     count=self.n,
+            #     input_ids=buffer[0].input_ids[:self.n, :],
+            #     input_mask=buffer[0].input_mask[:self.n, :],
+            #     segment_ids=buffer[0].segment_ids[:self.n, :],
+            #     input_str=buffer[0].input_str[:self.n],
+            # )
+            output = buffer[0]
+            remain = output.split(self.n)
+
+            return output, [remain] + buffer[1:], metadata[0], metadata
+        else:
+            total_count = self._count(buffer)
+
+            # We have multiple that are too small.
+            final_count = min(total_count, self.n)
+
+            output = Request(
+                count=0,
+                input_ids=cp.empty_like(buffer[0].input_ids, shape=(final_count, buffer[0].input_ids.shape[1]), order="C"),
+                input_mask=cp.empty_like(buffer[0].input_mask, shape=(final_count, buffer[0].input_mask.shape[1]), order="C"),
+                segment_ids=cp.empty_like(buffer[0].segment_ids, shape=(final_count, buffer[0].segment_ids.shape[1]), order="C"),
+                input_str=[""] * final_count,
+            )
+
+            curr_idx = 0
+            remain = []
+            out_meta = []
+            remain_meta = []
+
+            for curr_idx, b in enumerate(buffer):
+                if (output.count + b.count > self.n):
+                    remain.append(b.split(self.n - output.count))
+                    remain_meta.append(metadata[curr_idx])
+
+                start = output.count
+                stop = start + b.count
+
+                output.input_ids[start:stop, :] = b.input_ids
+                output.input_mask[start:stop, :] = b.input_mask
+                output.segment_ids[start:stop, :] = b.segment_ids
+                output.input_str[start:stop] = b.input_str
+                output.count += b.count
+
+                out_meta.extend(metadata[curr_idx])
+
+                if (output.count == self.n):
+                    break
+
+            curr_idx += 1
+
+            return output, remain + buffer[curr_idx:], out_meta, remain_meta + metadata[curr_idx:]
+
+
+queue_progress = tqdm.tqdm(desc="Input Stream Rate", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0)
+
 
 # from tornado.ioloop import IOLoop
 
@@ -51,6 +264,8 @@ class Request:
 # source = Stream.from_textfile('pcap_dump_small.json')  # doctest: +SKIP
 # source.map(json.loads).sink(print)  # doctest: +SKIP
 # source.start()  # doctest: +SKIP
+
+max_batch_size = 16
 
 kafka_compose_name = "kafka-docker"
 
@@ -83,10 +298,24 @@ If the input data is high throughput, we recommend using Dask, and starting appr
 In case of high-throughput processing jobs, please set appropriate number of Kafka topic partitions to ensure parallelism.
 To leverage the custreamz' accelerated Kafka reader (note that data in Kafka must be JSON format), use engine="cudf".
 '''
-source: Stream = Stream.from_kafka_batched(topic, consumer_conf, npartitions=None, start=True,
-                                   asynchronous=False, dask=False, engine="cudf", max_batch_size=8)
+# source: Stream = Stream.from_kafka_batched(topic, consumer_conf, npartitions=None, start=True,
+#                                    asynchronous=False, dask=False, engine="cudf", max_batch_size=max_batch_size)
 
-out_source = Stream()
+def json_to_cudf(in_str: str):
+    df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
+    return df
+
+source: Stream = Stream.from_textfile("pcap_dump.json", start=True).rate_limit(1/10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+
+def update_progress(x):
+    if (isinstance(x, str)):
+        queue_progress.update()
+    elif (isinstance(x, cudf.DataFrame)):
+        queue_progress.update(len(x.index))
+    else:
+        queue_progress.update(len(x))
+
+source.sink(update_progress)
 
 def filter_empty_data(messages):
     # Filter out null data columns and only return data
@@ -124,7 +353,8 @@ def process_batch_pytorch(messages: cudf.DataFrame):
     mask = mask.reshape(-1, max_seq_len)
     meta_data = meta_data.reshape(-1, 3)
     
-    return Request(input_ids=token_ids,
+    return Request(count=token_ids.shape[0],
+                   input_ids=token_ids,
                    input_mask=mask,
                    segment_ids=meta_data,
                    input_str=data_series.to_arrow().to_pylist())
@@ -142,12 +372,14 @@ def inference_worker():
     # pyc_ctx = pyc_dev.retain_primary_context()
     # pyc_ctx.push()
 
-    with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128-b8.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine, engine.create_execution_context() as context:
+    progress = tqdm.tqdm(desc="Running TensorRT Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf")
+
+    with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128-b16.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine, engine.create_execution_context() as context:
 
         # stream = cuda.Stream()
         stream = cp.cuda.Stream(non_blocking=True)
 
-        input_shape_max = (max_seq_length, 8)
+        input_shape_max = (max_seq_length, max_batch_size)
         input_nbytes_max = trt.volume(input_shape_max) * trt.int32.itemsize  
 
         # Allocate device memory for inputs.
@@ -240,10 +472,14 @@ def inference_worker():
 
             inf_queue.task_done()
 
+            progress.update(n=batch_size)
+
 def inference_worker_pytorch():
 
     # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
     model = torch.load("placeholder_pii2").to('cuda')
+
+    progress = tqdm.tqdm(desc="Running PyTorch Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf")
 
     while True:
 
@@ -263,25 +499,34 @@ def inference_worker_pytorch():
             probs = torch.sigmoid(logits[:, 1])
             preds = probs.ge(0.5)
 
+        progress.update(n=batch.count)
+
         if (preds.any().item()):
             for i, val in enumerate(preds.tolist()):
                 if (val):
-                    print("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
+                    progress.write("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
 
-def queue_batch(messages: Feature):
+
+
+def queue_batch(messages: Request):
+
+    # queue_progress.update(messages.count)
 
     inf_queue.put(messages)
 
 # Preprocess each batch
 stream_df = source.map(filter_empty_data) \
                 .filter(lambda x: len(x) > 0) \
-                .map(process_batch_pytorch)
+                .map(process_batch) \
+                .partition_batch(max_batch_size, timeout=1)
+
+# source.sink(lambda x: queue_progress.update())
 
 # Queue the inference work
 stream_df.sink(queue_batch)
 
 # turn-on the worker thread
-threading.Thread(target=inference_worker_pytorch, daemon=True).start()
+threading.Thread(target=inference_worker, daemon=True).start()
 
 # IOLoop.current().start()
 def run_asyncio_loop():
