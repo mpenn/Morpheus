@@ -17,7 +17,8 @@ docker-compose up -d
 docker-compose scale kafka=3
 
 # Run container
-docker run --rm -it -e KAFKA_BROKER_SERVERS=172.17.0.1:49153,172.17.0.1:49154,172.17.0.1:49155 -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
+docker run --rm -it -e KAFKA_BROKER_SERVERS=172.17.0.1:49161 -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
+docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
 
 # To view the messages from the server
 ./start-kafka-shell.sh 172.17.0.1

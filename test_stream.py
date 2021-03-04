@@ -19,6 +19,7 @@ import queue
 import threading
 import pycuda.autoinit
 import pycuda.driver as cuda
+import docker
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 
@@ -31,12 +32,25 @@ TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 # source.map(json.loads).sink(print)  # doctest: +SKIP
 # source.start()  # doctest: +SKIP
 
+kafka_compose_name = "kafka-docker"
 
-# Kafka topic to read streaming data from
-topic = "test_pcap"
+docker_client = docker.from_env()
+bridge_net = docker_client.networks.get("bridge")
+bridge_ip = bridge_net.attrs["IPAM"]["Config"][0]["Gateway"]
+
+kafka_net = docker_client.networks.get(kafka_compose_name + "_default")
 
 # Kafka brokers
 bootstrap_servers = '172.17.0.1:49156,172.17.0.1:49157'
+
+# Automatically determine the ports. Comment this if manual setup is desired
+bootstrap_servers = ",".join([c.ports["9092/tcp"][0]["HostIp"] + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
+
+# Use this version to specify the bridge IP instead
+bootstrap_servers = ",".join([bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
+
+# Kafka topic to read streaming data from
+topic = "test_pcap"
 
 # Kafka consumer configuration
 consumer_conf = {'bootstrap.servers': bootstrap_servers,
@@ -81,9 +95,20 @@ def inference_worker():
     pyc_ctx = pyc_dev.retain_primary_context()
     pyc_ctx.push()
 
-    with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128-b1-b4-b8.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine, engine.create_execution_context() as context:
+    with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128-b8.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine, engine.create_execution_context() as context:
 
-        stream = cp.cuda.Stream(non_blocking=True)
+        # stream = cp.cuda.Stream(non_blocking=True)
+        stream = cuda.Stream()
+
+        input_shape = (max_seq_length, 8)
+        input_nbytes = trt.volume(input_shape) * trt.int32.itemsize  
+
+        # Allocate device memory for inputs.
+        d_inputs = [cuda.mem_alloc(input_nbytes) for _ in range(3)]
+
+        # Allocate output buffer by querying the size from the context. This may be different for different input shapes.
+        h_output = cuda.pagelocked_empty(tuple(context.get_binding_shape(3)), dtype=np.float32)
+        d_output = cuda.mem_alloc(h_output.nbytes)
 
         # Stores the best profile for the batch size
         bs_to_profile = {}
@@ -95,10 +120,10 @@ def inference_worker():
             batch: Feature = inf_queue.get(block=True)
 
             batch_size = batch.input_ids.shape[0]
-            batch_size = 1
+            binding_idx_offset = 0
 
             # Now set the profile specific settings if the batch size changed
-            if (batch_size != previous_bs):
+            if (engine.num_optimization_profiles > 1 and batch_size != previous_bs):
                 if (batch_size not in bs_to_profile):
                     # select engine profile
                     selected_profile = -1
@@ -117,45 +142,51 @@ def inference_worker():
                 context.active_optimization_profile = bs_to_profile[batch_size]
                 binding_idx_offset = bs_to_profile[batch_size] * num_binding_per_profile
 
-                # Specify input shapes. These must be within the min/max bounds of the active profile
-                # Note that input shapes can be specified on a per-inference basis, but in this case, we only have a single shape.
-                input_shape = (max_seq_length, batch_size)
-                input_nbytes = trt.volume(input_shape) * trt.int32.itemsize
-                for binding in range(3):
-                    context.set_binding_shape(binding_idx_offset + binding, input_shape)
-                assert context.all_binding_shapes_specified
+            # Specify input shapes. These must be within the min/max bounds of the active profile
+            # Note that input shapes can be specified on a per-inference basis, but in this case, we only have a single shape.
+            input_shape = (max_seq_length, batch_size)
+            input_nbytes = trt.volume(input_shape) * trt.int32.itemsize
+            for binding in range(3):
+                context.set_binding_shape(binding_idx_offset + binding, input_shape)
+            assert context.all_binding_shapes_specified
 
-                previous_bs = batch_size
+            previous_bs = batch_size
 
 
-            d_inputs = [
-                batch.input_ids.ravel().data.ptr,
-                batch.segment_ids.ravel().data.ptr,
-                batch.input_mask.ravel().data.ptr,
-            ]
+            # d_inputs = [
+            #     batch.input_ids.ravel().data.ptr,
+            #     batch.segment_ids.ravel().data.ptr,
+            #     batch.input_mask.ravel().data.ptr,
+            # ]
 
-            output_shape = tuple(context.get_binding_shape(binding_idx_offset + 3))
-            output_size = trt.volume(output_shape) * trt.float32.itemsize
+            # output_shape = tuple(context.get_binding_shape(binding_idx_offset + 3))
+            # output_size = trt.volume(output_shape) * trt.float32.itemsize
 
-            d_output = cp.empty(output_shape, dtype=np.float32)
+            # d_output = cp.empty(output_shape, dtype=np.float32)
 
-            d_inputs = [cuda.mem_alloc(input_nbytes) for binding in range(3)]
+            ### Go via numpy array
+            input_ids = cuda.register_host_memory(np.ascontiguousarray(batch.input_ids.ravel().get()))
+            segment_ids = cuda.register_host_memory(np.ascontiguousarray(batch.segment_ids.ravel().get()))
+            input_mask = cuda.register_host_memory(np.ascontiguousarray(batch.input_mask.ravel().get()))
 
-            # Allocate output buffer by querying the size from the context. This may be different for different input shapes.
-            h_output = cuda.pagelocked_empty(tuple(context.get_binding_shape(binding_idx_offset + 3)), dtype=np.float32)
-            d_output = cuda.mem_alloc(h_output.nbytes)
+            cuda.memcpy_htod_async(d_inputs[0], input_ids, stream)
+            cuda.memcpy_htod_async(d_inputs[1], segment_ids, stream)
+            cuda.memcpy_htod_async(d_inputs[2], input_mask, stream)
 
-            stream = cuda.Stream()
 
-            context.execute_async_v2(bindings=[0] * binding_idx_offset + [int(d_inp) for d_inp in d_inputs] + [int(d_output)], stream_handle=stream.handle)
+            bindings = [0] * binding_idx_offset + [int(d_inp) for d_inp in d_inputs] + [int(d_output)]
+
+            context.execute_async_v2(bindings=bindings, stream_handle=stream.handle)
 
             stream.synchronize()
 
-            h_output_pinmem = cp.cuda.alloc_pinned_memory(d_output.nbytes)
+            # h_output_pinmem = cp.cuda.alloc_pinned_memory(d_output.nbytes)
 
-            h_output = np.frombuffer(h_output_pinmem, np.float32, d_output.size).reshape(d_output.shape)
+            # h_output = np.frombuffer(h_output_pinmem, np.float32, d_output.size).reshape(d_output.shape)
 
-            d_output.set(h_output, stream=stream)
+            # d_output.set(h_output, stream=stream)
+
+            cuda.memcpy_dtoh_async(h_output, d_output, stream)
 
             stream.synchronize()
 
