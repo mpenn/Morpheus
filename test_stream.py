@@ -24,17 +24,22 @@ import numpy as np
 import streamz
 import tensorrt as trt
 import torch
-import tqdm
+from tqdm import tqdm
+from tqdm.contrib import DummyTqdmFile
 from distributed.client import wait
 from streamz import Source, Stream
 from streamz.dataframe import DataFrame
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from tornado import gen
+import sys
 
 from cudf_subword_helper import Feature, tokenize_text_series
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 
+# Redirect printing to tqdm
+orig_out_err = sys.stdout, sys.stderr
+sys.stdout, sys.stderr = map(DummyTqdmFile, (sys.stdout, sys.stderr))
 
 @dataclasses.dataclass
 class Request:
@@ -195,9 +200,11 @@ class partition_batch(Stream):
             return output, remain + buffer[curr_idx:], out_meta, remain_meta + metadata[curr_idx:]
 
 
-queue_progress = tqdm.tqdm(desc="Input Stream Rate", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0)
+queue_progress = tqdm(desc="Input Stream Rate", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0, file=orig_out_err[0])
 
-max_batch_size = 16
+total_log_count = 43862
+
+max_batch_size = 1
 
 kafka_compose_name = "kafka-docker"
 
@@ -240,7 +247,6 @@ To leverage the custreamz' accelerated Kafka reader (note that data in Kafka mus
 # with open("true_pii_as_records.json", "r") as f:
 #     data = json.load(f)
 
-
 # # Adjust data
 
 # with open("true_pii_as_records-fixed.json", "w") as f2:
@@ -248,12 +254,13 @@ To leverage the custreamz' accelerated Kafka reader (note that data in Kafka mus
 #         json.dump(d, f2)
 #         f2.write("\n")
 
-
 def json_to_cudf(in_str: str):
     df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
     return df
 
-source: Stream = Stream.from_textfile("true_pii_as_records-fixed.json", start=True, asynchronous=True).rate_limit(1/10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+
+source: Stream = Stream.from_textfile("pcap_dump_nonull.json", start=True, asynchronous=True).rate_limit(
+    1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
 
 
 def update_progress(x):
@@ -313,9 +320,11 @@ def process_batch_pytorch(messages: cudf.DataFrame):
                    segment_ids=meta_data,
                    input_str=data_series.to_arrow().to_pylist())
 
+
 inf_queue = queue.Queue()
 
 max_seq_length = 128
+
 
 # Create the thread for running inference
 def inference_worker():
@@ -324,7 +333,7 @@ def inference_worker():
     # pyc_ctx = pyc_dev.retain_primary_context()
     # pyc_ctx.push()
 
-    progress = tqdm.tqdm(desc="Running TensorRT Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf")
+    progress = tqdm(desc="Running TensorRT Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0, file=orig_out_err[0])
 
     with open("/home/mdemoret/Repos/github/NVIDIA/TensorRT/demo/BERT/engines/bert_large_128-b16.engine", "rb") as f, trt.Runtime(TRT_LOGGER) as runtime, runtime.deserialize_cuda_engine(f.read()) as engine, engine.create_execution_context() as context:
 
@@ -431,7 +440,7 @@ def inference_worker_pytorch():
     # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
     model = torch.load("placeholder_pii2").to('cuda')
 
-    progress = tqdm.tqdm(desc="Running PyTorch Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf")
+    progress = tqdm.tqdm(desc="Running PyTorch Inference for PII", smoothing=0.0, dynamic_ncols=True, unit="inf", mininterval=1.0, file=orig_out_err[0])
 
     while True:
 
@@ -452,7 +461,47 @@ def inference_worker_pytorch():
         if (preds.any().item()):
             for i, val in enumerate(preds.tolist()):
                 if (val):
-                    progress.write("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
+                    print("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
+
+
+def inference_worker_triton():
+
+    import tritonclient.grpc as tritonclient
+    from tritonclient.grpc.model_config_pb2 import DataType
+
+    triton_client = tritonclient.InferenceServerClient(url="localhost:8001", verbose=False)
+
+    progress = tqdm(desc="Running Triton Inference for PII", smoothing=0.0, dynamic_ncols=True, unit="inf", mininterval=1.0, total=total_log_count)
+
+    while True:
+
+        # Get the next work item
+        batch: Request = inf_queue.get(block=True)
+
+        def infer_callback(result, error):
+            if (error):
+                print(error)
+            else:
+                progress.update(n=batch.count)
+
+        inputs: typing.List[tritonclient.InferInput] = [
+            tritonclient.InferInput("input_ids", list(batch.input_ids.shape), "INT32"),
+            tritonclient.InferInput("segment_ids", list(batch.input_ids.shape), "INT32"),
+            tritonclient.InferInput("input_mask", list(batch.input_mask.shape), "INT32"),
+        ]
+
+        input_ids_np = batch.input_ids.astype(np.int32).get()
+
+        inputs[0].set_data_from_numpy(input_ids_np)
+        inputs[1].set_data_from_numpy(np.zeros_like(input_ids_np))
+        inputs[2].set_data_from_numpy(batch.input_mask.astype(np.int32).get())
+
+        outputs = [
+            tritonclient.InferRequestedOutput("cls_squad_logits"),
+        ]
+
+        # Inference call
+        triton_client.async_infer(model_name="bert_trt", inputs=inputs, callback=infer_callback, outputs=outputs)
 
 
 def queue_batch(messages: Request):
@@ -465,7 +514,7 @@ def queue_batch(messages: Request):
 # Preprocess each batch
 stream_df = source.map(filter_empty_data) \
                 .filter(lambda x: len(x) > 0) \
-                .map(process_batch_pytorch) \
+                .map(process_batch) \
                 .partition_batch(max_batch_size, timeout=1)
 
 # source.sink(lambda x: queue_progress.update())
@@ -474,7 +523,7 @@ stream_df = source.map(filter_empty_data) \
 stream_df.sink(queue_batch)
 
 # turn-on the worker thread
-threading.Thread(target=inference_worker_pytorch, daemon=True).start()
+threading.Thread(target=inference_worker_triton, daemon=True).start()
 
 
 # IOLoop.current().start()
