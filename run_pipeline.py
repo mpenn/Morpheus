@@ -4,6 +4,7 @@ You can refer to https://kafka.apache.org/quickstart to start a local Kafka clus
 Below is an example snippet to start a stream from Kafka.
 '''
 import asyncio
+from asyncio.events import get_event_loop
 import concurrent.futures
 from config import Config
 import dataclasses
@@ -163,6 +164,81 @@ class partition_batch(Stream):
 
             return output, remain + buffer[curr_idx:], out_meta, remain_meta + metadata[curr_idx:]
 
+
+@Stream.register_api()
+class async_map(Stream):
+    """ Apply a function to every element in the stream
+
+    Parameters
+    ----------
+    func: callable
+    *args :
+        The arguments to pass to the function.
+    **kwargs:
+        Keyword arguments to pass to func
+
+    Examples
+    --------
+    >>> source = Stream()
+    >>> source.map(lambda x: 2*x).sink(print)
+    >>> for i in range(5):
+    ...     source.emit(i)
+    0
+    2
+    4
+    6
+    8
+    """
+    def __init__(self, upstream, func, *args, **kwargs):
+        self.func = func
+        # this is one of a few stream specific kwargs
+        stream_name = kwargs.pop('stream_name', None)
+        self.kwargs = kwargs
+        self.args = args
+
+        Stream.__init__(self, upstream, stream_name=stream_name, ensure_io_loop=True)
+
+    async def update(self, x, who=None, metadata=None):
+        try:
+            result = await self.func(x, *self.args, **self.kwargs)
+        except Exception as e:
+            # logger.exception(e)
+            print(e)
+            raise
+        else:
+            return self._emit(result, metadata=metadata)
+
+@Stream.register_api()
+class buffer_map(Stream):
+    """ Allow results to pile up at this point in the stream
+
+    This allows results to buffer in place at various points in the stream.
+    This can help to smooth flow through the system when backpressure is
+    applied.
+    """
+    _graphviz_shape = 'diamond'
+
+    def __init__(self, upstream, func, **kwargs):
+        from tornado.queues import Queue
+        self.queue = Queue()
+        self.func = func
+
+        kwargs["ensure_io_loop"] = True
+        Stream.__init__(self, upstream, **kwargs)
+
+        self.loop.add_callback(self.cb)
+
+    def update(self, x, who=None, metadata=None):
+        self._retain_refs(metadata)
+        return self.queue.put((self.func(x), metadata))
+
+    @gen.coroutine
+    def cb(self):
+        while True:
+            x, metadata = yield self.queue.get()
+            x_val = yield x
+            yield self._emit(x_val, metadata=metadata)
+            self._release_refs(metadata)
 
 config = Config.get()
 
@@ -479,6 +555,29 @@ def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
 async def main_loop():
     
     inf_queue = queue.Queue()
+    progress = tqdm(desc="Running Inference for PII",
+                smoothing=0.1,
+                dynamic_ncols=True,
+                unit="inf",
+                mininterval=1.0)
+
+    def queue_batch(messages: MultiRequest):
+
+        # queue_progress.update(messages.count)
+
+        inf_queue.put(messages)
+
+    def build_source():
+        def json_to_cudf(in_str: str):
+            df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
+            return df
+
+        source: Source = Stream.from_textfile("pcap_dump_nonull.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
+            1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+
+        return source
+
+    source: Source = build_source()
 
     def setup():
         # # Preprocess each batch
@@ -502,27 +601,9 @@ async def main_loop():
         else:
             raise Exception("Unknown inference pipeline: '{}'".format(config.general.pipeline))
 
-        threading.Thread(target=inference_worker, daemon=True, args=(inf_queue,)).start()
-
-    def queue_batch(messages: MultiRequest):
-
-        # queue_progress.update(messages.count)
-
-        inf_queue.put(messages)
-
-    def build_source():
-        def json_to_cudf(in_str: str):
-            df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
-            return df
-
-        source: Source = Stream.from_textfile("pcap_dump_nonull.json", asynchronous=True).rate_limit(
-            1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
-
-        return source
+        threading.Thread(target=inference_worker, daemon=True, args=(source.loop, inf_queue,)).start()
 
     setup()
-
-    source: Source = build_source()
 
     # source.sink(update_progress)
 
@@ -538,8 +619,30 @@ async def main_loop():
     req_stream = req_stream.partition(config.model.max_batch_size, timeout=0.1)
     req_stream = req_stream.map(batchsingle_to_multi)
 
-    # Queue the inference work
-    req_stream.sink(queue_batch)
+    # # Queue the inference work
+    # req_stream.sink(queue_batch)
+
+    async def future_map_batch(req: MultiRequest):
+        # Get the current event loop.
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+
+        inf_queue.put((req, fut))
+
+        res = await fut
+
+        return res
+
+    # def out_sink(inf_out: typing.Tuple[MultiRequest, typing.Any]):
+    #     progress.update(inf_out[0].count)
+
+    def out_sink(message):
+        progress.update(message[0].count)
+        # print(message)
+
+    req_stream = req_stream.buffer_map(future_map_batch)
+
+    req_stream.sink(out_sink)
 
     # Sleep for 1 sec to give something to await on
     await asyncio.sleep(1.0)

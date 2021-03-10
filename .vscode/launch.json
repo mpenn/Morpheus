@@ -75,6 +75,7 @@
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
             "CLX_MODEL_SEQ_LENGTH": "128",
             "CLX_MODEL_MAX_BATCH_SIZE": "8",
+            // "PYTHONASYNCIODEBUG": "1",
          },
          "args": [
          ]
