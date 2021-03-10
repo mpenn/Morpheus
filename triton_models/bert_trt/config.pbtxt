@@ -1,7 +1,7 @@
 name: "bert_trt"
 platform: "tensorrt_plan"
 max_batch_size: 8
-default_model_filename: "triton_bert_large_128-b8.engine"
+default_model_filename: "triton_bert_large_128-b8-b9.engine"
 
 input [
   {

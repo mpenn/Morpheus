@@ -23,3 +23,9 @@ docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) -e IN
 # To view the messages from the server
 ./start-kafka-shell.sh 172.17.0.1
 $KAFKA_HOME/bin/kafka-console-consumer.sh --topic=test_pcap --bootstrap-server `broker-list.sh`
+
+
+
+# OTHER COMMANDS USED
+# Launch Triton server
+docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models nvcr.io/nvidia/tritonserver:21.02-py3 tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1
