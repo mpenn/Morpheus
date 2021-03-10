@@ -5,12 +5,96 @@
    "version": "0.2.0",
    "configurations": [
       {
-         "name": "Python: Current File",
+         "name": "Python: Run Pipeline",
          "type": "python",
          "request": "launch",
-         "program": "${file}",
+         "program": "${workspaceFolder}/cli.py",
          "console": "integratedTerminal",
          "justMyCode": false,
-      }
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "pytorch",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "512",
+            "CLX_MODEL_MAX_BATCH_SIZE": "18",
+         },
+         "args": [
+            "model",
+            "--seq_length",
+            "130",
+            // "kafka",
+            // "--bootstrap_servers=auto",
+         ]
+      },
+      {
+         "name": "Python: Run Argparse",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/cli_argparse.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "pytorch",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "512",
+            "CLX_MODEL_MAX_BATCH_SIZE": "18",
+         },
+         "args": [
+            "--seq_length=130",
+            "--bootstrap_servers=auto",
+         ]
+      },
+      {
+         "name": "Python: Run Pytorch",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/cli.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "pytorch",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "512",
+            "CLX_MODEL_MAX_BATCH_SIZE": "16",
+         },
+         "args": [
+         ]
+      },
+      {
+         "name": "Python: Run Triton",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/cli.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "triton",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "128",
+            "CLX_MODEL_MAX_BATCH_SIZE": "8",
+         },
+         "args": [
+         ]
+      },
+      {
+         "name": "Python: Run TensorRT",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/cli.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "tensorrt",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "128",
+            "CLX_MODEL_MAX_BATCH_SIZE": "16",
+         },
+         "args": [
+         ]
+      },
    ]
 }
