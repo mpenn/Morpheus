@@ -28,38 +28,79 @@
 syntax = "proto3";
 
 service Pipeline {
-   rpc ProcessRequest(PipelineRequest) returns PipelineResponse
+   // rpc ProcessRequest(PipelineRequest) returns PipelineResponse {}
+
+   rpc QueuePreprocessing(StageInput) returns (StageOutput) {}
 }
 
-message RequestMetadata
+message StringArrayPayload
+{
+   repeated string value = 1;
+}
+
+message CudaArrayPayload
+{
+   repeated uint32 shape = 1;
+   repeated uint32 strides = 2;
+   string typestr = 3;
+   uint64 data = 4;
+   bool readonly = 5;
+   uint32 version = 6;
+}
+
+message Payload
+{
+   oneof data {
+      StringArrayPayload str_array = 1;
+      CudaArrayPayload cupy_array = 2;
+   }
+}
+
+message StageInput
 {
    uint32 id = 1;
+   uint32 count = 2;
 
-   map<string, string> data = 2;
+   map<string, Payload> payload = 3;
 }
 
-message PipelineRequest
+message StageOutput
 {
    uint32 id = 1;
-   RequestMetadata metadata = 2;
+   uint32 count = 2;
 
-   Any payload = 3;
+   map<string, Payload> payload = 3;
 }
 
-message PipelineResponse
-{
-   uint32 id = 1;
-}
+// message RequestMetadata
+// {
+//    uint32 id = 1;
 
-message StageRequest
-{
-   uint32 request_id = 1;
-   uint32 stage_id = 2;
-}
+//    map<string, string> data = 2;
+// }
 
-message RemoteMemoryRegion
-{
-    uint64 addr = 1;
-    uint64 size = 2;
-    uint64 rkey = 3;
-}
+// message PipelineRequest
+// {
+//    uint32 id = 1;
+//    RequestMetadata metadata = 2;
+
+//    Any payload = 3;
+// }
+
+// message PipelineResponse
+// {
+//    uint32 id = 1;
+// }
+
+// message StageRequest
+// {
+//    uint32 request_id = 1;
+//    uint32 stage_id = 2;
+// }
+
+// message RemoteMemoryRegion
+// {
+//     uint64 addr = 1;
+//     uint64 size = 2;
+//     uint64 rkey = 3;
+// }

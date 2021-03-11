@@ -4,6 +4,7 @@
    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
    "version": "0.2.0",
    "configurations": [
+
       {
          "name": "Python: Run Pipeline",
          "type": "python",
@@ -95,6 +96,24 @@
             "CLX_MODEL_MAX_BATCH_SIZE": "16",
          },
          "args": [
+         ]
+      },
+      {
+         "name": "Python: Run Preprocessing",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/cli.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "pytorch",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "512",
+            "CLX_MODEL_MAX_BATCH_SIZE": "16",
+         },
+         "args": [
+            "preprocessing"
          ]
       },
    ]

@@ -4,9 +4,7 @@ You can refer to https://kafka.apache.org/quickstart to start a local Kafka clus
 Below is an example snippet to start a stream from Kafka.
 '''
 import asyncio
-from asyncio.events import get_event_loop
 import concurrent.futures
-from config import Config
 import dataclasses
 import io
 import json
@@ -16,6 +14,7 @@ import sys
 import threading
 import time
 import typing
+from asyncio.events import get_event_loop
 from collections import defaultdict, deque
 from ctypes import c_void_p
 from functools import reduce
@@ -25,9 +24,9 @@ import cupy as cp
 # import pycuda.autoinit
 # import pycuda.driver as cuda
 import docker
+import grpc.aio
 import numpy as np
 import streamz
-
 import torch
 from distributed.client import wait
 from streamz import Source, Stream
@@ -38,11 +37,19 @@ from tornado.ioloop import IOLoop
 from tqdm import tqdm
 from tqdm.contrib import DummyTqdmFile
 
+from config import Config
 from cudf_subword_helper import Feature, tokenize_text_series
 from request import MultiRequest, SingleRequest, SingleResponse
 
+# Add generated proto output to the path. Stupid. See https://github.com/protocolbuffers/protobuf/issues/1491
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "services")))
+
+from services import request_pb2, request_pb2_grpc
+
 # # Redirect printing to tqdm
 orig_out_err = sys.stdout, sys.stderr
+
+
 # sys.stdout, sys.stderr = map(DummyTqdmFile, (sys.stdout, sys.stderr))
 @Stream.register_api()
 class async_map(Stream):
@@ -75,10 +82,7 @@ class async_map(Stream):
         self.kwargs = kwargs
         self.args = args
 
-        Stream.__init__(self,
-                        upstream,
-                        stream_name=stream_name,
-                        ensure_io_loop=True)
+        Stream.__init__(self, upstream, stream_name=stream_name, ensure_io_loop=True)
 
     @gen.coroutine
     def update(self, x, who=None, metadata=None):
@@ -98,6 +102,40 @@ config = Config.get()
 total_log_count = 43862
 
 
+def grpc_to_cupy(in_grpc: request_pb2.CudaArrayPayload):
+
+    # return cp.zeros(tuple(in_grpc.shape), dtype=np.dtype(in_grpc.typestr))
+
+    class CudaArrayPayloadWrapper():
+        def __init__(self, grpc: request_pb2.CudaArrayPayload):
+            self._grpc = grpc
+
+        @property
+        def __cuda_array_interface__(self):
+            output = {
+                "shape": tuple(self._grpc.shape),
+                "typestr": str(self._grpc.typestr),
+                "data": (int(self._grpc.data), bool(self._grpc.readonly)),
+                "version": int(self._grpc.version),
+                "strides": None if len(self._grpc.strides) == 0 else list(self._grpc.strides),
+            }
+            return output
+
+    # tmp = {
+    #     "__cuda_array_interface__": {
+    #         "shape": list(in_grpc.shape),
+    #         "typestr": str(in_grpc.typestr),
+    #         "data": (int(in_grpc.data), bool(in_grpc.readonly)),
+    #         "version": int(in_grpc.version),
+    #         "strides": None if len(in_grpc.strides) == 0 else list(in_grpc.strides),
+    #     }
+    # }
+
+    out_cp = cp.asarray(CudaArrayPayloadWrapper(in_grpc))
+
+    return out_cp
+
+
 def filter_empty_data(messages):
     # Filter out null data columns and only return data
     messages = messages[~messages.data.isnull()]
@@ -108,16 +146,13 @@ def to_cpu_dicts(messages):
     return messages.to_pandas().to_dict('records')
 
 
-def process_batch(messages: cudf.DataFrame):
+def process_batch(messages: cudf.DataFrame) -> typing.List[SingleRequest]:
 
     data_series = messages["data"]
 
-    tokenized = tokenize_text_series(data_series,
-                                     config.model.seq_length,
-                                     1,
-                                     config.model.vocab_hash_file)
+    tokenized = tokenize_text_series(data_series, config.model.seq_length, 1, config.model.vocab_hash_file)
 
-    return SingleRequest.from_feature(tokenized, messages)
+    return SingleRequest.from_feature(tokenized, data_series)
 
 
 def process_batch_pytorch(messages: cudf.DataFrame):
@@ -140,9 +175,7 @@ def process_batch_pytorch(messages: cudf.DataFrame):
     mask = mask.reshape(-1, config.model.seq_length)
     meta_data = meta_data.reshape(-1, 3)
 
-    return SingleRequest.from_feature(
-        Feature(input_ids=token_ids, input_mask=mask, segment_ids=meta_data),
-        data_series)
+    return SingleRequest.from_feature(Feature(input_ids=token_ids, input_mask=mask, segment_ids=meta_data), data_series)
 
 
 def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
@@ -152,11 +185,7 @@ def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
 async def main_loop():
 
     inf_queue = queue.Queue()
-    progress = tqdm(desc="Running Inference for PII",
-                    smoothing=0.1,
-                    dynamic_ncols=True,
-                    unit="inf",
-                    mininterval=1.0)
+    progress = tqdm(desc="Running Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0)
 
     def queue_batch(messages: MultiRequest):
 
@@ -165,54 +194,35 @@ async def main_loop():
         inf_queue.put(messages)
 
     def build_source():
-        # def json_to_cudf(in_str: str):
-        #     df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
-        #     return df
 
-        # source: Source = Stream.from_textfile("pcap_dump_nonull.json", asynchronous=True).rate_limit(
-        #     1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+        source: Stream = None
 
-        # Automatically determine the ports. Comment this if manual setup is desired
-        if (config.kafka.bootstrap_servers == "auto"):
-            kafka_compose_name = "kafka-docker"
+        use_kafka = False
 
-            docker_client = docker.from_env()
-            bridge_net = docker_client.networks.get("bridge")
-            bridge_ip = bridge_net.attrs["IPAM"]["Config"][0]["Gateway"]
+        if (not use_kafka):
 
-            kafka_net = docker_client.networks.get(kafka_compose_name +
-                                                   "_default")
+            def json_to_cudf(in_str: str):
+                df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
+                return df
 
-            config.kafka.bootstrap_servers = ",".join([
-                c.ports["9092/tcp"][0]["HostIp"] + ":" +
-                c.ports["9092/tcp"][0]["HostPort"]
-                for c in kafka_net.containers if "9092/tcp" in c.ports
-            ])
+            source: Stream = Stream.from_textfile(".tmp/pcap_dump_nonull.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
+                1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+        else:
 
-            # Use this version to specify the bridge IP instead
-            config.kafka.bootstrap_servers = ",".join([
-                bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"]
-                for c in kafka_net.containers if "9092/tcp" in c.ports
-            ])
+            # Kafka consumer configuration
+            consumer_conf = {
+                'bootstrap.servers': config.kafka.bootstrap_servers, 'group.id': 'custreamz', 'session.timeout.ms': "60000"
+            }
 
-            print("Auto determined Bootstrap Servers: {}".format(config.kafka.bootstrap_servers))
-
-        # Kafka consumer configuration
-        consumer_conf = {
-            'bootstrap.servers': config.kafka.bootstrap_servers,
-            'group.id': 'custreamz',
-            'session.timeout.ms': "60000"
-        }
-
-        source: Stream = Stream.from_kafka_batched(
-            config.kafka.input_topic,
-            consumer_conf,
-            npartitions=None,
-            start=False,
-            asynchronous=True,
-            dask=False,
-            engine="cudf",
-            max_batch_size=config.model.max_batch_size)
+            source: Stream = Stream.from_kafka_batched(config.kafka.input_topic,
+                                                    consumer_conf,
+                                                    npartitions=None,
+                                                    start=False,
+                                                    asynchronous=True,
+                                                    dask=False,
+                                                    engine="cudf",
+                                                    loop=IOLoop.current(),
+                                                    max_batch_size=config.model.max_batch_size)
 
         return source
 
@@ -238,15 +248,12 @@ async def main_loop():
         elif (config.general.pipeline == "tensorrt"):
             from inference_tensorrt import inference_worker
         else:
-            raise Exception("Unknown inference pipeline: '{}'".format(
-                config.general.pipeline))
+            raise Exception("Unknown inference pipeline: '{}'".format(config.general.pipeline))
 
-        threading.Thread(target=inference_worker,
-                         daemon=True,
-                         args=(
-                             source.loop,
-                             inf_queue,
-                         )).start()
+        threading.Thread(target=inference_worker, daemon=True, args=(
+            source.loop,
+            inf_queue,
+        )).start()
 
     setup()
 
@@ -254,10 +261,46 @@ async def main_loop():
 
     req_stream: Stream = source
 
+    def to_cpu_json(message: cudf.DataFrame):
+        json_str_array = cudf.io.json.to_json(message, orient="records", lines=True).split("\n")
+        data_array = message["data"].to_arrow().to_pylist()
+
+        return json_str_array, data_array
+
     # Preprocess each batch into stream of Request
     req_stream = req_stream.map(filter_empty_data)
     req_stream = req_stream.filter(lambda x: len(x) > 0)
-    req_stream = req_stream.map(process_batch)
+    req_stream = req_stream.map(to_cpu_json)
+
+    channel = grpc.aio.insecure_channel('localhost:50051')
+
+    await asyncio.wait_for(channel.channel_ready(), timeout=10.0)
+    print("Connected to Preprocessing Server!")
+
+    stub = request_pb2_grpc.PipelineStub(channel)
+
+    # Send request to grpc server
+    async def preprocess_grpc(x: typing.Tuple[typing.List[str], typing.List[str]]):
+
+        messages = x[0]
+        data = x[1]
+
+        in_req = request_pb2.StageInput(id=1, count=len(messages))
+        in_req.payload["messages"].str_array.value.extend(messages)
+        in_req.payload["data"].str_array.value.extend(data)
+
+        response = await stub.QueuePreprocessing(in_req)
+
+        out_res = MultiRequest.create(input_ids=grpc_to_cupy(response.payload["input_ids"].cupy_array),
+                                      input_mask=grpc_to_cupy(response.payload["input_mask"].cupy_array),
+                                      segment_ids=grpc_to_cupy(response.payload["segment_ids"].cupy_array),
+                                      input_str=list(response.payload["input_str"].str_array.value))
+
+        return out_res.to_singles()
+
+    req_stream = req_stream.async_map(preprocess_grpc)
+
+    # req_stream = req_stream.map(process_batch)
     req_stream = req_stream.flatten()
 
     # Do batching here if needed
@@ -295,11 +338,7 @@ async def main_loop():
     # Post processing
     def post_process(x: SingleResponse):
         # Convert to final form
-        message = {
-            "type": "PII",
-            "message": x.input_str,
-            "result": x.probs[0].get().tolist()
-        }
+        message = {"type": "PII", "message": x.input_str, "result": x.probs[0].get().tolist()}
 
         return json.dumps(message)
 
@@ -316,7 +355,13 @@ async def main_loop():
 
 
 def run_pipeline():
+
     loop = asyncio.get_event_loop()
+
+    from grpc_preprocessing import serve
+
+    asyncio.ensure_future(serve())
+
     asyncio.ensure_future(main_loop())
     try:
         loop.run_forever()
@@ -325,12 +370,3 @@ def run_pipeline():
     finally:
         loop.close()
         print("Exited")
-
-
-# if __name__ == '__main__':
-#     cli(obj={}, auto_envvar_prefix='CLX')
-
-#     print("Config: ")
-#     print(dataclasses.asdict(Config.get()))
-
-#     # run_asyncio_loop()

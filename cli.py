@@ -1,5 +1,6 @@
 from click.decorators import option
 import configargparse
+import docker
 from config import Config
 
 DEFAULT_CONFIG = Config.default()
@@ -25,6 +26,16 @@ if __name__ == '__main__':
     kafka_group.add_argument("--input_topic", type=str, default=DEFAULT_CONFIG.kafka.input_topic, env_var='CLX_KAFKA_INPUT_TOPIC')
     kafka_group.add_argument("--output_topic", type=str, default=DEFAULT_CONFIG.kafka.output_topic, env_var='CLX_KAFKA_OUTPUT_TOPIC')
 
+    subparsers = p.add_subparsers(help='sub-command help')
+
+    parser_preproc = subparsers.add_parser('preprocessing', help='Run preprocessing')
+    # parser_a.add_argument('bar', type=int, help='bar help')
+    parser_preproc.set_defaults(stage="preprocess")
+
+    parser_pipeline = subparsers.add_parser('pipeline', help='Run pipeline')
+    # parser_a.add_argument('bar', type=int, help='bar help')
+    parser_pipeline.set_defaults(stage="pipeline")
+
     options = p.parse_args()
 
     # Now push this into the Config
@@ -43,6 +54,38 @@ if __name__ == '__main__':
     print("Config:")
     print(c.to_string())
 
-    from run_pipeline import run_pipeline
+    # Automatically determine the ports. Comment this if manual setup is desired
+    if (c.kafka.bootstrap_servers == "auto"):
+        kafka_compose_name = "kafka-docker"
 
-    run_pipeline()
+        docker_client = docker.from_env()
+        bridge_net = docker_client.networks.get("bridge")
+        bridge_ip = bridge_net.attrs["IPAM"]["Config"][0]["Gateway"]
+
+        kafka_net = docker_client.networks.get(kafka_compose_name + "_default")
+
+        c.kafka.bootstrap_servers = ",".join([
+            c.ports["9092/tcp"][0]["HostIp"] + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers
+            if "9092/tcp" in c.ports
+        ])
+
+        # Use this version to specify the bridge IP instead
+        c.kafka.bootstrap_servers = ",".join(
+            [bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
+
+        print("Auto determined Bootstrap Servers: {}".format(c.kafka.bootstrap_servers))
+
+
+    stage = getattr(options, "stage", "pipeline")
+
+    if (stage == "pipeline"):
+
+        from grpc_pipeline import run_pipeline
+
+        run_pipeline()
+
+    elif (stage == "preprocess"):
+
+        from grpc_preprocessing import run
+
+        run()

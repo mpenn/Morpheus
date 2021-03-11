@@ -57,10 +57,11 @@ class RequestData:
         in_str = in_df.to_arrow().to_pylist() if isinstance(in_df, cudf.Series) else in_df.to_pandas().to_dict('records')
 
         return RequestData(count=in_feature.input_ids.shape[0],
-                       input_ids=in_feature.input_ids,
-                       input_mask=in_feature.input_mask,
-                       segment_ids=in_feature.segment_ids,
-                       input_str=in_str)
+                           input_ids=in_feature.input_ids,
+                           input_mask=in_feature.input_mask,
+                           segment_ids=in_feature.segment_ids,
+                           input_str=in_str)
+
 
 @dataclasses.dataclass
 class SingleRequest:
@@ -83,17 +84,16 @@ class SingleRequest:
     def input_str(self):
         return self.data.input_str[self.offset]
 
-    def from_feature(in_feature: Feature, in_df: cudf.Series):
+    def from_feature(in_feature: Feature, in_df: cudf.Series) -> typing.List["SingleRequest"]:
         data = RequestData.from_feature(in_feature=in_feature, in_df=in_df)
 
         out = []
 
         for i in range(data.count):
-            out.append(
-                SingleRequest(data=data, offset=i)
-            )
+            out.append(SingleRequest(data=data, offset=i))
 
         return out
+
 
 @dataclasses.dataclass
 class MultiRequest:
@@ -117,26 +117,52 @@ class MultiRequest:
     def input_str(self):
         return self.data.input_str[self.offset:self.offset + self.count]
 
+    def to_singles(self):
+        out = []
+
+        for i in range(self.count):
+            out.append(SingleRequest(data=self.data, offset=i))
+
+        return out
+
+    def create(input_ids: cp.ndarray, input_mask: cp.ndarray, segment_ids: cp.ndarray,
+               input_str: typing.List[str]) -> "MultiRequest":
+        data = RequestData(count=input_ids.shape[0],
+                           input_ids=input_ids,
+                           input_mask=input_mask,
+                           segment_ids=segment_ids,
+                           input_str=input_str)
+
+        out = MultiRequest(offset=0, count=data.count, data=data)
+
+        return out
+
     def from_singles(single_requests: typing.List[SingleRequest]):
 
         final_count = len(single_requests)
 
         # Quick exit if no copying needs to be done
         if (final_count == 1):
-            return MultiRequest(offset=0, count=final_count, data=single_requests[0].data)
+            return MultiRequest(offset=single_requests[0].offset, count=final_count, data=single_requests[0].data)
 
         data = RequestData(
             count=final_count,
-            input_ids=cp.empty_like(single_requests[0].input_ids, shape=(final_count, single_requests[0].input_ids.shape[1]), order="C"),
-            input_mask=cp.empty_like(single_requests[0].input_mask, shape=(final_count, single_requests[0].input_mask.shape[1]), order="C"),
-            segment_ids=cp.empty_like(single_requests[0].segment_ids, shape=(final_count, single_requests[0].segment_ids.shape[1]), order="C"),
+            input_ids=cp.empty_like(single_requests[0].input_ids,
+                                    shape=(final_count, single_requests[0].input_ids.shape[1]),
+                                    order="C"),
+            input_mask=cp.empty_like(single_requests[0].input_mask,
+                                     shape=(final_count, single_requests[0].input_mask.shape[1]),
+                                     order="C"),
+            segment_ids=cp.empty_like(single_requests[0].segment_ids,
+                                      shape=(final_count, single_requests[0].segment_ids.shape[1]),
+                                      order="C"),
             input_str=[""] * final_count,
         )
 
         for i, r in enumerate(single_requests):
-            data.input_ids[i:i+1, :] = r.input_ids
-            data.input_mask[i:i+1, :] = r.input_mask
-            data.segment_ids[i:i+1, :] = r.segment_ids
+            data.input_ids[i:i + 1, :] = r.input_ids
+            data.input_mask[i:i + 1, :] = r.input_mask
+            data.segment_ids[i:i + 1, :] = r.segment_ids
             data.input_str[i] = r.input_str
 
         return MultiRequest(offset=0, count=final_count, data=data)
@@ -147,6 +173,8 @@ class ResponseData:
     count: int
     probs: cp.ndarray
     input_str: typing.List[str]
+
+
 @dataclasses.dataclass
 class MultiResponse:
     offset: int
@@ -160,6 +188,7 @@ class MultiResponse:
     @property
     def input_str(self):
         return self.data.input_str[self.offset:self.offset + self.count]
+
 
 @dataclasses.dataclass
 class SingleResponse:
@@ -180,8 +209,6 @@ class SingleResponse:
         out = []
 
         for i in range(data.count):
-            out.append(
-                SingleResponse(data=data, offset=i)
-            )
+            out.append(SingleResponse(data=data, offset=i))
 
         return out
