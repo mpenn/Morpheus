@@ -39,132 +39,13 @@ from tqdm import tqdm
 from tqdm.contrib import DummyTqdmFile
 
 from cudf_subword_helper import Feature, tokenize_text_series
-from request import MultiRequest, SingleRequest
+from request import MultiRequest, SingleRequest, SingleResponse
 
 # # Redirect printing to tqdm
 orig_out_err = sys.stdout, sys.stderr
+
+
 # sys.stdout, sys.stderr = map(DummyTqdmFile, (sys.stdout, sys.stderr))
-
-
-@Stream.register_api()
-class partition_batch(Stream):
-    _graphviz_shape = 'diamond'
-
-    def __init__(self, upstream, n, timeout=None, key=None, **kwargs):
-        self.n = n
-        self._timeout = timeout
-        self._key = key
-        self._buffer = defaultdict(lambda: [])
-        self._metadata_buffer = defaultdict(lambda: [])
-        self._callbacks = {}
-        kwargs["ensure_io_loop"] = True
-        Stream.__init__(self, upstream, **kwargs)
-
-    def _get_key(self, x):
-        if self._key is None:
-            return None
-        if callable(self._key):
-            return self._key(x)
-        return x[self._key]
-
-    @gen.coroutine
-    def _flush(self, key):
-        # Clear the current buffer
-        result, self._buffer[key] = self._buffer[key], []
-        metadata_result, self._metadata_buffer[key] = self._metadata_buffer[key], []
-
-        # Break up the current results into n sized chunks
-        output, remaining_buffer, metadata, remaining_metadata = self._to_batch(result, metadata_result)
-
-        assert len(remaining_buffer) == len(remaining_metadata)
-
-        yield self._emit(output, metadata=metadata)
-
-        # Requeue any remaining
-        for i in range(len(remaining_buffer)):
-            self.update(remaining_buffer[i], metadata=remaining_metadata[i])
-
-        self._release_refs(metadata)
-
-    @gen.coroutine
-    def update(self, x, who=None, metadata=None):
-        self._retain_refs(metadata)
-        key = self._get_key(x)
-        buffer = self._buffer[key]
-        metadata_buffer = self._metadata_buffer[key]
-        buffer.append(x)
-        metadata_buffer.append(metadata)
-
-        if self._count(buffer) >= self.n:
-            if key in self._callbacks is not None and self.n > 1:
-                self._callbacks[key].cancel()
-                del self._callbacks[key]
-            yield self._flush(key)
-            return
-        if len(buffer) == 1 and self._timeout is not None:
-            self._callbacks[key] = self.loop.call_later(self._timeout, self._flush, key)
-
-    def _count(self, buffer: typing.List[SingleRequest]):
-        return reduce(lambda x, y: x + y.count, buffer, 0)
-
-    def _to_batch(self, buffer: typing.List[SingleRequest], metadata: list):
-
-        # Quick exit if we only have one and its too small
-        if (len(buffer) == 1 and buffer[0].count <= self.n):
-            return buffer[0], [], metadata[0], []
-        elif (buffer[0].count == self.n):
-            return buffer[0], buffer[1:], metadata[0], metadata[1:]
-
-        # Are we too big
-        if (buffer[0].count > self.n):
-            # Chop the top off
-            output = buffer[0]
-            remain = output.split(self.n)
-
-            return output, [remain] + buffer[1:], metadata[0], metadata
-        else:
-            total_count = self._count(buffer)
-
-            # We have multiple that are too small.
-            final_count = min(total_count, self.n)
-
-            output = SingleRequest(
-                count=0,
-                input_ids=cp.empty_like(buffer[0].input_ids, shape=(final_count, buffer[0].input_ids.shape[1]), order="C"),
-                input_mask=cp.empty_like(buffer[0].input_mask, shape=(final_count, buffer[0].input_mask.shape[1]), order="C"),
-                segment_ids=cp.empty_like(buffer[0].segment_ids, shape=(final_count, buffer[0].segment_ids.shape[1]), order="C"),
-                input_str=[""] * final_count,
-            )
-
-            curr_idx = 0
-            remain = []
-            out_meta = []
-            remain_meta = []
-
-            for curr_idx, b in enumerate(buffer):
-                if (output.count + b.count > self.n):
-                    remain.append(b.split(self.n - output.count))
-                    remain_meta.append(metadata[curr_idx])
-
-                start = output.count
-                stop = start + b.count
-
-                output.input_ids[start:stop, :] = b.input_ids
-                output.input_mask[start:stop, :] = b.input_mask
-                output.segment_ids[start:stop, :] = b.segment_ids
-                output.input_str[start:stop] = b.input_str
-                output.count += b.count
-
-                out_meta.extend(metadata[curr_idx])
-
-                if (output.count == self.n):
-                    break
-
-            curr_idx += 1
-
-            return output, remain + buffer[curr_idx:], out_meta, remain_meta + metadata[curr_idx:]
-
-
 @Stream.register_api()
 class async_map(Stream):
     """ Apply a function to every element in the stream
@@ -196,11 +77,16 @@ class async_map(Stream):
         self.kwargs = kwargs
         self.args = args
 
-        Stream.__init__(self, upstream, stream_name=stream_name, ensure_io_loop=True)
+        Stream.__init__(self,
+                        upstream,
+                        stream_name=stream_name,
+                        ensure_io_loop=True)
 
-    async def update(self, x, who=None, metadata=None):
+    @gen.coroutine
+    def update(self, x, who=None, metadata=None):
         try:
-            result = await self.func(x, *self.args, **self.kwargs)
+            r = self.func(x, *self.args, **self.kwargs)
+            result = yield r
         except Exception as e:
             # logger.exception(e)
             print(e)
@@ -208,67 +94,12 @@ class async_map(Stream):
         else:
             return self._emit(result, metadata=metadata)
 
-@Stream.register_api()
-class buffer_map(Stream):
-    """ Allow results to pile up at this point in the stream
-
-    This allows results to buffer in place at various points in the stream.
-    This can help to smooth flow through the system when backpressure is
-    applied.
-    """
-    _graphviz_shape = 'diamond'
-
-    def __init__(self, upstream, func, **kwargs):
-        from tornado.queues import Queue
-        self.queue = Queue()
-        self.func = func
-
-        kwargs["ensure_io_loop"] = True
-        Stream.__init__(self, upstream, **kwargs)
-
-        self.loop.add_callback(self.cb)
-
-    def update(self, x, who=None, metadata=None):
-        self._retain_refs(metadata)
-        return self.queue.put((self.func(x), metadata))
-
-    @gen.coroutine
-    def cb(self):
-        while True:
-            x, metadata = yield self.queue.get()
-            x_val = yield x
-            yield self._emit(x_val, metadata=metadata)
-            self._release_refs(metadata)
 
 config = Config.get()
 
 # queue_progress = tqdm(desc="Input Stream Rate", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0, file=orig_out_err[0])
 
 total_log_count = 43862
-
-# Automatically determine the ports. Comment this if manual setup is desired
-if (config.kafka.bootstrap_servers == "auto"):
-    kafka_compose_name = "kafka-docker"
-
-    docker_client = docker.from_env()
-    bridge_net = docker_client.networks.get("bridge")
-    bridge_ip = bridge_net.attrs["IPAM"]["Config"][0]["Gateway"]
-
-    kafka_net = docker_client.networks.get(kafka_compose_name + "_default")
-
-    config.kafka.bootstrap_servers = ",".join(
-        [c.ports["9092/tcp"][0]["HostIp"] + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
-
-    # Use this version to specify the bridge IP instead
-    config.kafka.bootstrap_servers = ",".join([bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
-
-# Kafka topic to read streaming data from
-topic = "test_pcap"
-
-# thread_pool = concurrent.futures.ThreadPoolExecutor()
-
-# Kafka consumer configuration
-consumer_conf = {'bootstrap.servers': config.kafka.bootstrap_servers, 'group.id': 'custreamz', 'session.timeout.ms': "60000"}
 '''
 If you changed Dask=True, please ensure you have a Dask cluster up and running. Refer to this for Dask API: https://docs.dask.org/en/latest/
 If the input data is high throughput, we recommend using Dask, and starting appropriate number of Dask workers.
@@ -301,7 +132,6 @@ To leverage the custreamz' accelerated Kafka reader (note that data in Kafka mus
 # source: Stream = Stream.from_textfile("pcap_dump_nonull.json", start=True, asynchronous=True).rate_limit(
 #     1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
 
-
 # def update_progress(x):
 #     if (isinstance(x, str)):
 #         queue_progress.update()
@@ -325,9 +155,12 @@ def process_batch(messages: cudf.DataFrame):
 
     data_series = messages["data"]
 
-    tokenized = tokenize_text_series(data_series, config.model.seq_length, 1, config.model.vocab_hash_file)
+    tokenized = tokenize_text_series(data_series,
+                                     config.model.seq_length,
+                                     1,
+                                     config.model.vocab_hash_file)
 
-    return SingleRequest.from_feature(tokenized, data_series)
+    return SingleRequest.from_feature(tokenized, messages)
 
 
 def process_batch_pytorch(messages: cudf.DataFrame):
@@ -350,7 +183,9 @@ def process_batch_pytorch(messages: cudf.DataFrame):
     mask = mask.reshape(-1, config.model.seq_length)
     meta_data = meta_data.reshape(-1, 3)
 
-    return SingleRequest.from_feature(Feature(input_ids=token_ids, input_mask=mask, segment_ids=meta_data), data_series)
+    return SingleRequest.from_feature(
+        Feature(input_ids=token_ids, input_mask=mask, segment_ids=meta_data),
+        data_series)
 
     # return Request(count=token_ids.shape[0],
     #                input_ids=token_ids,
@@ -471,7 +306,6 @@ def process_batch_pytorch(messages: cudf.DataFrame):
 
 #             progress.update(n=batch_size)
 
-
 # def inference_worker_pytorch():
 
 #     # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
@@ -504,7 +338,6 @@ def process_batch_pytorch(messages: cudf.DataFrame):
 #             for i, val in enumerate(preds.tolist()):
 #                 if (val):
 #                     print("\033[0;31mFound PII:\033[0m {}".format(batch.input_str[i].replace("\r\\n", "\n")))
-
 
 # def inference_worker_triton():
 
@@ -550,16 +383,14 @@ def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
     return MultiRequest.from_singles(single_requests)
 
 
-
-
 async def main_loop():
-    
+
     inf_queue = queue.Queue()
     progress = tqdm(desc="Running Inference for PII",
-                smoothing=0.1,
-                dynamic_ncols=True,
-                unit="inf",
-                mininterval=1.0)
+                    smoothing=0.1,
+                    dynamic_ncols=True,
+                    unit="inf",
+                    mininterval=1.0)
 
     def queue_batch(messages: MultiRequest):
 
@@ -568,12 +399,54 @@ async def main_loop():
         inf_queue.put(messages)
 
     def build_source():
-        def json_to_cudf(in_str: str):
-            df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
-            return df
+        # def json_to_cudf(in_str: str):
+        #     df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
+        #     return df
 
-        source: Source = Stream.from_textfile("pcap_dump_nonull.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
-            1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+        # source: Source = Stream.from_textfile("pcap_dump_nonull.json", asynchronous=True).rate_limit(
+        #     1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+
+        # Automatically determine the ports. Comment this if manual setup is desired
+        if (config.kafka.bootstrap_servers == "auto"):
+            kafka_compose_name = "kafka-docker"
+
+            docker_client = docker.from_env()
+            bridge_net = docker_client.networks.get("bridge")
+            bridge_ip = bridge_net.attrs["IPAM"]["Config"][0]["Gateway"]
+
+            kafka_net = docker_client.networks.get(kafka_compose_name +
+                                                   "_default")
+
+            config.kafka.bootstrap_servers = ",".join([
+                c.ports["9092/tcp"][0]["HostIp"] + ":" +
+                c.ports["9092/tcp"][0]["HostPort"]
+                for c in kafka_net.containers if "9092/tcp" in c.ports
+            ])
+
+            # Use this version to specify the bridge IP instead
+            config.kafka.bootstrap_servers = ",".join([
+                bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"]
+                for c in kafka_net.containers if "9092/tcp" in c.ports
+            ])
+
+            print("Auto determined Bootstrap Servers: {}".format(config.kafka.bootstrap_servers))
+
+        # Kafka consumer configuration
+        consumer_conf = {
+            'bootstrap.servers': config.kafka.bootstrap_servers,
+            'group.id': 'custreamz',
+            'session.timeout.ms': "60000"
+        }
+
+        source: Stream = Stream.from_kafka_batched(
+            config.kafka.input_topic,
+            consumer_conf,
+            npartitions=None,
+            start=False,
+            asynchronous=True,
+            dask=False,
+            engine="cudf",
+            max_batch_size=config.model.max_batch_size)
 
         return source
 
@@ -599,9 +472,15 @@ async def main_loop():
         elif (config.general.pipeline == "tensorrt"):
             from inference_tensorrt import inference_worker
         else:
-            raise Exception("Unknown inference pipeline: '{}'".format(config.general.pipeline))
+            raise Exception("Unknown inference pipeline: '{}'".format(
+                config.general.pipeline))
 
-        threading.Thread(target=inference_worker, daemon=True, args=(source.loop, inf_queue,)).start()
+        threading.Thread(target=inference_worker,
+                         daemon=True,
+                         args=(
+                             source.loop,
+                             inf_queue,
+                         )).start()
 
     setup()
 
@@ -621,7 +500,6 @@ async def main_loop():
 
     # # Queue the inference work
     # req_stream.sink(queue_batch)
-
     async def future_map_batch(req: MultiRequest):
         # Get the current event loop.
         loop = asyncio.get_running_loop()
@@ -637,12 +515,33 @@ async def main_loop():
     #     progress.update(inf_out[0].count)
 
     def out_sink(message):
-        progress.update(message[0].count)
+        progress.update(message.count)
         # print(message)
 
-    req_stream = req_stream.buffer_map(future_map_batch)
+    res_stream = req_stream.async_map(future_map_batch)
 
-    req_stream.sink(out_sink)
+    res_stream.sink(out_sink)
+
+    res_stream = res_stream.map(lambda x: SingleResponse.from_multi(x))
+    res_stream = res_stream.flatten()
+    res_stream = res_stream.filter(lambda x: x.probs.any().item())
+
+    # Post processing
+    def post_process(x: SingleResponse):
+        # Convert to final form
+        message = {
+            "type": "PII",
+            "message": x.input_str,
+            "result": x.probs[0].get().tolist()
+        }
+
+        return json.dumps(message)
+
+    res_stream = res_stream.map(post_process)
+
+    producer_conf = {'bootstrap.servers': config.kafka.bootstrap_servers}
+
+    res_stream.to_kafka(config.kafka.output_topic, producer_conf)
 
     # Sleep for 1 sec to give something to await on
     await asyncio.sleep(1.0)

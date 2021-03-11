@@ -6,37 +6,6 @@ import torch
 import typing
 import dataclasses
 import pprint
-
-opt_inference_pipeline = os.environ.get("CLX_INFERENCE_PIPELINE", "triton").lower()
-opt_vocab_hash_file = os.environ.get("CLX_VOCAB_HASH_FILE", "bert-base-cased-hash.txt").lower()
-opt_seq_length = int(os.environ.get("CLX_SEQ_LENGTH", 128))
-opt_max_batch_size = int(os.environ.get("CLX_MAX_BATCH_SIZE", 8))
-opt_bootstrap_servers = os.environ.get("CLX_BOOTSTRAP_SERVERS", "auto").lower()
-opt_input_topic = os.environ.get("CLX_input_topic", "test_pcap")
-opt_input_topic = os.environ.get("CLX_input_topic", "test_pcap")
-
-def _get_default_state():
-
-   state = {
-      "general": {
-         "debug": False,
-         "pipeline": "triton",
-      },
-      "model": {
-         "vocab_hash_file": "bert-base-cased-hash.txt",
-         "seq_length": 128,
-         "max_batch_size": 8
-      },
-      "kafka": {
-         "bootstrap_servers": "auto",
-         "input_topic": "test_pcap",
-         "output_topic": "output_topic",
-      }
-   }
-
-   return state
-
-
 class ConfigWrapper(object):
 
    def __init__(self, internal_dict: dict):
@@ -82,7 +51,7 @@ class ConfigWrapper(object):
 @dataclasses.dataclass
 class ConfigGeneral():
    debug = False
-   pipeline: str = "triton"
+   pipeline: str = "pytorch"
 
 @dataclasses.dataclass
 class ConfigModel():

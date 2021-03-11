@@ -13,7 +13,7 @@ TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 config = Config.get()
 
 
-def inference_worker(inf_queue: queue.Queue):
+def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
     # pyc_dev = pycuda.autoinit.device
     # pyc_ctx = pyc_dev.retain_primary_context()

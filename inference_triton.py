@@ -1,4 +1,5 @@
 import asyncio
+from functools import partial
 import tritonclient.grpc as tritonclient
 from tritonclient.grpc.model_config_pb2 import DataType
 from tqdm import tqdm
@@ -28,13 +29,12 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
         batch = message[0]
         fut = message[1]
 
-        def infer_callback(result, error):
-            output = (batch, result)
+        def infer_callback(f, result, error):
             def tmp(r, e):
                 if (error):
-                    fut.set_exception(e)
+                    f.set_exception(e)
                 else:
-                    fut.set_result((batch, r))
+                    f.set_result((batch, r))
             # if (error):
             #     loop.call_soon_threadsafe(fut.set_exception, error)
             # else:
@@ -67,5 +67,5 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
         # Inference call
         triton_client.async_infer(model_name="bert_trt",
                                   inputs=inputs,
-                                  callback=infer_callback,
+                                  callback=partial(infer_callback, fut),
                                   outputs=outputs)

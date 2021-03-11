@@ -16,8 +16,12 @@ docker-compose up -d
 # Scale to 3 instances
 docker-compose scale kafka=3
 
+# Create the topic
+./start-kafka-shell.sh 172.17.0.1
+$KAFKA_HOME/bin/kafka-topics.sh --create --topic=test_pcap --bootstrap-server `broker-list.sh`
+
 # Run container
-docker run --rm -it -e KAFKA_BROKER_SERVERS=172.17.0.1:49161 -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
+# docker run --rm -it -e KAFKA_BROKER_SERVERS=172.17.0.1:49161 -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
 docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
 
 # To view the messages from the server
@@ -29,3 +33,6 @@ $KAFKA_HOME/bin/kafka-console-consumer.sh --topic=test_pcap --bootstrap-server `
 # OTHER COMMANDS USED
 # Launch Triton server
 docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models nvcr.io/nvidia/tritonserver:21.02-py3 tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1
+
+# Run inference container
+docker run --rm -ti --gpus=all -e CLX_INFERENCE_PIPELINE="pytorch" -e CLX_KAFKA_BOOTSTRAP_SERVERS="172.17.0.1:49164,172.17.0.1:49165,172.17.0.1:49166" gitlab-master.nvidia.com:5005/mdemoret/cyber-demo

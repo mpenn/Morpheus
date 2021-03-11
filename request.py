@@ -53,11 +53,14 @@ class RequestData:
     input_str: typing.List[str]
 
     def from_feature(in_feature: Feature, in_df: cudf.Series):
+
+        in_str = in_df.to_arrow().to_pylist() if isinstance(in_df, cudf.Series) else in_df.to_pandas().to_dict('records')
+
         return RequestData(count=in_feature.input_ids.shape[0],
                        input_ids=in_feature.input_ids,
                        input_mask=in_feature.input_mask,
                        segment_ids=in_feature.segment_ids,
-                       input_str=in_df.to_arrow().to_pylist())
+                       input_str=in_str)
 
 @dataclasses.dataclass
 class SingleRequest:
@@ -139,3 +142,46 @@ class MultiRequest:
         return MultiRequest(offset=0, count=final_count, data=data)
 
 
+@dataclasses.dataclass
+class ResponseData:
+    count: int
+    probs: cp.ndarray
+    input_str: typing.List[str]
+@dataclasses.dataclass
+class MultiResponse:
+    offset: int
+    count: int
+    data: RequestData
+
+    @property
+    def probs(self):
+        return self.data.probs[self.offset:self.offset + self.count, :]
+
+    @property
+    def input_str(self):
+        return self.data.input_str[self.offset:self.offset + self.count]
+
+@dataclasses.dataclass
+class SingleResponse:
+    offset: int
+    data: ResponseData
+
+    @property
+    def probs(self):
+        return self.data.probs[self.offset:self.offset + 1, :]
+
+    @property
+    def input_str(self):
+        return self.data.input_str[self.offset]
+
+    def from_multi(multi_res: MultiResponse):
+        data = multi_res.data
+
+        out = []
+
+        for i in range(data.count):
+            out.append(
+                SingleResponse(data=data, offset=i)
+            )
+
+        return out
