@@ -121,16 +121,6 @@ def grpc_to_cupy(in_grpc: request_pb2.CudaArrayPayload):
             }
             return output
 
-    # tmp = {
-    #     "__cuda_array_interface__": {
-    #         "shape": list(in_grpc.shape),
-    #         "typestr": str(in_grpc.typestr),
-    #         "data": (int(in_grpc.data), bool(in_grpc.readonly)),
-    #         "version": int(in_grpc.version),
-    #         "strides": None if len(in_grpc.strides) == 0 else list(in_grpc.strides),
-    #     }
-    # }
-
     out_cp = cp.asarray(CudaArrayPayloadWrapper(in_grpc))
 
     return out_cp
