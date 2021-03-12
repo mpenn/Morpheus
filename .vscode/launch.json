@@ -58,7 +58,7 @@
             "CLX_INFERENCE_PIPELINE": "pytorch",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
             "CLX_MODEL_SEQ_LENGTH": "512",
-            "CLX_MODEL_MAX_BATCH_SIZE": "16",
+            "CLX_MODEL_MAX_BATCH_SIZE": "32",
          },
          "args": [
          ]

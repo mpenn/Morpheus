@@ -36,13 +36,13 @@ def cupy_to_grpc(in_cp: cp.ndarray, out_grpc: request_pb2.CudaArrayPayload = Non
 
     return out_grpc
 
-def process_batch(messages: cudf.DataFrame) -> typing.List[SingleRequest]:
+def process_batch(messages: cudf.DataFrame) -> MultiRequest:
 
     data_series = messages["data"]
 
     tokenized = tokenize_text_series(data_series, config.model.seq_length, 1, config.model.vocab_hash_file)
 
-    return SingleRequest.from_feature(tokenized, data_series)
+    return MultiRequest.from_feature(tokenized, data_series, messages["timestamp"])
 
 class PreprocessingServicer(request_pb2_grpc.PipelineServicer):
     """Provides methods that implement functionality of route guide server."""
@@ -54,12 +54,10 @@ class PreprocessingServicer(request_pb2_grpc.PipelineServicer):
         response = request_pb2.StageOutput(id=request.id, count=request.count)
 
         try:
-            df = cudf.DataFrame({"data": request.payload["data"].str_array.value})
-
-            single_requests = process_batch(df)
+            df = cudf.DataFrame({"data": request.payload["data"].str_array.value, "timestamp": [0] * request.count})
 
             # To multi
-            multi_request = MultiRequest(offset=0, count=len(single_requests), data=single_requests[0].data)
+            multi_request = process_batch(df)
 
             # TEMP: Hold onto a reference to this multi request so the data doesnt go out of scope.
             self.hold.append(multi_request)
@@ -72,7 +70,6 @@ class PreprocessingServicer(request_pb2_grpc.PipelineServicer):
             cupy_to_grpc(multi_request.segment_ids, response.payload["segment_ids"].cupy_array)
             response.payload["input_str"].str_array.value.extend(multi_request.input_str)
 
-            return single_requests
         except Exception as ex:
             print(ex)
         finally:

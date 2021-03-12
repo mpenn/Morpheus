@@ -39,7 +39,7 @@ from tqdm.contrib import DummyTqdmFile
 
 from config import Config
 from cudf_subword_helper import Feature, tokenize_text_series
-from request import MultiRequest, SingleRequest, SingleResponse
+from request import MultiRequest, MultiResponse, SingleRequest, SingleResponse
 
 # Add generated proto output to the path. Stupid. See https://github.com/protocolbuffers/protobuf/issues/1491
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "services")))
@@ -136,38 +136,6 @@ def to_cpu_dicts(messages):
     return messages.to_pandas().to_dict('records')
 
 
-def process_batch(messages: cudf.DataFrame) -> typing.List[SingleRequest]:
-
-    data_series = messages["data"]
-
-    tokenized = tokenize_text_series(data_series, config.model.seq_length, 1, config.model.vocab_hash_file)
-
-    return SingleRequest.from_feature(tokenized, data_series)
-
-
-def process_batch_pytorch(messages: cudf.DataFrame):
-    """
-    converts cudf.Series of strings to two torch tensors and meta_data- token ids and attention mask with padding
-    """
-    data_series = messages["data"]
-
-    # max_seq_len = 512
-    num_strings = len(data_series)
-    token_ids, mask, meta_data = data_series.str.subword_tokenize(
-        config.model.vocab_hash_file,
-        max_length=config.model.seq_length,
-        stride=500,
-        do_lower=False,
-        do_truncate=True,
-    )
-
-    token_ids = token_ids.reshape(-1, config.model.seq_length)
-    mask = mask.reshape(-1, config.model.seq_length)
-    meta_data = meta_data.reshape(-1, 3)
-
-    return SingleRequest.from_feature(Feature(input_ids=token_ids, input_mask=mask, segment_ids=meta_data), data_series)
-
-
 def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
     return MultiRequest.from_singles(single_requests)
 
@@ -195,8 +163,9 @@ async def main_loop():
                 df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
                 return df
 
-            source: Stream = Stream.from_textfile(".tmp/pcap_dump_nonull.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
-                1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+            source: Stream = Stream.from_textfile(
+                "pcap_dump.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
+                    1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
         else:
 
             # Kafka consumer configuration
@@ -205,14 +174,13 @@ async def main_loop():
             }
 
             source: Stream = Stream.from_kafka_batched(config.kafka.input_topic,
-                                                    consumer_conf,
-                                                    npartitions=None,
-                                                    start=False,
-                                                    asynchronous=True,
-                                                    dask=False,
-                                                    engine="cudf",
-                                                    loop=IOLoop.current(),
-                                                    max_batch_size=config.model.max_batch_size)
+                                                       consumer_conf,
+                                                       npartitions=None,
+                                                       start=False,
+                                                       asynchronous=True,
+                                                       dask=False,
+                                                       engine="cudf",
+                                                       loop=IOLoop.current())
 
         return source
 
@@ -260,7 +228,7 @@ async def main_loop():
     # Preprocess each batch into stream of Request
     req_stream = req_stream.map(filter_empty_data)
     req_stream = req_stream.filter(lambda x: len(x) > 0)
-    req_stream = req_stream.map(to_cpu_json)
+    # req_stream = req_stream.map(to_cpu_json)
 
     channel = grpc.aio.insecure_channel('localhost:50051')
 
@@ -270,10 +238,11 @@ async def main_loop():
     stub = request_pb2_grpc.PipelineStub(channel)
 
     # Send request to grpc server
-    async def preprocess_grpc(x: typing.Tuple[typing.List[str], typing.List[str]]):
+    async def preprocess_grpc(x: cudf.DataFrame):
 
-        messages = x[0]
-        data = x[1]
+        messages = cudf.io.json.to_json(x, orient="records", lines=True).split("\n")
+        data = x["data"].to_arrow().to_pylist()
+        timestamp = x["timestamp"].to_arrow().to_pylist()
 
         in_req = request_pb2.StageInput(id=1, count=len(messages))
         in_req.payload["messages"].str_array.value.extend(messages)
@@ -284,7 +253,8 @@ async def main_loop():
         out_res = MultiRequest.create(input_ids=grpc_to_cupy(response.payload["input_ids"].cupy_array),
                                       input_mask=grpc_to_cupy(response.payload["input_mask"].cupy_array),
                                       segment_ids=grpc_to_cupy(response.payload["segment_ids"].cupy_array),
-                                      input_str=list(response.payload["input_str"].str_array.value))
+                                      input_str=messages,
+                                      timestamp=timestamp)
 
         return out_res.to_singles()
 
@@ -323,7 +293,8 @@ async def main_loop():
 
     res_stream = res_stream.map(lambda x: SingleResponse.from_multi(x))
     res_stream = res_stream.flatten()
-    res_stream = res_stream.filter(lambda x: x.probs.any().item())
+
+    # res_stream = res_stream.filter(lambda x: x.probs.any().item())
 
     # Post processing
     def post_process(x: SingleResponse):
@@ -332,11 +303,62 @@ async def main_loop():
 
         return json.dumps(message)
 
-    res_stream = res_stream.map(post_process)
+    out_stream = res_stream
+
+    out_stream = out_stream.filter(lambda x: x.probs.any().item())
+    out_stream = out_stream.map(post_process)
 
     producer_conf = {'bootstrap.servers': config.kafka.bootstrap_servers}
 
-    res_stream.to_kafka(config.kafka.output_topic, producer_conf)
+    out_stream.to_kafka(config.kafka.output_topic, producer_conf)
+
+    # Finally, if we want to save out the file for viz, do that here
+    def to_vis_df(x: typing.List[SingleResponse]):
+
+        comb = MultiResponse.from_singles(x)
+
+        df = cudf.io.read_json(io.StringIO("\n".join(comb.input_str)), engine="cudf", lines=True)
+
+        df["pii"] = cudf.Series(comb.probs.squeeze().astype(cp.bool).get().tolist())
+
+        return df
+
+    def round_to_sec(x):
+        return int(round(x / 1000.0) * 1000)
+
+    viz_stream = res_stream
+    viz_stream = viz_stream.partition(10000, timeout=10, key=lambda x: round_to_sec(x.timestamp))  # Group
+    viz_stream = viz_stream.filter(lambda x: len(x) > 0)
+    viz_stream = viz_stream.map(to_vis_df)  # Convert group to dataframe
+
+    os.makedirs("./viz_frames", exist_ok=True)
+
+    global my_var, first_timestamp
+    my_var = 0
+    first_timestamp = -1
+
+    # Sink to file
+    def write_viz_file(in_df: cudf.DataFrame):
+        global my_var, first_timestamp
+        a = my_var
+
+        curr_timestamp = round_to_sec(in_df["timestamp"].iloc[0])
+
+        if (first_timestamp == -1):
+            first_timestamp = curr_timestamp
+
+        offset = (curr_timestamp - first_timestamp) / 1000
+
+        fn = os.path.join("viz_frames", "{}.csv".format(offset))
+
+        assert not os.path.exists(fn)
+
+        in_df.to_csv(fn,
+                     columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "pii"])
+
+        my_var = a + 1
+
+    viz_stream.sink(write_viz_file)
 
     # Sleep for 1 sec to give something to await on
     await asyncio.sleep(1.0)
