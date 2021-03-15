@@ -143,7 +143,6 @@ def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
 async def main_loop():
 
     inf_queue = queue.Queue()
-    progress = tqdm(desc="Running Inference for PII", smoothing=0.1, dynamic_ncols=True, unit="inf", mininterval=1.0)
 
     def queue_batch(messages: MultiRequest):
 
@@ -164,7 +163,7 @@ async def main_loop():
                 return df
 
             source: Stream = Stream.from_textfile(
-                "pcap_dump.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
+                ".tmp/pcap_dump-half.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
                     1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
         else:
 
@@ -205,6 +204,8 @@ async def main_loop():
             from inference_pytorch import inference_worker
         elif (config.general.pipeline == "tensorrt"):
             from inference_tensorrt import inference_worker
+        elif (config.general.pipeline == "triton_onnx"):
+            from inference_triton_onnx import inference_worker
         else:
             raise Exception("Unknown inference pipeline: '{}'".format(config.general.pipeline))
 
@@ -234,6 +235,8 @@ async def main_loop():
 
     await asyncio.wait_for(channel.channel_ready(), timeout=10.0)
     print("Connected to Preprocessing Server!")
+
+    progress = tqdm(desc="Running Inference for PII", smoothing=0.01, dynamic_ncols=True, unit="inf", mininterval=1.0)
 
     stub = request_pb2_grpc.PipelineStub(channel)
 
@@ -358,7 +361,11 @@ async def main_loop():
 
         my_var = a + 1
 
-    viz_stream.sink(write_viz_file)
+    output_viz_keyframes = False
+
+    if (output_viz_keyframes):
+
+        viz_stream.sink(write_viz_file)
 
     # Sleep for 1 sec to give something to await on
     await asyncio.sleep(1.0)

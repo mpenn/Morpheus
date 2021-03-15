@@ -12,7 +12,7 @@ if __name__ == '__main__':
     pipeline_group = p.add_argument_group(title="pipeline", description="Options related to the model")
     pipeline_group.add_argument("--pipeline",
                                 type=str,
-                                choices=["triton", "pytorch", "tensorrt"],
+                                choices=["triton", "pytorch", "tensorrt", "triton_onnx"],
                                 default=DEFAULT_CONFIG.general.pipeline,
                                 env_var='CLX_INFERENCE_PIPELINE')
 
