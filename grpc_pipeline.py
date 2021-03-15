@@ -163,7 +163,7 @@ async def main_loop():
                 return df
 
             source: Stream = Stream.from_textfile(
-                ".tmp/pcap_dump-half.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
+                ".tmp/pcap_dump_nonull.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
                     1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
         else:
 

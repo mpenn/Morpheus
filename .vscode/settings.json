@@ -10,4 +10,8 @@
   "python.formatting.yapfArgs": [
     "--style={based_on_style: pep8, column_limit: 130, split_all_top_level_comma_separated_values: true, join_multiple_lines: true, indent_dictionary_value: true}"
   ],
+  "python.linting.pylintArgs": [
+    "--rcfile=${env:HOME}/Repos/rapids/.pylintrc"
+  ],
+  "python.linting.pylintEnabled": true,
 }
