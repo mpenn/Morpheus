@@ -154,7 +154,7 @@ async def main_loop():
 
         source: Stream = None
 
-        use_kafka = False
+        use_kafka = True
 
         if (not use_kafka):
 
@@ -179,7 +179,8 @@ async def main_loop():
                                                        asynchronous=True,
                                                        dask=False,
                                                        engine="cudf",
-                                                       loop=IOLoop.current())
+                                                       loop=IOLoop.current(),
+                                                       max_batch_size=config.model.max_batch_size)
 
         return source
 
@@ -322,7 +323,29 @@ async def main_loop():
 
         df = cudf.io.read_json(io.StringIO("\n".join(comb.input_str)), engine="cudf", lines=True)
 
-        df["pii"] = cudf.Series(comb.probs.squeeze().astype(cp.bool).get().tolist())
+        idx2label = {
+            0: 'address',
+            1: 'bank_acct',
+            2: 'credit_card',
+            3: 'email',
+            4: 'govt_id',
+            5: 'name',
+            6: 'password',
+            7: 'phone_num',
+            8: 'secret_keys',
+            9: 'user'
+        }
+
+        pass_thresh = (comb.probs >= 0.5).any(axis=1)
+        max_arg = comb.probs.argmax(axis=1)
+
+        condlist = [pass_thresh]
+
+        choicelist = [max_arg]
+
+        index_sens_info = cp.select(condlist, choicelist, default=len(idx2label))
+
+        df["si"] = cudf.Series(np.choose(index_sens_info.get(), list(idx2label.values()) + ["none"]).tolist())
 
         return df
 
@@ -356,12 +379,11 @@ async def main_loop():
 
         assert not os.path.exists(fn)
 
-        in_df.to_csv(fn,
-                     columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "pii"])
+        in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si"])
 
         my_var = a + 1
 
-    output_viz_keyframes = False
+    output_viz_keyframes = True
 
     if (output_viz_keyframes):
 

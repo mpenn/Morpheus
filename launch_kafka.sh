@@ -25,7 +25,7 @@ $KAFKA_HOME/bin/kafka-topics.sh --delete --topic=test_pcap --bootstrap-server `b
 
 # Run container
 # docker run --rm -it -e KAFKA_BROKER_SERVERS=172.17.0.1:49161 -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
-docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:latest
+docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) -e INPUT_FILE_NAME=pcap_dump.json -e TOPIC_NAME=test_pcap --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:1
 
 # To view the messages from the server
 ./start-kafka-shell.sh 172.17.0.1
@@ -42,3 +42,14 @@ docker run --rm -ti --gpus=all -e CLX_INFERENCE_PIPELINE="pytorch" -e CLX_KAFKA_
 
 python -m grpc_tools.protoc -I=. --python_out=./proto_out --grpc_python_out=./proto_out request.proto
 --include_source_info
+
+# Generate More Data (Run Once)
+docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) --mount src="$PWD/.tmp,target=/app/data/,type=bind" kafka-producer:latest python /app/main.py -m generate -n network -s 10 -p 0.1 -d 0.2 -r 10.20.0.0/16
+
+# Actually produce data
+docker run --rm -it -e KAFKA_BROKER_SERVERS=$(kafka-docker/broker-list.sh) --mount src="$PWD/.tmp,target=/app/data/,type=bind" kafka-producer:latest python /app/main.py -m produce -n network -i pcap_dump.json -j 10 -t test_pcap
+
+# Delete all messages in topic
+$KAFKA_HOME/bin/kafka-topics.sh --alter --topic=test_pcap --zookeeper 172.17.0.1:2181 --config retention.ms=1
+$KAFKA_HOME/bin/kafka-topics.sh --alter --topic=test_pcap --zookeeper 172.17.0.1:2181 --config retention.ms=86400000
+

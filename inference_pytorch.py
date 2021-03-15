@@ -11,7 +11,7 @@ import cupy as cp
 def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
     # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
-    model = torch.load("placeholder_pii2").to('cuda')
+    model = torch.load(".tmp/ph_label_model.bin").to('cuda')
 
     while True:
 
@@ -32,13 +32,19 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
             logits = model(input_ids,
                            token_type_ids=None,
                            attention_mask=attention_mask)[0]
-            probs = torch.sigmoid(logits[:, 1])
+            probs = torch.sigmoid(logits)
             preds = probs.ge(0.5)
+
+        probs_cp = cp.fromDlpack(to_dlpack(probs))
+
+        # Ensure that we are of the shape `[Batch Size, Num Labels]`
+        if (len(probs_cp.shape) == 1):
+            probs_cp = cp.expand_dims(probs_cp, axis=1)
 
         fut.set_result(
             MultiResponse(
                 data=ResponseData(count=batch.count,
-                                  probs=cp.expand_dims(cp.fromDlpack(to_dlpack(preds)), axis=1),
+                                  probs=probs_cp,
                                   input_str=batch.input_str,
                                   timestamp=batch.timestamp),
                 offset=0,
