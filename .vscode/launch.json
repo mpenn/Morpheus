@@ -4,7 +4,37 @@
    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
    "version": "0.2.0",
    "configurations": [
-
+      {
+         "name": "Python: Current File",
+         "type": "python",
+         "request": "launch",
+         "program": "${file}",
+         "console": "integratedTerminal",
+         "cwd": "${workspaceFolder}"
+      },
+      {
+         "name": "Python: Run Network Generator",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/.tmp/kafka-producer/main.py",
+         "console": "integratedTerminal",
+         "cwd": "${workspaceFolder}/.tmp/kafka-producer",
+         "args": [
+            "-m",
+            "produce",
+            "-n",
+            "./network",
+            "-i",
+            "/home/mdemoret/Repos/rapids/cyber-dev/.tmp/dataset2/pcap_dump_2_pre_class-model2.json",
+            "-j",
+            "20",
+            "-t",
+            "test_pcap"
+         ],
+         "env": {
+            "KAFKA_BROKER_SERVERS": "172.17.0.1:49161,172.17.0.1:49160,172.17.0.1:49159",
+         }
+      },
       {
          "name": "Python: Run Pipeline",
          "type": "python",
@@ -57,11 +87,10 @@
          "env": {
             "CLX_INFERENCE_PIPELINE": "pytorch",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
-            "CLX_MODEL_SEQ_LENGTH": "512",
+            "CLX_MODEL_SEQ_LENGTH": "256",
             "CLX_MODEL_MAX_BATCH_SIZE": "64",
          },
-         "args": [
-         ]
+         "args": []
       },
       {
          "name": "Python: Run Triton (TRT)",
@@ -78,8 +107,7 @@
             "CLX_MODEL_MAX_BATCH_SIZE": "8",
             // "PYTHONASYNCIODEBUG": "1",
          },
-         "args": [
-         ]
+         "args": []
       },
       {
          "name": "Python: Run Triton (ONNX)",
@@ -96,8 +124,7 @@
             "CLX_MODEL_MAX_BATCH_SIZE": "8",
             // "PYTHONASYNCIODEBUG": "1",
          },
-         "args": [
-         ]
+         "args": []
       },
       {
          "name": "Python: Run TensorRT",
@@ -113,8 +140,7 @@
             "CLX_MODEL_SEQ_LENGTH": "128",
             "CLX_MODEL_MAX_BATCH_SIZE": "8",
          },
-         "args": [
-         ]
+         "args": []
       },
       {
          "name": "Python: Run Preprocessing",

@@ -57,7 +57,7 @@ def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
 
     tokens, attention_masks, metadata = text_ser.str.subword_tokenize(
         vocab_hash_file,
-        do_lower=True,
+        do_lower=False,
         max_rows_tensor=max_rows_tensor,
         stride=stride,
         max_length=max_length,

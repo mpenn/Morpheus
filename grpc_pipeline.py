@@ -150,11 +150,12 @@ async def main_loop():
 
         inf_queue.put(messages)
 
-    def build_source():
+    def build_source() -> typing.Tuple[streamz.Source, int]:
 
         source: Stream = None
+        max_itr: int = None  # Maximum number of iterations for progress reporting. None = Unknown/Unlimited
 
-        use_kafka = True
+        use_kafka = False
 
         if (not use_kafka):
 
@@ -162,9 +163,13 @@ async def main_loop():
                 df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
                 return df
 
-            source: Stream = Stream.from_textfile(
-                ".tmp/pcap_dump_nonull.json", asynchronous=True, loop=IOLoop.current()).rate_limit(
-                    1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
+            input_file = ".tmp/kafka-producer/pcap_out.json"
+
+            # Read the number of lines for progress reporting
+            max_itr = sum(1 for i in open(input_file, 'rb'))
+
+            source: Stream = Stream.from_textfile(input_file, asynchronous=True, loop=IOLoop.current()).rate_limit(
+                1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0).map(json_to_cudf).buffer(1000)
         else:
 
             # Kafka consumer configuration
@@ -182,22 +187,11 @@ async def main_loop():
                                                        loop=IOLoop.current(),
                                                        max_batch_size=config.model.max_batch_size)
 
-        return source
+        return source, max_itr
 
-    source: Source = build_source()
+    source, max_iterations = build_source()
 
     def setup():
-        # # Preprocess each batch
-        # stream_df = source.map(filter_empty_data) \
-        #                 .filter(lambda x: len(x) > 0) \
-        #                 .map(process_batch) \
-        #                 .partition_batch(config.model.max_batch_size, timeout=1)
-
-        # # source.sink(lambda x: queue_progress.update())
-
-        # # Queue the inference work
-        # stream_df.sink(queue_batch)
-
         # turn-on the worker thread
         if (config.general.pipeline == "triton"):
             from inference_triton import inference_worker
@@ -237,7 +231,12 @@ async def main_loop():
     await asyncio.wait_for(channel.channel_ready(), timeout=10.0)
     print("Connected to Preprocessing Server!")
 
-    progress = tqdm(desc="Running Inference for PII", smoothing=0.01, dynamic_ncols=True, unit="inf", mininterval=1.0)
+    progress = tqdm(desc="Running Inference for PII",
+                    smoothing=0.01,
+                    dynamic_ncols=True,
+                    unit="inf",
+                    mininterval=1.0,
+                    total=max_iterations)
 
     stub = request_pb2_grpc.PipelineStub(channel)
 
@@ -309,7 +308,43 @@ async def main_loop():
 
     out_stream = res_stream
 
-    out_stream = out_stream.filter(lambda x: x.probs.any().item())
+    # Set pre_class_file to non-None and it will output the input data with classifications appended.
+    pre_class_file = None
+    # pre_class_file = ".tmp/dataset2/pcap_dump_2_pre_class-model1-casing.json"
+
+    if (pre_class_file is not None and os.path.exists(pre_class_file)):
+        os.remove(pre_class_file)
+
+    def output_preclass(x: SingleResponse):
+        message = json.loads(x.input_str)
+
+        idx2label = {
+            0: 'address',
+            1: 'bank_acct',
+            2: 'credit_card',
+            3: 'email',
+            4: 'govt_id',
+            5: 'name',
+            6: 'password',
+            7: 'phone_num',
+            8: 'secret_keys',
+            9: 'user'
+        }
+
+        probs_np = (x.probs > 0.5).astype(cp.bool).get()
+
+        for i, label in idx2label.items():
+
+            message["pii_" + label] = probs_np[0, i].item()
+
+        with open(pre_class_file, "a") as f:
+            json.dump(message, f)
+            f.write("\n")
+
+    if (pre_class_file is not None):
+        out_stream.sink(output_preclass)
+
+    out_stream = out_stream.filter(lambda x: (x.probs > 0.5).any().item())
     out_stream = out_stream.map(post_process)
 
     producer_conf = {'bootstrap.servers': config.kafka.bootstrap_servers}

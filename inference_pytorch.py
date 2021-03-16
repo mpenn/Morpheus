@@ -11,7 +11,7 @@ import cupy as cp
 def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
     # Get model from https://drive.google.com/u/1/uc?id=1Lbj1IyHEBV9LS2Jo1z4cmlBNxtZUkYKa&export=download
-    model = torch.load(".tmp/ph_label_model.bin").to('cuda')
+    model = torch.load(".tmp/models_pytorch/model_10labels_256seq.bin").to('cuda')
 
     while True:
 
@@ -36,6 +36,9 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
             preds = probs.ge(0.5)
 
         probs_cp = cp.fromDlpack(to_dlpack(probs))
+
+        # TEMP: Set email to 0 since this gets detected a lot
+        # probs_cp[:, 3] = 0.0
 
         # Ensure that we are of the shape `[Batch Size, Num Labels]`
         if (len(probs_cp.shape) == 1):
