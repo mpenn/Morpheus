@@ -267,6 +267,7 @@ def make_capwin_graph(df):
                     "govt_id": 0x0fffffbf,
                     "name": 0x0fffffbf,
                     "none": 0x02ffffff,
+                    "password": 0x0fffffbf,
                     "phone_num": 0x0fffffbf,
                     "secret_keys": 0x80ff0000,
                     "user": 0x0fffffbf,
@@ -320,7 +321,7 @@ def make_capwin_dataset(start, end, src_path, dst_path):
                 f"{src_path}/{i}.0.csv",
                 header=0,
                 parse_dates=[1],
-                usecols=[2, 3, 6],
+                usecols=[2, 3, 6, 7],
                 dtype=[
                     "int32",  # index
                     "datetime64[ms]",  # timestamp
@@ -328,7 +329,8 @@ def make_capwin_dataset(start, end, src_path, dst_path):
                     "str",  # dest_ip
                     "int32",  # src_port
                     "int32",  # dest_port
-                    "str"  # pii
+                    "str",  # pii
+                    "str", # data
                 ]).reset_index(drop=True)
         except Exception:
             # print(f"missing {src_path}/{i}.0.csv")
@@ -342,21 +344,21 @@ def make_capwin_dataset(start, end, src_path, dst_path):
         df = cudf.concat([df.reset_index(drop=True), df2],
                          ignore_index=True).reset_index(drop=True).sort_values(by=["src_ip", "dest_ip"]).reset_index(drop=True)
 
-        results = make_capwin_graph(df[["src_ip", "dest_ip", "pii"]])
+        results = make_capwin_graph(df[["src_ip", "dest_ip", "pii", "data"]])
 
         if i == 0:
             nodes = results[1][["id", "name", "degree", "size", "color"]]
-            edges = results[2][["id", "name", "src", "dst", "color"]]
+            edges = results[2][["id", "name", "src", "dst", "color", "data"]]
         else:
             nodes = relabel_nodes(nodes[["id", "name"]], results[1][["id", "name", "degree", "size", "color"]])
-            edges = relabel_edges(edges[["id", "name", "src", "dst", "color"]],
-                                  results[2][["id", "name", "src", "dst", "color"]],
+            edges = relabel_edges(edges[["id", "name", "src", "dst", "color", "data"]],
+                                  results[2][["id", "name", "src", "dst", "color", "data"]],
                                   nodes[["id", "remap"]])
 
         edges = edges.assign(**compute_edge_bundles(edges, "id", "src", "dst"))
 
         nodes_out = nodes[["name", "id", "color", "size"]]
-        edges_out = edges[["name", "src", "dst", "edge", "color", "bundle"]]
+        edges_out = edges[["name", "src", "dst", "edge", "color", "bundle", "data"]]
 
         nodes_out.to_csv(f"{dst_path}/{i}.0.nodes.csv", index=False)
         edges_out.to_csv(f"{dst_path}/{i}.0.edges.csv", index=False)
@@ -369,14 +371,15 @@ def make_capwin_dataset(start, end, src_path, dst_path):
 import shutil
 import os
 
-output_dir = "/home/mdemoret/Repos/rapids/rapids-js-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label"
-shutil.rmtree(output_dir)
+output_dir = "/home/mdemoret/Repos/rapids/node-rapids-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label"
+if (os.path.exists(output_dir)):
+    shutil.rmtree(output_dir)
 
 os.makedirs(output_dir, exist_ok=True)
 
 make_capwin_dataset(0,
                     200,
                     "viz_frames",
-                    "/home/mdemoret/Repos/rapids/rapids-js-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label")
+                    "/home/mdemoret/Repos/rapids/node-rapids-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label")
 
 # %%

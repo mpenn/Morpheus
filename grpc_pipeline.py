@@ -10,6 +10,7 @@ import io
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -26,6 +27,7 @@ import cupy as cp
 import docker
 import grpc.aio
 import numpy as np
+import pandas as pd
 import streamz
 import torch
 from distributed.client import wait
@@ -48,6 +50,37 @@ from services import request_pb2, request_pb2_grpc
 
 # # Redirect printing to tqdm
 orig_out_err = sys.stdout, sys.stderr
+
+def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
+    """
+    Fixes parsing issues when reading from a file. `\n` gets converted to `\\n` for some reason
+    """
+
+    x["data"] = x["data"].str.replace('\\n', '\n', regex=False)
+
+    return x
+
+    # # Convert to pandas to use `replace(regex=True)`
+    # if (isinstance(x, cudf.DataFrame)):
+    #     x = x.to_pandas()
+
+    # rep_dict = {
+    #     "data": {
+    #         r'\\n': r'\n'
+    #     }
+    # }
+
+    # x = x.replace(rep_dict, regex=True)
+
+    # return cudf.from_pandas(x)
+
+def json_str_records_to_cudf(x: str):
+
+    cudf_df = cudf.io.read_json(io.StringIO(x), engine="cudf", lines=True)
+
+    # Cleanup the \\n -> \n issue
+    return df_onread_cleanup(cudf_df)
+
 
 
 # sys.stdout, sys.stderr = map(DummyTqdmFile, (sys.stdout, sys.stderr))
@@ -159,11 +192,18 @@ async def main_loop():
 
         if (not use_kafka):
 
-            def json_to_cudf(in_str: str):
-                df = cudf.io.read_json(io.StringIO("".join(in_str)), engine="cudf", lines=True)
+            def json_to_cudf(in_str: typing.List[str]):
+
+                # This method is slow but it works well
+                # df = cudf.from_pandas(pd.DataFrame.from_records([json.loads(x) for x in in_str]))
+
+                df = json_str_records_to_cudf("".join(in_str))
                 return df
 
-            input_file = ".tmp/kafka-producer/pcap_out.json"
+            # input_file = ".tmp/kafka-producer/pcap_out.json"
+            # input_file = ".tmp/dataset2/pcap_dump_2.json"
+            # input_file = ".tmp/dataset4/pcap_dump.json"
+            input_file = ".tmp/dataset4/pcap_dump_augmented_1200delay.json"
 
             # Read the number of lines for progress reporting
             max_itr = sum(1 for i in open(input_file, 'rb'))
@@ -215,16 +255,9 @@ async def main_loop():
 
     req_stream: Stream = source
 
-    def to_cpu_json(message: cudf.DataFrame):
-        json_str_array = cudf.io.json.to_json(message, orient="records", lines=True).split("\n")
-        data_array = message["data"].to_arrow().to_pylist()
-
-        return json_str_array, data_array
-
     # Preprocess each batch into stream of Request
     req_stream = req_stream.map(filter_empty_data)
     req_stream = req_stream.filter(lambda x: len(x) > 0)
-    # req_stream = req_stream.map(to_cpu_json)
 
     channel = grpc.aio.insecure_channel('localhost:50051')
 
@@ -238,17 +271,37 @@ async def main_loop():
                     mininterval=1.0,
                     total=max_iterations)
 
+    tp_progress = tqdm(desc="Bytes throughput",
+                    smoothing=0.01,
+                    dynamic_ncols=True,
+                    unit="bytes",
+                    mininterval=1.0)
+
     stub = request_pb2_grpc.PipelineStub(channel)
 
     # Send request to grpc server
     async def preprocess_grpc(x: cudf.DataFrame):
 
-        messages = cudf.io.json.to_json(x, orient="records", lines=True).split("\n")
-        data = x["data"].to_arrow().to_pylist()
-        timestamp = x["timestamp"].to_arrow().to_pylist()
+        # Need to be in pandas here
+        x_pd = x.to_pandas()
 
-        in_req = request_pb2.StageInput(id=1, count=len(messages))
-        in_req.payload["messages"].str_array.value.extend(messages)
+        # Save off the input messages as they are. Must use json.dumps here
+        input_messages = [json.dumps(y) for y in x_pd.to_dict(orient="records")]
+
+        def deserialize_data(y: str):
+            try:
+                return str(json.loads(y))
+            except:
+                return y
+
+        # Some of the messages are json body and need to be deserialized again
+        x_pd["data"] = x_pd["data"].apply(deserialize_data)
+
+        data = x_pd["data"].to_list()
+        timestamp = x_pd["timestamp"].to_list()
+
+        in_req = request_pb2.StageInput(id=1, count=len(input_messages))
+        in_req.payload["messages"].str_array.value.extend(input_messages)
         in_req.payload["data"].str_array.value.extend(data)
 
         response = await stub.QueuePreprocessing(in_req)
@@ -256,7 +309,7 @@ async def main_loop():
         out_res = MultiRequest.create(input_ids=grpc_to_cupy(response.payload["input_ids"].cupy_array),
                                       input_mask=grpc_to_cupy(response.payload["input_mask"].cupy_array),
                                       segment_ids=grpc_to_cupy(response.payload["segment_ids"].cupy_array),
-                                      input_str=messages,
+                                      input_str=input_messages,
                                       timestamp=timestamp)
 
         return out_res.to_singles()
@@ -290,9 +343,17 @@ async def main_loop():
         progress.update(message.count)
         # print(message)
 
+    def throughput_sink(message: MultiResponse):
+
+        for s in message.input_str:
+            o = json.loads(s)
+
+            tp_progress.update(n=int(o["data_len"]))
+
     res_stream = req_stream.async_map(future_map_batch)
 
     res_stream.sink(out_sink)
+    res_stream.sink(throughput_sink)
 
     res_stream = res_stream.map(lambda x: SingleResponse.from_multi(x))
     res_stream = res_stream.flatten()
@@ -310,7 +371,7 @@ async def main_loop():
 
     # Set pre_class_file to non-None and it will output the input data with classifications appended.
     pre_class_file = None
-    # pre_class_file = ".tmp/dataset2/pcap_dump_2_pre_class-model1-casing.json"
+    # pre_class_file = ".tmp/dataset4/pcap_dump_pre_class_check.json"
 
     if (pre_class_file is not None and os.path.exists(pre_class_file)):
         os.remove(pre_class_file)
@@ -349,7 +410,7 @@ async def main_loop():
 
     producer_conf = {'bootstrap.servers': config.kafka.bootstrap_servers}
 
-    out_stream.to_kafka(config.kafka.output_topic, producer_conf)
+    # out_stream.to_kafka(config.kafka.output_topic, producer_conf)
 
     # Finally, if we want to save out the file for viz, do that here
     def to_vis_df(x: typing.List[SingleResponse]):
@@ -357,6 +418,21 @@ async def main_loop():
         comb = MultiResponse.from_singles(x)
 
         df = cudf.io.read_json(io.StringIO("\n".join(comb.input_str)), engine="cudf", lines=True)
+
+        df = df_onread_cleanup(df)
+
+        def deserialize_data(y: str):
+            try:
+                return json.dumps(json.loads(json.loads(y)), indent=3)
+            except:
+                return y
+
+        df_pd = df.to_pandas()
+
+        # Some of the messages are json body and need to be deserialized again
+        df_pd["data"] = df_pd["data"].apply(deserialize_data)
+
+        df = cudf.from_pandas(df_pd)
 
         idx2label = {
             0: 'address',
@@ -414,7 +490,7 @@ async def main_loop():
 
         assert not os.path.exists(fn)
 
-        in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si"])
+        in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si", "data"])
 
         my_var = a + 1
 

@@ -56,10 +56,20 @@ $KAFKA_HOME/bin/kafka-topics.sh --alter --topic=test_pcap --zookeeper 172.17.0.1
 # Start Jupyter to run the graph preprocessing
 docker run --gpus=all --rm -ti -p 8889:8888 -p 8787:8787 -p 8786:8786 -v $PWD:/rapids/notebooks/host rapidsai/rapidsai-nightly:cuda10.2-runtime-ubuntu18.04-py3.8 /bin/bash
 
+# Start the viz container
+docker-compose run --rm devel
+
 # Run viz generation pipeline then run jupyter notebook noteboks/network_graph_viz_frames_clean.ipynb. Afterwards run:
-sudo chown -R mdemoret:mdemoret noteboks/output/ && rm /home/mdemoret/Repos/rapids/rapids-js-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label/* && cp -r noteboks/output/* /home/mdemoret/Repos/rapids/rapids-js-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label/
+sudo chown -R mdemoret:mdemoret noteboks/output/ && rm /home/mdemoret/Repos/rapids/node-rapids-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label/* && cp -r noteboks/output/* /home/mdemoret/Repos/rapids/node-rapids-dev/modules/demo/graph/data/network_graph_viz_frames_multi_label/
 
 # Then run the viz with (from the rapids-js container)
-yarn demo modules/demo/graph --nodes=$(echo data/network_graph_viz_frames_multi_label/{0..199}.0.nodes.csv | sed 's/ /,/g')\
- --edges=$(echo data/network_graph_viz_frames_multi_label/{0..199}.0.edges.csv | sed 's/ /,/g')\
+export FILE_COUNT=199
+yarn demo modules/demo/graph --nodes=$(echo data/network_graph_viz_frames_multi_label/{0..${FILE_COUNT}}.0.nodes.csv | sed 's/ /,/g')\
+ --edges=$(echo data/network_graph_viz_frames_multi_label/{0..${FILE_COUNT}}.0.edges.csv | sed 's/ /,/g')\
  --params='"autoCenter":1,"strongGravityMode":0,"jitterTolerance":0.01,"scalingRatio":1,"gravity":5,"controlsVisible":0,"outboundAttraction":1,"linLogMode":1' --delay=100 --width=1920 --height=1080
+
+yarn demo modules/demo/graph --nodes=$(echo data/network_graph_viz_frames_multi_label/{0..159}.0.nodes.csv | sed 's/ /,/g')\
+ --edges=$(echo data/network_graph_viz_frames_multi_label/{0..159}.0.edges.csv | sed 's/ /,/g')\
+ --params='"autoCenter":1,"strongGravityMode":0,"jitterTolerance":0.01,"scalingRatio":1,"gravity":5,"controlsVisible":0,"outboundAttraction":1,"linLogMode":1' --delay=100 --width=1920 --height=1080
+
+ --nodes=$(echo data/network_graph_viz_frames_multi_label_Bartley1/{0..199}.0.nodes.csv | sed 's/ /,/g') --edges=$(echo data/network_graph_viz_frames_multi_label_Bartley1/{0..199}.0.edges.csv | sed 's/ /,/g') --params='"autoCenter":1,"strongGravityMode":0,"jitterTolerance":0.01,"scalingRatio":1,"gravity":5,"controlsVisible":0,"outboundAttraction":1,"linLogMode":1' --delay=100 --width=1920 --height=1080

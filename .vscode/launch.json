@@ -25,9 +25,9 @@
             "-n",
             "./network",
             "-i",
-            "/home/mdemoret/Repos/rapids/cyber-dev/.tmp/dataset2/pcap_dump_2_pre_class-model2.json",
+            "/home/mdemoret/Repos/rapids/cyber-dev/.tmp/dataset4/pcap_dump_pre_class.json",
             "-j",
-            "20",
+            "1200",
             "-t",
             "test_pcap"
          ],
@@ -120,8 +120,8 @@
          "env": {
             "CLX_INFERENCE_PIPELINE": "triton_onnx",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
-            "CLX_MODEL_SEQ_LENGTH": "128",
-            "CLX_MODEL_MAX_BATCH_SIZE": "8",
+            "CLX_MODEL_SEQ_LENGTH": "256",
+            "CLX_MODEL_MAX_BATCH_SIZE": "2",
             // "PYTHONASYNCIODEBUG": "1",
          },
          "args": []
