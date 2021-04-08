@@ -104,7 +104,7 @@
             "CLX_INFERENCE_PIPELINE": "triton",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
             "CLX_MODEL_SEQ_LENGTH": "256",
-            "CLX_MODEL_MAX_BATCH_SIZE": "8",
+            "CLX_MODEL_MAX_BATCH_SIZE": "32",
             // "PYTHONASYNCIODEBUG": "1",
          },
          "args": []
@@ -138,7 +138,7 @@
             "CLX_INFERENCE_PIPELINE": "tensorrt",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
             "CLX_MODEL_SEQ_LENGTH": "256",
-            "CLX_MODEL_MAX_BATCH_SIZE": "8",
+            "CLX_MODEL_MAX_BATCH_SIZE": "32",
          },
          "args": []
       },

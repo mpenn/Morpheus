@@ -1,7 +1,7 @@
 name: "mini_bert_trt"
 platform: "tensorrt_plan"
-max_batch_size: 8
-default_model_filename: "mini_bert.engine"
+max_batch_size: 32
+default_model_filename: "mini_bert_b1-8_b1-16_b1-32.engine"
 
 input [
   {
@@ -24,7 +24,7 @@ output [
 ]
 
 dynamic_batching { 
-  preferred_batch_size: [ 1, 4, 8 ]
+  preferred_batch_size: [ 1, 4, 8, 12, 16, 20, 24, 28, 32 ]
   max_queue_delay_microseconds: 50000
 }
 
@@ -32,6 +32,6 @@ instance_group [
   {
     count: 1
     kind: KIND_GPU
-    profile: ["0"]
+    profile: ["2"]
   }
 ]

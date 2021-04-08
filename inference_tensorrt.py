@@ -1,8 +1,11 @@
 import asyncio
 import os
+
+from tornado.ioloop import IOLoop
+from pipeline import InferenceStage
 import typing
 from tqdm import tqdm
-from request import MultiRequest, MultiResponse, ResponseData
+from request import MultiInferenceMessage, MultiRequest, MultiResponse, ResponseData, ResponseMemory
 import queue
 import torch
 from torch.utils.dlpack import from_dlpack
@@ -47,7 +50,7 @@ def onnx_to_engine(runtime, onnx_file):
 
             # Create the optimization files
             prev_batch_size = 0
-            batch_sizes = [8]
+            batch_sizes = [8, 16, 32]
             for batch_size in sorted(batch_sizes):
                 profile = builder.create_optimization_profile()
 
@@ -71,7 +74,6 @@ def onnx_to_engine(runtime, onnx_file):
             with open(matching_engine, "wb") as f:
                 f.write(serialized_engine)
 
-
             return engine
 
 
@@ -87,7 +89,7 @@ def build_engine(runtime, model_file):
         return onnx_to_engine(runtime, model_file)
 
 
-def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
+def inference_worker(loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
 
     # pyc_dev = pycuda.autoinit.device
     # pyc_ctx = pyc_dev.retain_primary_context()
@@ -136,8 +138,12 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
         # stream = cuda.Stream()
         stream = cp.cuda.Stream(non_blocking=True)
 
+        stream.use()
+
         input_nbytes_max = 0
         output_nbytes_max = 0
+        output_shape_max = None
+        output_dtype = None
         max_profile = 0
         num_binding_per_profile = engine.num_bindings // engine.num_optimization_profiles
 
@@ -171,8 +177,8 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
             assert context.all_binding_shapes_specified
 
             # Calc the output
-            prof_out_nbytes = trt.volume(
-                context.get_binding_shape(get_output_binding(idx))) * engine.get_binding_dtype(get_output_binding(idx)).itemsize
+            prof_out_nbytes = trt.volume(context.get_binding_shape(get_output_binding(idx))) * engine.get_binding_dtype(
+                get_output_binding(idx)).itemsize
 
             if (prof_in_nbytes > input_nbytes_max):
                 input_nbytes_max = prof_in_nbytes
@@ -184,26 +190,37 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
 
             # Set the max size so we can determine the output max size
             for i in range(num_inputs):
-                context.set_binding_shape(get_binding(locked_profile, i),
-                                          engine.get_profile_shape(profile_index=locked_profile, binding=get_binding(locked_profile, i))[2])
+                context.set_binding_shape(
+                    get_binding(locked_profile, i),
+                    engine.get_profile_shape(profile_index=locked_profile, binding=get_binding(locked_profile, i))[2])
 
             assert context.all_binding_shapes_specified
 
-            input_nbytes_max = trt.volume(context.get_binding_shape(
-                get_binding(locked_profile, 0))) * engine.get_binding_dtype(
-                    get_binding(locked_profile, 0)).itemsize
-            output_nbytes_max = trt.volume(
-                context.get_binding_shape(get_output_binding(locked_profile))) * engine.get_binding_dtype(get_output_binding(locked_profile)).itemsize
+            input_nbytes_max = trt.volume(context.get_binding_shape(get_binding(locked_profile, 0))) * engine.get_binding_dtype(
+                get_binding(locked_profile, 0)).itemsize
+
+            output_shape_max = context.get_binding_shape(get_output_binding(locked_profile))
+            output_dtype = engine.get_binding_dtype(get_output_binding(locked_profile))
+            output_nbytes_max = trt.volume(output_shape_max) * output_dtype.itemsize
+
+            # Convert to usable types
+            output_shape_max = tuple(output_shape_max)
+            output_dtype = trt.nptype(output_dtype)
 
         # Allocate device memory for inputs.
         # d_inputs = [cuda.mem_alloc(input_nbytes_max) for _ in range(3)]
         d_inputs = [cp.cuda.alloc(input_nbytes_max) for _ in range(num_inputs)]
+
+        # Set segment IDs to 0 since we never actually use this input
+        d_inputs[1].memset(0, input_nbytes_max)
 
         # Allocate output buffer by querying the size from the context. This may be different for different input shapes.
         # h_output = cuda.pagelocked_empty(tuple(context.get_binding_shape(3)), dtype=np.float32)
         # d_output = cuda.mem_alloc(h_output.nbytes)
         h_output = cp.cuda.alloc_pinned_memory(output_nbytes_max)
         d_output = cp.cuda.alloc(h_output.mem.size)
+
+        d_output.memset(0, output_nbytes_max)
 
         # Stores the best profile for the batch size
         previous_bs = 0
@@ -213,29 +230,30 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
         stream.record(prev_event)
 
         if (ready_event is not None):
-            loop.asyncio_loop.call_soon_threadsafe(ready_event.set)
+            loop.add_callback(ready_event.set)
+            # loop.asyncio_loop.call_soon_threadsafe(ready_event.set)
 
         while True:
 
             # Get the next work item
-            message: typing.Tuple[MultiRequest, asyncio.Future] = inf_queue.get(block=True)
+            message: typing.Tuple[MultiInferenceMessage, asyncio.Future] = inf_queue.get(block=True)
 
             batch = message[0]
             fut = message[1]
 
-            def infer_callback(f):
-                def tmp(r):
-                    f.set_result(
-                        MultiResponse(
-                            data=ResponseData(count=batch.count,
-                                              probs=cp.zeros((batch.count, 1), dtype=cp.int32),
-                                              input_str=batch.input_str,
-                                              timestamp=batch.timestamp),
-                            offset=0,
-                            count=batch.count,
-                        ))
+            # def infer_callback(f):
+            #     def tmp(r):
+            #         f.set_result(
+            #             MultiResponse(
+            #                 data=ResponseData(count=batch.count,
+            #                                   probs=cp.zeros((batch.count, 1), dtype=cp.int32),
+            #                                   input_str=batch.input_str,
+            #                                   timestamp=batch.timestamp),
+            #                 offset=0,
+            #                 count=batch.count,
+            #             ))
 
-                loop.asyncio_loop.call_soon_threadsafe(tmp, None)
+            #     loop.asyncio_loop.call_soon_threadsafe(tmp, None)
 
             batch_size = batch.count
 
@@ -276,12 +294,10 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
             # cuda.memcpy_dtod_async(d_inputs[2], int(batch.input_mask.data.ptr), batch.input_mask.nbytes, stream)
 
             assert batch.input_ids.nbytes <= input_nbytes_max
-            assert batch.segment_ids.nbytes <= input_nbytes_max
             assert batch.input_mask.nbytes <= input_nbytes_max
 
             if (len(d_inputs) == 3):
                 d_inputs[0].copy_from_device_async(batch.input_ids.data, batch.input_ids.nbytes, stream=stream)
-                d_inputs[1].copy_from_device_async(batch.segment_ids.data, batch.segment_ids.nbytes, stream=stream)
                 d_inputs[2].copy_from_device_async(batch.input_mask.data, batch.input_mask.nbytes, stream=stream)
             elif (len(d_inputs) == 2):
                 d_inputs[0].copy_from_device_async(batch.input_ids.data, batch.input_ids.nbytes, stream=stream)
@@ -306,19 +322,19 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
             # stream.record(prev_event)
 
             # cuda.memcpy_dtoh_async(h_output, d_output, stream)
-            d_output.copy_to_host_async(c_void_p(h_output.ptr), h_output.mem.size, stream=stream)
+            # d_output.copy_to_host_async(c_void_p(h_output.ptr), h_output.mem.size, stream=stream)
+
+            logits = cp.ndarray(shape=output_shape_max, dtype=output_dtype, memptr=d_output)[:batch_size, :]
+
+            # probs = 1.0 / (1.0 + cp.exp(-logits))
+            probs = logits
 
             stream.synchronize()
 
-            fut.set_result(
-                MultiResponse(
-                    data=ResponseData(count=batch.count,
-                                      probs=cp.zeros((batch.count, 1), dtype=cp.int32),
-                                      input_str=batch.input_str,
-                                      timestamp=batch.timestamp),
-                    offset=0,
-                    count=batch.count,
-                ))
+            fut.set_result(ResponseMemory(
+                count=probs.shape[0],
+                probs=probs,
+            ))
             # infer_callback(fut)
 
             # stream.add_callback(infer_callback, fut)
@@ -326,3 +342,12 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_
             # stream.synchronize()
 
             # stream.launch_host_func(infer_callback, fut)
+
+
+class TensorRTInferenceStage(InferenceStage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+    def _get_inference_fn(self) -> typing.Callable:
+
+        return inference_worker

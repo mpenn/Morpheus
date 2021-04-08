@@ -121,7 +121,8 @@ if __name__ == '__main__':
     elif (c.general.pipeline == "pytorch"):
         from inference_pytorch import inference_worker
     elif (c.general.pipeline == "tensorrt"):
-        from inference_tensorrt import inference_worker
+        from inference_tensorrt import TensorRTInferenceStage
+        pipeline.add_stage(TensorRTInferenceStage(c))
     elif (c.general.pipeline == "triton_onnx"):
         from inference_triton_onnx import inference_worker
     else:

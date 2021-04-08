@@ -676,6 +676,57 @@ class InferenceStage(Stage):
         x.set_meta("ts_" + self.name, curr_time)
 
 
+class WriteClassificationStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._seq_length = c.model.seq_length
+        self._vocab_hash_file = c.model.vocab_hash_file
+
+    @property
+    def name(self) -> str:
+        return "write_classification"
+
+    def pre_process_batch(self, x: MultiMessage):
+
+        # Set the stride to 75%. Works well with powers of 2
+        stride = self._seq_length // 2
+        stride = stride + stride // 2
+
+        tokenized = tokenize_text_series(cudf.Series(x.data_col), self._seq_length, stride, self._vocab_hash_file)
+
+        # Create the inference memory. Keep in mind count here could be > than input count
+        memory = InferenceMemory(count=tokenized.input_ids.shape[0],
+                                 input_ids=tokenized.input_ids,
+                                 input_mask=tokenized.input_mask,
+                                 seq_ids=tokenized.segment_ids)
+
+        infer_message = MultiInferenceMessage(meta=x.meta,
+                                              mess_offset=x.mess_offset,
+                                              mess_count=x.mess_count,
+                                              memory=memory,
+                                              offset=0,
+                                              count=memory.count)
+
+        return infer_message
+
+    async def _build(self, input_stream: Stream) -> Stream:
+
+        stream = input_stream.async_map(self.pre_process_batch, executor=self._pipeline.thread_pool)
+
+        return stream
+
+    def post_timestamps(self, x: MultiInferenceMessage):
+
+        curr_time = get_time_ms()
+
+        # # Get IDs
+        # ids = x.id_list
+
+        # deltas = [curr_time - self._timestamps.pop(i) for i in ids]
+
+        x.set_meta("ts_" + self.name, curr_time)
+
 class Pipeline():
     def __init__(self, c: Config):
 
@@ -690,7 +741,7 @@ class Pipeline():
 
         self._source_stream: Source = None
 
-        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     @property
     def thread_pool(self):
