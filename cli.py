@@ -222,6 +222,39 @@ def buffer(ctx: click.Context, **kwargs):
 
     return stage
 
+@pipeline.command(short_help="Delay results")
+@click.option('--duration', type=str, help="Time to delay messages in the pipeline. Follows the pandas interval format")
+@click.pass_context
+def delay(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from morpheus.pipeline.general_stages import DelayStage
+
+    stage = DelayStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+@pipeline.command(short_help="Queue results until the previous stage is complete, then dump entire queue into pipeline. Useful for testing stages independently. Requires finite source such as `from-file`")
+@click.pass_context
+def trigger(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from morpheus.pipeline.general_stages import TriggerStage
+
+    stage = TriggerStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
 
 @pipeline.command(short_help="Deserialize source data from JSON")
 @click.pass_context
@@ -270,6 +303,22 @@ def inf_triton(ctx: click.Context, **kwargs):
     from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
 
     stage = TritonInferenceStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+@pipeline.command(short_help="Perform a no-op inference for testing")
+@click.pass_context
+def inf_identity(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from morpheus.pipeline.inference.inference_identity import IdentityInferenceStage
+
+    stage = IdentityInferenceStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 

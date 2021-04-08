@@ -12,6 +12,7 @@ import threading
 import json
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 import cupy as cp
+import morpheus.utils.async_map
 
 def get_time_ms():
     return round(time.time() * 1000)
@@ -31,6 +32,48 @@ class BufferStage(Stage):
 
     async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
         return input_stream[0].buffer(self._buffer_count), input_stream[1]
+
+class DelayStage(Stage):
+    def __init__(self, c: Config, duration: str):
+        super().__init__(c)
+
+        self._duration = duration
+
+    @property
+    def name(self) -> str:
+        return "delay"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+        return input_stream[0].time_delay(self._duration), input_stream[1]
+
+class TriggerStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+    @property
+    def name(self) -> str:
+        return "trigger"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+
+        stream = input_stream[0]
+
+        collector = stream.collect()
+
+        def flush_input(_: Stream):
+            collector.flush()
+
+        stream.add_done_callback(flush_input)
+
+        stream = collector.flatten()
+
+        return stream, input_stream[1]
 
 
 class MonitorStage(Stage):
@@ -63,11 +106,12 @@ class MonitorStage(Stage):
 
     async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-        self._pipeline._source_stage.add_done_callback(self._refresh_progress)
+        # self._pipeline._source_stage.add_done_callback(self._refresh_progress)
+        input_stream[0].add_done_callback(self._refresh_progress)
 
         return input_stream
 
-    def _refresh_progress(self):
+    def _refresh_progress(self, _):
         self._progress.refresh()
 
     def _progress_sink(self, x):

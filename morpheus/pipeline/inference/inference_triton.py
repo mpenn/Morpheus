@@ -227,14 +227,15 @@ class TritonInference:
         mem: ShmWrapper = self._mem_pool.borrow()
 
         def infer_callback(f, m, result, error):
+
+            logits = result.as_numpy("output")
+
+            probs = 1.0 / (1.0 + np.exp(-logits))
+
             def tmp(r, e):
                 if (e):
                     f.set_exception(e)
                 else:
-                    logits = r.as_numpy("output")
-
-                    probs = 1.0 / (1.0 + np.exp(-logits))
-
                     f.set_result(ResponseMemory(
                         count=probs.shape[0],
                         probs=cp.array(probs),

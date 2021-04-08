@@ -103,6 +103,62 @@ class SourceStage(StreamWrapper):
 
         pass
 
+# @Stream.register_api()
+# class source_done(Stream):
+#     """ Apply a function to every element in the stream
+
+#     Parameters
+#     ----------
+#     func: callable
+#     *args :
+#         The arguments to pass to the function.
+#     **kwargs:
+#         Keyword arguments to pass to func
+
+#     Examples
+#     --------
+#     >>> source = Stream()
+#     >>> source.map(lambda x: 2*x).sink(print)
+#     >>> for i in range(5):
+#     ...     source.emit(i)
+#     0
+#     2
+#     4
+#     6
+#     8
+#     """
+#     def __init__(self, upstream, func, *args, **kwargs):
+#         self.func = func
+#         # this is one of a few stream specific kwargs
+#         stream_name = kwargs.pop('stream_name', None)
+#         self.executor = kwargs.pop('executor', None)
+#         self.kwargs = kwargs
+#         self.args = args
+
+#         Stream.__init__(self, upstream, stream_name=stream_name, ensure_io_loop=True)
+
+#     @gen.coroutine
+#     def update(self, x, who=None, metadata=None):
+
+#         if (metadata is not None and any(map(lambda x: x.get("complete", False)), metadata)):
+#             return self._emit(x, metadata=metadata)
+#         else:
+
+
+#         try:
+#             self._retain_refs(metadata)
+#             r = self.func(x, *self.args, **self.kwargs)
+#             result = yield r
+#         except Exception as e:
+#             # logger.exception(e)
+#             print(e)
+#             raise
+#         else:
+#             emit = yield self._emit(result, metadata=metadata)
+
+#             # return emit
+#         finally:
+#             self._release_refs(metadata)
 
 class Stage(StreamWrapper):
     def __init__(self, c: Config):
@@ -138,11 +194,17 @@ class Stage(StreamWrapper):
         if (self._post_sink_fn is not None):
             self._output_stream.sink(self._post_sink_fn)
 
+        self._output_stream.add_done_callback(self._on_complete)
+
         return output
 
     async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
         pass
+
+    def _on_complete(self, stream: Stream):
+
+        tqdm.write("Stage Complete: {}".format(self.name))
 
 
 class Pipeline():

@@ -15,6 +15,8 @@ import json
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 import cupy as cp
 import asyncio
+import numpy as np
+
 
 class InferenceStage(Stage):
     def __init__(self, c: Config):
@@ -78,7 +80,9 @@ class InferenceStage(Stage):
 
         return stream, MultiResponseMessage
 
-    def _split_batches(self, x: MultiInferenceMessage):
+    def _split_batches(self, x: MultiInferenceMessage) -> typing.List[MultiInferenceMessage]:
+
+        # return [x]
 
         out_batches = []
 
@@ -108,7 +112,9 @@ class InferenceStage(Stage):
 
         for start, stop in out_batches:
 
-            out_resp.append(x.get_slice(start, stop))
+            
+
+            out_resp.append()
 
             # self._progress.update(out_resp[-1].mess_count)
 
@@ -140,6 +146,13 @@ class InferenceStage(Stage):
         # Convert a MultiResponse into a MultiResponseMessage
         in_message = x[0]
         out_message = x[1]
+
+        # return MultiResponseMessage(meta=in_message[0].meta,
+        #                             mess_offset=in_message[0].mess_offset,
+        #                             mess_count=in_message[0].mess_count,
+        #                             memory=out_message[0],
+        #                             offset=0,
+        #                             count=out_message[0].count)
 
         assert len(in_message) == len(out_message)
 

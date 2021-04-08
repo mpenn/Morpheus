@@ -1,6 +1,10 @@
+from time import time
 from streamz import Stream
+from streamz.core import convert_interval
 from tornado import gen
+import asyncio
 
+from tornado.queues import Queue
 
 @Stream.register_api()
 class async_map(Stream):
@@ -50,6 +54,7 @@ class async_map(Stream):
     @gen.coroutine
     def update(self, x, who=None, metadata=None):
         try:
+            self._retain_refs(metadata)
             r = self.func(x, *self.args, **self.kwargs)
             result = yield r
         except Exception as e:
@@ -57,4 +62,41 @@ class async_map(Stream):
             print(e)
             raise
         else:
-            return self._emit(result, metadata=metadata)
+            emit = yield self._emit(result, metadata=metadata)
+
+            # return emit
+        finally:
+            self._release_refs(metadata)
+
+
+@Stream.register_api()
+class time_delay(Stream):
+    """ Add a time delay to results """
+    _graphviz_shape = 'octagon'
+
+    def __init__(self, upstream, interval, **kwargs):
+        self.interval = convert_interval(interval)
+        self.queue = Queue()
+
+        kwargs["ensure_io_loop"] = True
+        Stream.__init__(self, upstream,**kwargs)
+
+        self.loop.add_callback(self.cb)
+
+    @gen.coroutine
+    def cb(self):
+        while True:
+            q_time, x, metadata = yield self.queue.get()
+            
+            duration = self.interval - (time() - q_time)
+
+            if duration > 0:
+                yield gen.sleep(duration)
+
+            yield self._emit(x, metadata=metadata)
+            
+            self._release_refs(metadata)
+
+    def update(self, x, who=None, metadata=None):
+        self._retain_refs(metadata)
+        return self.queue.put((time(), x, metadata))
