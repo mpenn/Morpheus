@@ -128,53 +128,17 @@ class SourceStage(StreamWrapper):
         pass
 
 
-class FileSourceStage(SourceStage):
-    def __init__(self, c: Config):
-        super().__init__(c)
-
-        self._filename = ".tmp/dataset4/pcap_dump_augmented_0delay.json"
-        self._input_count = None
-
-    @property
-    def name(self) -> str:
-        return "File Source"
-
-    @property
-    def input_count(self) -> int:
-        # Return None for no max intput count
-        return self._input_count
-
-    async def _build(self) -> Stream:
-        def json_to_cudf(in_str: typing.List[str]):
-
-            # This method is slow but it works well
-            # df = cudf.from_pandas(pd.DataFrame.from_records([json.loads(x) for x in in_str]))
-
-            df = json_str_records_to_cudf("".join(in_str))
-            return df
-
-        # Read the number of lines for progress reporting
-        # TODO: Make this async
-        self._input_count = sum(1 for i in open(self._filename, 'rb'))
-
-        source: Source = Stream.from_textfile(self._filename, asynchronous=True, loop=IOLoop.current()).rate_limit(
-            1 / 10000).timed_window(0.1).filter(lambda x: len(x) > 0)
-
-        source = source.async_map(json_to_cudf, executor=self._pipeline.thread_pool)
-
-        return source
-
-
 class FileSourceStage2(SourceStage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, filename: str):
         super().__init__(c)
 
-        self._filename = ".tmp/dataset4/pcap_dump_augmented_0delay.json"
+        self._filename = filename
+        self._batch_size = c.pipeline_batch_size
         self._input_count = None
 
     @property
     def name(self) -> str:
-        return "File Source"
+        return "from-file"
 
     @property
     def input_count(self) -> int:
@@ -198,7 +162,7 @@ class FileSourceStage2(SourceStage):
         return source
 
     def _generate_frames(self, df):
-        for x in df.groupby(np.arange(len(df)) // 256):
+        for x in df.groupby(np.arange(len(df)) // self._batch_size):
             y = x[1].reset_index(drop=True)
 
             yield y
@@ -208,19 +172,25 @@ class FileSourceStage2(SourceStage):
 
 
 class KafkaSourceStage(SourceStage):
-    def __init__(self, c: Config):
+    def __init__(self,
+                 c: Config,
+                 bootstrap_servers: str,
+                 input_topic: str = "test_pcap",
+                 group_id: str = "custreamz",
+                 use_dask: bool = False,
+                 poll_interval: str = "10millis"):
         super().__init__(c)
 
-        self._consumer_conf = {
-            'bootstrap.servers': c.kafka.bootstrap_servers, 'group.id': 'custreamz', 'session.timeout.ms': "60000"
-        }
+        self._consumer_conf = {'bootstrap.servers': bootstrap_servers, 'group.id': group_id, 'session.timeout.ms': "60000"}
 
-        self._input_topic = c.kafka.input_topic
-        self._use_dask = False
+        self._input_topic = input_topic
+        self._use_dask = use_dask
+        self._poll_interval = poll_interval
+        self._max_batch_size = c.pipeline_batch_size
 
     @property
     def name(self) -> str:
-        return "Kafka Source"
+        return "from-kafka"
 
     async def _build(self) -> Stream:
 
@@ -235,9 +205,9 @@ class KafkaSourceStage(SourceStage):
                                                        asynchronous=True,
                                                        dask=True,
                                                        engine="cudf",
-                                                       poll_interval="10millis",
+                                                       poll_interval=self._poll_interval,
                                                        loop=IOLoop.current(),
-                                                       max_batch_size=1000)
+                                                       max_batch_size=self._max_batch_size)
         else:
             source: Stream = Stream.from_kafka_batched(self._input_topic,
                                                        self._consumer_conf,
@@ -246,9 +216,9 @@ class KafkaSourceStage(SourceStage):
                                                        asynchronous=True,
                                                        dask=False,
                                                        engine="cudf",
-                                                       poll_interval="10millis",
+                                                       poll_interval=self._poll_interval,
                                                        loop=IOLoop.current(),
-                                                       max_batch_size=1000)
+                                                       max_batch_size=self._max_batch_size)
 
         # Always gather here (no-op if not using dask)
         return source.gather()
@@ -263,51 +233,65 @@ class Stage(StreamWrapper):
 
         self._timestamps: typing.Dict[int, int] = {}
 
-    async def build(self, input_stream: Stream) -> Stream:
+    @abstractmethod
+    def accepted_types(self) -> typing.Tuple:
+        pass
+
+    async def build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
         assert input_stream is not None, "Sources must have input streams"
+        
+        # Check the type. Convert Any to object
+        if (not issubclass(input_stream[1], tuple(map(lambda x: object if x is typing.Any else x, self.accepted_types())))):
+            raise RuntimeError("The {} stage cannot handle input of {}. Accepted input types: {}".format(
+                self.name, input_stream[1], self.accepted_types()))
 
-        self._input_stream = input_stream
+        self._input_stream = input_stream[0]
 
         if (self._pre_sink_fn is not None):
             self._input_stream.sink(self._pre_sink_fn)
 
-        self._output_stream = await self._build(input_stream)
+        output = await self._build(input_stream)
+
+        self._output_stream = output[0]
 
         if (self._post_sink_fn is not None):
             self._output_stream.sink(self._post_sink_fn)
 
-        return self._output_stream
+        return output
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
         pass
 
 
 class BufferStage(Stage):
-    def __init__(self, c: Config, buffer_count: int = 1000):
+    def __init__(self, c: Config, count: int = 1000):
         super().__init__(c)
 
-        self._buffer_count = buffer_count
+        self._buffer_count = count
 
     @property
     def name(self) -> str:
         return "buffer"
 
-    async def _build(self, input_stream: Stream) -> Stream:
-        return input_stream.buffer(self._buffer_count)
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+        return input_stream[0].buffer(self._buffer_count), input_stream[1]
 
 
 class TqdmStage(Stage):
     def __init__(self,
                  c: Config,
-                 progress_desc: str = "Progress",
+                 description: str = "Progress",
                  smoothing: int = 0.05,
                  unit="messages",
                  determine_count_fn: typing.Callable[[typing.Any], int] = None):
         super().__init__(c)
 
-        self._progress = tqdm(desc=progress_desc,
+        self._progress = tqdm(desc=description,
                               smoothing=smoothing,
                               dynamic_ncols=True,
                               unit=unit,
@@ -321,9 +305,12 @@ class TqdmStage(Stage):
 
     @property
     def name(self) -> str:
-        return "progress"
+        return "monitor"
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
         self._pipeline._source_stage.add_done_callback(self._refresh_progress)
 
@@ -388,6 +375,9 @@ class DeserializeStage(Stage):
     def name(self) -> str:
         return "deserialize"
 
+    def accepted_types(self) -> typing.Tuple:
+        return (cudf.DataFrame, )
+
     def pre_timestamps(self, x: cudf.DataFrame):
 
         curr_time = get_time_ms()
@@ -422,9 +412,9 @@ class DeserializeStage(Stage):
 
         return MultiMessage(meta=meta, mess_offset=0, mess_count=len(x_pd))
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-        return input_stream.async_map(self.process_dataframe, executor=self._pipeline.thread_pool)
+        return input_stream[0].async_map(self.process_dataframe, executor=self._pipeline.thread_pool), MultiMessage
 
     def post_timestamps(self, x: MultiMessage):
 
@@ -443,12 +433,15 @@ class PreprocessStage(Stage):
         super().__init__(c)
 
         self._post_sink_fn = self.post_timestamps
-        self._seq_length = c.model.seq_length
-        self._vocab_hash_file = c.model.vocab_hash_file
+        self._seq_length = c.model_seq_length
+        self._vocab_hash_file = c.model_vocab_hash_file
 
     @property
     def name(self) -> str:
         return "preprocess"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (MultiMessage, )
 
     def pre_process_batch(self, x: MultiMessage):
 
@@ -473,11 +466,11 @@ class PreprocessStage(Stage):
 
         return infer_message
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-        stream = input_stream.async_map(self.pre_process_batch, executor=self._pipeline.thread_pool)
+        stream = input_stream[0].async_map(self.pre_process_batch, executor=self._pipeline.thread_pool)
 
-        return stream
+        return stream, MultiInferenceMessage
 
     def post_timestamps(self, x: MultiInferenceMessage):
 
@@ -496,37 +489,52 @@ class InferenceStage(Stage):
         super().__init__(c)
 
         self._post_sink_fn = self.post_timestamps
-        self._seq_length = c.model.seq_length
+        self._seq_length = c.model_seq_length
 
         self._thread = None
-        self._inf_queue = inf_queue = queue.Queue()
+        self._inf_queue = queue.Queue()
 
-        self._max_batch_size = c.model.max_batch_size
+        self._max_batch_size = c.model_max_batch_size
 
-        self._output_stream: Stream = Stream(loop=IOLoop.current(), asynchronous=True, ensure_io_loop=True)
+        # self._progress = tqdm(desc="Inferece",
+        #                       smoothing=0.001,
+        #                       dynamic_ncols=True,
+        #                       unit="inf",
+        #                       mininterval=1.0,
+        #                       maxinterval=2.0)
 
     @property
     def name(self) -> str:
         return "inference"
 
+    def accepted_types(self) -> typing.Tuple:
+        return (MultiInferenceMessage, )
+
     @abstractmethod
     def _get_inference_fn(self) -> typing.Callable:
         pass
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-        ready_event = asyncio.Event()
+        wait_events = []
 
-        threading.Thread(target=self._get_inference_fn(), daemon=True, args=(
-            IOLoop.current(),
-            self._inf_queue,
-            ready_event,
-        )).start()
+        for i in range(1):
+            ready_event = asyncio.Event()
 
-        # Wait for the inference thread to be ready
-        await ready_event.wait()
+            threading.Thread(target=self._get_inference_fn(),
+                             daemon=True,
+                             args=(
+                                 IOLoop.current(),
+                                 self._inf_queue,
+                                 ready_event,
+                             )).start()
 
-        stream = input_stream
+            # Wait for the inference thread to be ready
+            wait_events.append(ready_event.wait())
+
+        asyncio.gather(*wait_events, return_exceptions=True)
+
+        stream = input_stream[0]
 
         # First convert to manageable batches. If the batches are too large, we cant process them
         stream = stream.async_map(self._split_batches, executor=self._pipeline.thread_pool)
@@ -536,35 +544,15 @@ class InferenceStage(Stage):
 
         stream = stream.async_map(self._convert_response, executor=self._pipeline.thread_pool)
 
-        return stream
+        return stream, MultiResponseMessage
 
     def _split_batches(self, x: MultiInferenceMessage):
 
         out_batches = []
 
-        start_idx = 0
-        curr_idx = 0
-        curr_batch_count = 0
-
         id_array = cp.concatenate([cp.array([-1]), x.seq_ids[:, 0], cp.array([-1])])
 
         diff_ids = cp.where(id_array[1:] != id_array[:-1])[0]
-
-        # id_counts = (diff_ids[1:] - diff_ids[:-1]).tolist()
-
-        # # Loop over each incoming message and split
-        # for count in id_counts:
-        #     if (curr_batch_count + count > self._max_batch_size):
-        #         assert curr_batch_count > 0, "Otherwise we need to split even a single id into multiple"
-
-        #         # Build current
-        #         assert start_idx != curr_idx, "Cant have 0 elements"
-
-        #         out_batches.append((start_idx, curr_idx))
-
-        #         start_idx = curr_idx + 1
-
-        #     curr_idx = curr_idx + count
 
         diff_ids = diff_ids.tolist()
 
@@ -572,9 +560,6 @@ class InferenceStage(Stage):
         tail = 0
 
         for i in range(1, len(diff_ids)):
-
-            head_idx = diff_ids[head]
-            tail_idx = diff_ids[i] - 1
 
             poss_count = diff_ids[i] - diff_ids[head]
 
@@ -593,6 +578,8 @@ class InferenceStage(Stage):
 
             out_resp.append(x.get_slice(start, stop))
 
+            # self._progress.update(out_resp[-1].mess_count)
+
         assert len(out_resp) > 0
 
         return out_resp
@@ -605,6 +592,8 @@ class InferenceStage(Stage):
 
         for y in x:
             fut = loop.create_future()
+
+            # self._progress.update(n=y.mess_count)
 
             self._inf_queue.put((y, fut))
 
@@ -678,12 +667,17 @@ class InferenceStage(Stage):
 
 
 class AddClassificationsStage(Stage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, threshold: float = 0.5):
         super().__init__(c)
+
+        self._threshold = threshold
 
     @property
     def name(self) -> str:
-        return "add_class"
+        return "add-class"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (MultiResponseMessage, )
 
     def _add_labels(self, x: MultiResponseMessage):
         # Keys
@@ -700,7 +694,7 @@ class AddClassificationsStage(Stage):
             9: 'user'
         }
 
-        probs_np = (x.probs > 0.5).astype(cp.bool).get()
+        probs_np = (x.probs > self._threshold).astype(cp.bool).get()
 
         for i, label in idx2label.items():
             x.set_meta("si_" + label, probs_np[:, i].tolist())
@@ -708,27 +702,23 @@ class AddClassificationsStage(Stage):
         # Return list of strs to write out
         return x
 
-    def write_to_file(self, x: typing.List[str]):
-        with open(self._output_file, "a") as f:
-            f.writelines(x)
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-    async def _build(self, input_stream: Stream) -> Stream:
-
-        stream = input_stream
+        stream = input_stream[0]
 
         # Convert the messages to rows of strings
         stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool)
 
         # Return input unchanged
-        return stream
+        return stream, MultiResponseMessage
 
 
 class WriteToFileStage(Stage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, output_file: str, overwrite: bool):
         super().__init__(c)
 
-        self._output_file = ".tmp/dataset4/pcap_dump_pre_class_delete.json"
-        self._overwrite = True
+        self._output_file = output_file
+        self._overwrite = overwrite
         self._ignore_columns = [r'^ID$', r'^ts_']
 
         if (os.path.exists(self._output_file)):
@@ -740,9 +730,12 @@ class WriteToFileStage(Stage):
 
     @property
     def name(self) -> str:
-        return "write_class"
+        return "to-file"
 
-    def _convert_to_json(self, x: MultiResponseMessage):
+    def accepted_types(self) -> typing.Tuple:
+        return (MultiMessage, )
+
+    def _convert_to_json(self, x: MultiMessage):
 
         # Get list of columns that pass ignore regex
         columns = list(x.meta.df.columns)
@@ -773,10 +766,10 @@ class WriteToFileStage(Stage):
         with open(self._output_file, "a") as f:
             f.writelines(x)
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
         # Convert the messages to rows of strings
-        stream = input_stream.async_map(self._convert_to_json, executor=self._pipeline.thread_pool)
+        stream = input_stream[0].async_map(self._convert_to_json, executor=self._pipeline.thread_pool)
 
         # Sink to file
         stream.sink(self.write_to_file)
@@ -786,15 +779,18 @@ class WriteToFileStage(Stage):
 
 
 class FilterDetectionsStage(Stage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, threshold: float = 0.5):
         super().__init__(c)
 
         # Probability to consider a detection
-        self._threshold = 0.5
+        self._threshold = threshold
 
     @property
     def name(self) -> str:
-        return "filter_detect"
+        return "filter"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (MultiResponseMessage, )
 
     def filter(self, x: MultiResponseMessage) -> typing.List[MultiResponseMessage]:
 
@@ -824,9 +820,9 @@ class FilterDetectionsStage(Stage):
 
         return output_list
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-        stream = input_stream
+        stream = input_stream[0]
 
         # Reduce messages to only have detections
         stream = stream.async_map(self.filter, executor=self._pipeline.thread_pool)
@@ -837,36 +833,39 @@ class FilterDetectionsStage(Stage):
         # Filter out empty message groups
         stream = stream.filter(lambda x: x.count > 0)
 
-        return stream
+        return stream, MultiResponseMessage
 
 
 class WriteToKafkaStage(Stage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, bootstrap_servers: str, output_topic: str):
         super().__init__(c)
 
-        self._kafka_conf = {'bootstrap.servers': c.kafka.bootstrap_servers}
+        self._kafka_conf = {'bootstrap.servers': bootstrap_servers}
 
-        self._output_topic = c.kafka.output_topic
+        self._output_topic = output_topic
 
     @property
     def name(self) -> str:
         return "write_kafka"
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
         # Write to kafka
-        input_stream.to_kafka(self._output_topic, self._kafka_conf)
+        input_stream[0].to_kafka(self._output_topic, self._kafka_conf)
 
         # Return input unchanged
         return input_stream
 
 
 class GenerateVizFramesStage(Stage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, out_dir: str = "./viz_frames", overwrite: bool = False):
         super().__init__(c)
 
-        self._out_dir = "./viz_frames"
-        self._overwrite = False
+        self._out_dir = out_dir
+        self._overwrite = overwrite
 
         if (os.path.exists(self._out_dir)):
             if (self._overwrite):
@@ -883,6 +882,9 @@ class GenerateVizFramesStage(Stage):
     @property
     def name(self) -> str:
         return "gen_viz"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (MultiResponseMessage, )
 
     @staticmethod
     def round_to_sec(x):
@@ -948,9 +950,9 @@ class GenerateVizFramesStage(Stage):
 
         in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si", "data"])
 
-    async def _build(self, input_stream: Stream) -> Stream:
+    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
 
-        stream = input_stream
+        stream = input_stream[0]
 
         # Convert stream to dataframes
         stream = stream.map(self._to_vis_df)  # Convert group to dataframe
@@ -982,7 +984,9 @@ class Pipeline():
 
         self._source_stream: Source = None
 
-        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=c.num_threads)
+
+        self.batch_size = c.pipeline_batch_size
 
     @property
     def thread_pool(self):
@@ -1008,16 +1012,25 @@ class Pipeline():
 
     async def build_and_start(self):
 
+        tqdm.write("====Building Pipeline====")
+
         self._source_stream = await self._source_stage.build(None)
 
         self._source_stage.add_done_callback(self._on_input_complete)
 
         # Add the ID single threaded
         current_stream = self._source_stream.map(self._add_id_col)
+        currend_stream_and_type = current_stream, cudf.DataFrame
+
+        tqdm.write("Added source: {} -> {}".format(self._source_stage.name, currend_stream_and_type[1].__name__))
 
         # Now loop over stages
         for s in self._stages:
-            current_stream = await s.build(current_stream)
+            currend_stream_and_type = await s.build(currend_stream_and_type)
+
+            tqdm.write("Added stage: {} -> {}".format(s.name, currend_stream_and_type[1].__name__))
+
+        tqdm.write("====Starting Inference====")
 
         self._source_stream.start()
 

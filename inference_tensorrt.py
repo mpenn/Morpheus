@@ -129,7 +129,7 @@ def inference_worker(loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.
     # model_file = "triton_models/bert_trt/1/triton_bert_large_256-b1_8-b1_16-b1_32.engine"
     # model_file = "triton_models/bert_trt/1/triton_bert_large_128-b8-b9.engine"
     # model_file = "triton_models/pii_onnx/1/model_10labels_256seqV3.onnx"
-    model_file = ".tmp/models_onnx/mini_bert.onnx"
+    model_file = ".tmp/models_onnx/mini_bert_128seq.onnx"
 
     with trt.Runtime(TRT_LOGGER) as runtime, \
          build_engine(runtime, model_file=model_file) as engine, \

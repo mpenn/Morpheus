@@ -177,19 +177,20 @@ def inference_worker(loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
 class TritonInference:
-    def __init__(self, c: Config):
-        self._model_name = "mini_bert_trt"
+    def __init__(self, c: Config, model_name: str, server_url: str):
+        self._model_name = model_name
+        self._server_url = server_url
 
         self._requires_seg_ids = False
 
-        self._max_batch_size = c.model.max_batch_size
-        self._seq_length = c.model.seq_length
+        self._max_batch_size = c.model_max_batch_size
+        self._seq_length = c.model_seq_length
 
     def init(self, loop: IOLoop):
 
         self._loop = loop
 
-        self.triton_client = tritonclient.InferenceServerClient(url="localhost:8001", verbose=False)
+        self.triton_client = tritonclient.InferenceServerClient(url=self._server_url, verbose=False)
 
         # To make sure no shared memory regions are registered with the server.
         self.triton_client.unregister_system_shared_memory()
@@ -304,15 +305,18 @@ class TritonInference:
 
 
 class TritonInferenceStage(InferenceStage):
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, model_name: str, server_url: str):
         super().__init__(c)
 
-        self._model_name = "mini_bert_trt"
+        self._model_name = model_name
+        self._server_url=server_url
 
         self._requires_seg_ids = False
 
-        self._worker = TritonInference(c)
+        # self._worker = TritonInference(c, model_name=model_name, server_url=server_url)
 
     def _get_inference_fn(self) -> typing.Callable:
 
-        return self._worker.main_loop
+        worker = TritonInference(Config.get(), model_name=self._model_name, server_url=self._server_url)
+
+        return worker.main_loop

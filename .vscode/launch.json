@@ -58,10 +58,10 @@
          ]
       },
       {
-         "name": "Python: Run Argparse",
+         "name": "Python: Onnx-To-TRT",
          "type": "python",
          "request": "launch",
-         "program": "${workspaceFolder}/cli_argparse.py",
+         "program": "${workspaceFolder}/cli_click.py",
          "console": "integratedTerminal",
          "justMyCode": false,
          "cwd": "${workspaceFolder}",
@@ -72,8 +72,61 @@
             "CLX_MODEL_MAX_BATCH_SIZE": "18",
          },
          "args": [
-            "--seq_length=130",
-            "--bootstrap_servers=auto",
+            "onnx-to-trt",
+            // "--help"
+            "--input_model=.tmp/models_onnx/mini_bert_128seq.onnx",
+            "--output_model=.tmp/models_onnx/mini_bert_128seq_b1-8_b1-16.engine",
+            "--batches",
+            "1",
+            "8",
+            "--batches",
+            "1",
+            "16",
+            "--seq_length=128"
+         ]
+      },
+      {
+         "name": "Python: Pipeline via Click",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/cli.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "CLX_INFERENCE_PIPELINE": "pytorch",
+            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+            "CLX_MODEL_SEQ_LENGTH": "512",
+            "CLX_MODEL_MAX_BATCH_SIZE": "16",
+         },
+         "args": [
+            "pipeline",
+            "--num_threads=4",
+            "--model_max_batch_size=32",
+            "--model_seq_length=256",
+            // "from-file",
+            // "--filename=.tmp/dataset4/pcap_dump_augmented_0delay.json",
+            "from-kafka",
+            "monitor",
+            "--description",
+            "Input Message Rate",
+            "buffer",
+            "deserialize",
+            "preprocess",
+            "buffer",
+            "inf-triton",
+            "--model_name=mini_bert_trt",
+            "--server_url=localhost:8001",
+            "monitor",
+            "--description",
+            "Inference Rate",
+            "--smoothing=0.001",
+            "--unit",
+            "inf",
+            "filter",
+            "to-kafka",
+            "--output_topic",
+            "output_topic"
          ]
       },
       {
@@ -103,7 +156,7 @@
          "env": {
             "CLX_INFERENCE_PIPELINE": "triton",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
-            "CLX_MODEL_SEQ_LENGTH": "256",
+            "CLX_MODEL_SEQ_LENGTH": "128",
             "CLX_MODEL_MAX_BATCH_SIZE": "32",
             // "PYTHONASYNCIODEBUG": "1",
          },
@@ -120,8 +173,8 @@
          "env": {
             "CLX_INFERENCE_PIPELINE": "triton_onnx",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
-            "CLX_MODEL_SEQ_LENGTH": "256",
-            "CLX_MODEL_MAX_BATCH_SIZE": "8",
+            "CLX_MODEL_SEQ_LENGTH": "128",
+            "CLX_MODEL_MAX_BATCH_SIZE": "32",
             // "PYTHONASYNCIODEBUG": "1",
          },
          "args": []
@@ -137,7 +190,7 @@
          "env": {
             "CLX_INFERENCE_PIPELINE": "tensorrt",
             "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
-            "CLX_MODEL_SEQ_LENGTH": "256",
+            "CLX_MODEL_SEQ_LENGTH": "128",
             "CLX_MODEL_MAX_BATCH_SIZE": "32",
          },
          "args": []

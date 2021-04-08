@@ -1,142 +1,391 @@
-from pipeline import AddClassificationsStage, BufferStage, FilterDetectionsStage, GenerateVizFramesStage, TqdmStage, WriteToFileStage
-from click.decorators import option
-import configargparse
-import docker
-from config import Config
+import click
+from config import Config, ConfigOnnxToTRT, auto_determine_bootstrap
+from pipeline import Pipeline
 
 DEFAULT_CONFIG = Config.default()
 
-if __name__ == '__main__':
-    p = configargparse.ArgParser(default_config_files=['/etc/app/conf.d/*.conf', '~/.my_settings'])
-    p.add('-c', '--my-config', is_config_file=True, help='config file path')
 
-    pipeline_group = p.add_argument_group(title="pipeline", description="Options related to the model")
-    pipeline_group.add_argument("--pipeline",
-                                type=str,
-                                choices=["triton", "pytorch", "tensorrt", "triton_onnx"],
-                                default=DEFAULT_CONFIG.general.pipeline,
-                                env_var='CLX_INFERENCE_PIPELINE')
+def _without_empty_args(passed_args):
+    return {k: v for k, v in passed_args.items() if v is not None}
 
-    model_group = p.add_argument_group(title="model", description="Options related to the model")
-    model_group.add_argument("--vocab_hash_file",
-                             type=str,
-                             default=DEFAULT_CONFIG.model.vocab_hash_file,
-                             env_var='CLX_MODEL_VOCAB_HASH_FILE')
-    model_group.add_argument("--seq_length", type=int, default=DEFAULT_CONFIG.model.seq_length, env_var='CLX_MODEL_SEQ_LENGTH')
-    model_group.add_argument("--max_batch_size",
-                             type=int,
-                             default=DEFAULT_CONFIG.model.max_batch_size,
-                             env_var='CLX_MODEL_MAX_BATCH_SIZE')
 
-    kafka_group = p.add_argument_group(title="kafka", description="Options related to Kafka")
-    kafka_group.add_argument("--bootstrap_servers",
-                             type=str,
-                             default=DEFAULT_CONFIG.kafka.bootstrap_servers,
-                             env_var='CLX_KAFKA_BOOTSTRAP_SERVERS')
-    kafka_group.add_argument("--input_topic", type=str, default=DEFAULT_CONFIG.kafka.input_topic, env_var='CLX_KAFKA_INPUT_TOPIC')
-    kafka_group.add_argument("--output_topic",
-                             type=str,
-                             default=DEFAULT_CONFIG.kafka.output_topic,
-                             env_var='CLX_KAFKA_OUTPUT_TOPIC')
+class DefaultGroup(click.Group):
+    def resolve_command(self, ctx, args):
+        base = super(DefaultGroup, self)
+        cmd_name, cmd, args = base.resolve_command(ctx, args)
+        if hasattr(ctx, 'arg0'):
+            args.insert(0, ctx.arg0)
+            cmd_name = cmd.name
+        return cmd_name, cmd, args
 
-    subparsers = p.add_subparsers(help='sub-command help')
 
-    parser_preproc = subparsers.add_parser('preprocessing', help='Run preprocessing')
-    # parser_a.add_argument('bar', type=int, help='bar help')
-    parser_preproc.set_defaults(stage="preprocess")
+@click.group(chain=False, invoke_without_command=True)
+@click.option('--debug/--no-debug', default=False)
+@click.pass_context
+def cli(ctx: click.Context, **kwargs):
 
-    parser_pipeline = subparsers.add_parser('pipeline', help='Run pipeline')
-    # parser_a.add_argument('bar', type=int, help='bar help')
-    parser_pipeline.set_defaults(stage="pipeline")
+    # ensure that ctx.obj exists and is a dict (in case `cli()` is called
+    # by means other than the `if` block below
+    ctx.ensure_object(dict)
 
-    options = p.parse_args()
+    kwargs = _without_empty_args(kwargs)
 
-    # Now push this into the Config
     c = Config.get()
 
-    c.general.pipeline = options.pipeline
+    for param in kwargs:
+        if hasattr(c, param):
+            setattr(c, param, kwargs[param])
 
-    c.model.vocab_hash_file = options.vocab_hash_file
-    c.model.seq_length = options.seq_length
-    c.model.max_batch_size = options.max_batch_size
 
-    c.kafka.bootstrap_servers = options.bootstrap_servers
-    c.kafka.input_topic = options.input_topic
-    c.kafka.output_topic = options.output_topic
+@cli.command(short_help="Converts an ONNX model to a TRT engine")
+@click.option("--input_model", type=click.Path(exists=True, readable=True), required=True)
+@click.option("--output_model", type=click.Path(exists=False, writable=True), required=True)
+@click.option('--batches', type=(int, int), required=True, multiple=True)
+@click.option('--seq_length', type=int, required=True)
+@click.option('--max_workspace_size', type=int, default=16000)
+@click.pass_context
+def onnx_to_trt(ctx: click.Context, **kwargs):
 
-    print("Config:")
-    print(c.to_string())
+    print("Generating onnx file")
 
-    # Automatically determine the ports. Comment this if manual setup is desired
-    if (c.kafka.bootstrap_servers == "auto"):
-        kafka_compose_name = "kafka-docker"
+    # Convert batches to a list
+    kwargs["batches"] = list(kwargs["batches"])
 
-        docker_client = docker.from_env()
-        bridge_net = docker_client.networks.get("bridge")
-        bridge_ip = bridge_net.attrs["IPAM"]["Config"][0]["Gateway"]
+    kwargs = _without_empty_args(kwargs)
 
-        kafka_net = docker_client.networks.get(kafka_compose_name + "_default")
+    c = ConfigOnnxToTRT()
 
-        c.kafka.bootstrap_servers = ",".join([
-            c.ports["9092/tcp"][0]["HostIp"] + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers
-            if "9092/tcp" in c.ports
-        ])
+    for param in kwargs:
+        if hasattr(c, param):
+            setattr(c, param, kwargs[param])
 
-        # Use this version to specify the bridge IP instead
-        c.kafka.bootstrap_servers = ",".join(
-            [bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
+    from onnx_to_trt import gen_engine
 
-        print("Auto determined Bootstrap Servers: {}".format(c.kafka.bootstrap_servers))
+    gen_engine(c)
 
-    stage = getattr(options, "stage", "pipeline")
 
-    # if (stage == "pipeline"):
+@cli.group(chain=True, invoke_without_command=True, short_help="Run the inference pipeline")
+@click.option('--num_threads',
+              default=DEFAULT_CONFIG.num_threads,
+              type=click.IntRange(min=1),
+              help="Number of internal pipeline threads to use")
+@click.option(
+    '--pipeline_batch_size',
+    default=DEFAULT_CONFIG.pipeline_batch_size,
+    type=click.IntRange(min=1),
+    help="Internal batch size for the pipeline. Can be much larger than the model batch size. Also used for Kafka consumers")
+@click.option('--model_vocab_hash_file',
+              default=DEFAULT_CONFIG.model_vocab_hash_file,
+              type=click.Path(exists=True, dir_okay=False),
+              help="Model vocab file to use for pre-processing")
+@click.option('--model_seq_length',
+              default=DEFAULT_CONFIG.model_seq_length,
+              type=click.IntRange(min=1),
+              help="Sequence length to use for the model")
+@click.option('--model_max_batch_size',
+              default=DEFAULT_CONFIG.model_max_batch_size,
+              type=click.IntRange(min=1),
+              help="Max batch size to use for the model")
+@click.pass_context
+def pipeline(ctx: click.Context, **kwargs):
+    """Configure and run the pipeline. To configure the pipeline, list the stages in the order that data should flow. The output of each stage will become the input for the next stage. For example, to read, classify and write to a file, the following stages could be used
 
-    #     from grpc_pipeline import run_pipeline
+    \b
+    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
 
-    #     run_pipeline()
+    \b
+    Pipelines must follow a few rules:
+    1. Data must originate in a source stage. Current options are `from-file` or `from-kafka`
+    2. A `deserialize` stage must be placed between the source stages and the rest of the pipeline
+    3. Only one inference stage can be used. Zero is also fine
+    4. The following stages must come after an inference stage: `add-class`, `filter`, `gen-viz`
 
-    # elif (stage == "preprocess"):
+    """
 
-    #     from grpc_preprocessing import run
+    print("Building pipeline")
 
-    #     run()
+    kwargs = _without_empty_args(kwargs)
 
-    from pipeline import Pipeline, SourceStage, Stage, FileSourceStage2, DeserializeStage, PreprocessStage, KafkaSourceStage
+    c = Config.get()
 
-    pipeline = Pipeline(c)
+    for param in kwargs:
+        if hasattr(c, param):
+            setattr(c, param, kwargs[param])
 
-    pipeline.set_source(FileSourceStage2(c))
+    ctx.obj = Pipeline(c)
 
-    pipeline.add_stage(TqdmStage(c, progress_desc="Input Message Rate"))
+    return ctx.obj
 
-    pipeline.add_stage(BufferStage(c, buffer_count=1000))
 
-    pipeline.add_stage(DeserializeStage(c))
-    pipeline.add_stage(PreprocessStage(c))
+@pipeline.resultcallback()
+@click.pass_context
+def post_pipeline(ctx: click.Context, stages, **kwargs):
 
-    if (c.general.pipeline == "triton"):
-        from inference_triton import TritonInferenceStage
-        pipeline.add_stage(TritonInferenceStage(c))
-    elif (c.general.pipeline == "pytorch"):
-        from inference_pytorch import inference_worker
-    elif (c.general.pipeline == "tensorrt"):
-        from inference_tensorrt import TensorRTInferenceStage
-        pipeline.add_stage(TensorRTInferenceStage(c))
-    elif (c.general.pipeline == "triton_onnx"):
-        from inference_triton_onnx import inference_worker
-    else:
-        raise Exception("Unknown inference pipeline: '{}'".format(c.general.pipeline))
+    print("Running pipeline... Ctrl+C to Quit")
 
-    # pipeline.add_stage(FilterDetectionsStage(c))
+    p: Pipeline = ctx.ensure_object(Pipeline)
 
-    # pipeline.add_stage(AddClassificationsStage(c))
+    # Run the pipeline
+    p.run()
 
-    # pipeline.add_stage(WriteToFileStage(c))
-    pipeline.add_stage(GenerateVizFramesStage(c))
 
-    pipeline.add_stage(TqdmStage(c, progress_desc="Inference Rate", smoothing=0.001, unit="inf"))
+@pipeline.command(short_help="Load messages from a file")
+@click.option('--filename', type=click.Path(exists=True, dir_okay=False), help="Input filename")
+@click.pass_context
+def from_file(ctx: click.Context, **kwargs):
 
-    # pipeline.set_source(KafkaSourceStage(c))
+    p: Pipeline = ctx.ensure_object(Pipeline)
 
-    pipeline.run()
+    from pipeline import FileSourceStage2
+
+    stage = FileSourceStage2(Config.get(), **kwargs)
+
+    p.set_source(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Load messages from a Kafka cluster")
+@click.option(
+    '--bootstrap_servers',
+    type=str,
+    default="auto",
+    required=True,
+    help=
+    "Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, this can be set to 'auto' to automatically determine the cluster IPs and ports"
+)
+@click.option('--input_topic', type=str, default="test_pcap", required=True, help="Kafka topic to read from")
+@click.option('--group_id', type=str, default="custreamz", required=True, help="")
+@click.option('--use_dask', is_flag=True, help="Whether or not to use dask for multiple processes reading from Kafka")
+@click.option('--poll_interval',
+              type=str,
+              default="10millis",
+              required=True,
+              help="Polling interval to check for messages. Follows the pandas interval format")
+# @click.option('--max_batch_size', type=int, default=1000, required=True, help="Maximum messages that can be pulled off the server at a time. Should ")
+@click.pass_context
+def from_kafka(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
+        kwargs["bootstrap_servers"] = auto_determine_bootstrap()
+
+    from pipeline import KafkaSourceStage
+
+    stage = KafkaSourceStage(Config.get(), **kwargs)
+
+    p.set_source(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Display throughput numbers at a specific point in the pipeline")
+@click.option('--description', type=str, required=True, help="Header message to use for this monitor")
+@click.option('--smoothing',
+              type=float,
+              default=0.05,
+              help="How much to average throughput numbers. 0=full average, 1=instantaneous")
+@click.option('--unit', type=str, help="Units to use for data rate")
+@click.pass_context
+def monitor(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import TqdmStage
+
+    stage = TqdmStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Buffer results")
+@click.option('--count', type=int, default=1000, help="")
+@click.pass_context
+def buffer(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import BufferStage
+
+    stage = BufferStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Deserialize source data from JSON")
+@click.pass_context
+def deserialize(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import DeserializeStage
+
+    stage = DeserializeStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Convert messages to tokens")
+@click.pass_context
+def preprocess(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import PreprocessStage
+
+    stage = PreprocessStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Perform inference with Triton")
+@click.option('--model_name', type=str, required=True, help="Model name in Triton to send messages to")
+@click.option('--server_url', type=str, required=True, help="Triton server URL (IP:Port)")
+@click.pass_context
+def inf_triton(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from inference_triton import TritonInferenceStage
+
+    stage = TritonInferenceStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Add detected classifications to each message")
+@click.option('--threshold', type=float, default=0.5, required=True, help="Level to consider True/False")
+@click.pass_context
+def add_class(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import AddClassificationsStage
+
+    stage = AddClassificationsStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Filter message by a classification threshold")
+@click.option('--threshold', type=float, default=0.5, required=True, help="")
+@click.pass_context
+def filter(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import FilterDetectionsStage
+
+    stage = FilterDetectionsStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Write all messages to a file")
+@click.option('--filename', type=click.Path(writable=True), required=True, help="")
+@click.option('--overwrite', is_flag=True, help="")
+@click.pass_context
+def to_file(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import WriteToFileStage
+
+    stage = WriteToFileStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Write all messages to a Kafka cluster")
+@click.option(
+    '--bootstrap_servers',
+    type=str,
+    default="auto",
+    required=True,
+    help=
+    "Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, this can be set to 'auto' to automatically determine the cluster IPs and ports"
+)
+@click.option('--output_topic', type=str, required=True, help="Output Kafka topic to publish to")
+@click.pass_context
+def to_kafka(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
+        kwargs["bootstrap_servers"] = auto_determine_bootstrap()
+
+    from pipeline import WriteToKafkaStage
+
+    stage = WriteToKafkaStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@pipeline.command(short_help="Write out vizualization data frames")
+@click.option('--out_dir', type=click.Path(dir_okay=True, file_okay=False), default="./viz_frames", required=True, help="")
+@click.option('--overwrite', is_flag=True, help="")
+@click.pass_context
+def gen_viz(ctx: click.Context, **kwargs):
+
+    p: Pipeline = ctx.ensure_object(Pipeline)
+
+    kwargs = _without_empty_args(kwargs)
+
+    from pipeline import GenerateVizFramesStage
+
+    stage = GenerateVizFramesStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+if __name__ == '__main__':
+    cli(obj={}, auto_envvar_prefix='CLX', show_default=True)
+
+    print("Config: ")
+    print(Config.get().to_string())
+
+    # run_asyncio_loop()
+    from run_pipeline import run_pipeline
+
+    run_pipeline()
