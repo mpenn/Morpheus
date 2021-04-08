@@ -8,6 +8,7 @@ from request import MultiRequest, MultiResponse, ResponseData
 import queue
 import numpy as np
 import cupy as cp
+from scipy.special import expit
 
 
 def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
@@ -30,7 +31,7 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
                     f.set_result(
                         MultiResponse(
                             data=ResponseData(count=batch.count,
-                                              probs=cp.zeros((batch.count, 1), dtype=np.int32),
+                                              probs=cp.asarray(expit(r.as_numpy("output"))),
                                               input_str=batch.input_str,
                                               timestamp=batch.timestamp),
                             offset=0,

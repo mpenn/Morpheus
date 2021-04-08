@@ -1,7 +1,7 @@
 name: "bert_trt"
 platform: "tensorrt_plan"
-max_batch_size: 8
-default_model_filename: "triton_bert_large_128-b8-b9.engine"
+max_batch_size: 16
+default_model_filename: "triton_bert_large_128-b1_8-b1_16-b1_32.engine"
 
 input [
   {
@@ -29,6 +29,14 @@ output [
 ]
 
 dynamic_batching { 
-  preferred_batch_size: [ 1, 4, 8 ]
-  max_queue_delay_microseconds: 500000
+  preferred_batch_size: [ 1, 4, 8, 12, 16 ]
+  max_queue_delay_microseconds: 50000
 }
+
+instance_group [
+  {
+    count: 1
+    kind: KIND_GPU
+    profile: ["1"]
+  }
+]

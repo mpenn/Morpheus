@@ -30,7 +30,7 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
                     f.set_result(
                         MultiResponse(
                             data=ResponseData(count=batch.count,
-                                              probs=cp.zeros((batch.count, 1), dtype=np.int32),
+                                              probs=cp.zeros((batch.count, 10), dtype=np.int32),
                                               input_str=batch.input_str,
                                               timestamp=batch.timestamp),
                             offset=0,

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import typing
 from tqdm import tqdm
 from request import MultiRequest, MultiResponse, ResponseData
@@ -15,6 +16,59 @@ TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 config = Config.get()
 
 
+def onnx_to_engine(runtime, onnx_file):
+
+    # First check for a matching engine file
+    matching_engine = os.path.splitext(onnx_file)[0] + ".engine"
+
+    if (os.path.exists(matching_engine)):
+        # Deserialize and return the engine
+        with open(matching_engine, "rb") as f:
+
+            return runtime.deserialize_cuda_engine(f.read())
+
+    # Otherwise we are creating a new model
+    EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+
+    with trt.Builder(TRT_LOGGER) as builder, builder.create_network(EXPLICIT_BATCH) as network, trt.OnnxParser(network, TRT_LOGGER) as parser:
+        with open(onnx_file, "rb") as model_file:
+            if (not parser.parse(model_file.read())):
+                for error in range(parser.num_errors):
+                    print(parser.get_error(error))
+                raise Exception("Count not parse Onnx file. See log.")
+            
+        # Now we need to build and serialize the model
+        with builder.create_builder_config() as builder_config:
+            builder_config.max_workspace_size = 16000 * (1024 * 1024)
+            builder_config.set_flag(trt.BuilderFlag.FP16)
+
+            # Actually build the engine
+            print("Building engine")
+            engine = builder.build_engine(network, builder_config)
+
+            # Now save a copy to prevent building next time
+            print("Writing engine to: {}".format())
+            serialized_engine = engine.serialize()
+
+            with open(matching_engine, "wb") as f:
+                f.write(serialized_engine)
+
+
+            return engine
+
+
+def build_engine(runtime, model_file):
+
+    model_ext = os.path.splitext(model_file)[1]
+
+    if (model_ext == ".engine"):
+        with open(model_file, "rb") as f:
+
+            return runtime.deserialize_cuda_engine(f.read())
+    elif (model_ext == ".onnx"):
+        return onnx_to_engine(runtime, model_file)
+
+
 def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
     # pyc_dev = pycuda.autoinit.device
@@ -27,7 +81,7 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
     #                 unit="inf",
     #                 mininterval=1.0)
 
-    locked_profile = 0  # -1 to unlock
+    locked_profile = 2  # -1 to unlock
     bs_to_profile = {}
 
     def choose_profile(engine, context) -> int:
@@ -52,11 +106,10 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
             return selected_profile
 
+    model_file = "triton_models/bert_trt/1/triton_bert_large_128-b1_8-b1_16-b1_32.engine"
+    # model_file = "triton_models/bert_trt/1/triton_bert_large_128-b8-b9.engine"
 
-    with open("triton_models/bert_trt/1/triton_bert_large_128-b8-b9.engine", "rb") as f, \
-            trt.Runtime(TRT_LOGGER) as runtime, \
-            runtime.deserialize_cuda_engine(f.read()) as engine, \
-            engine.create_execution_context() as context:
+    with trt.Runtime(TRT_LOGGER) as runtime, build_engine(runtime, model_file=model_file) as engine, engine.create_execution_context() as context:
 
         # stream = cuda.Stream()
         stream = cp.cuda.Stream(non_blocking=True)
@@ -97,7 +150,7 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
             # Set the max size so we can determine the output max size
             for i in range(3):
                 context.set_binding_shape(locked_profile * num_binding_per_profile + i,
-                                          engine.get_profile_shape(profile_index=locked_profile, binding=i)[2])
+                                          engine.get_profile_shape(profile_index=locked_profile, binding=locked_profile * num_binding_per_profile + i)[2])
 
             assert context.all_binding_shapes_specified
 
@@ -121,7 +174,7 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
         # Stores the best profile for the batch size
         previous_bs = 0
         previous_profile = context.active_optimization_profile
-        
+
         prev_event = cp.cuda.Event(block=True, disable_timing=True)
         stream.record(prev_event)
 
@@ -148,7 +201,6 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
                 loop.asyncio_loop.call_soon_threadsafe(tmp, None)
 
             batch_size = batch.count
-            binding_idx_offset = 0
 
             # Specify input shapes. These must be within the min/max bounds of the active profile
             # Note that input shapes can be specified on a per-inference basis, but in this case, we only have a single shape.
@@ -161,9 +213,10 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
             if (curr_profile != previous_profile):
 
                 context.set_optimization_profile_async(curr_profile, stream_handle=stream.ptr)
-                binding_idx_offset = curr_profile * num_binding_per_profile
 
                 previous_profile = curr_profile
+
+            binding_idx_offset = curr_profile * num_binding_per_profile
 
             # Now set the batch settings
             if (batch_size != previous_bs or True):

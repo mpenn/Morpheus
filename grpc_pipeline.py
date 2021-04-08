@@ -203,7 +203,7 @@ async def main_loop():
             # input_file = ".tmp/kafka-producer/pcap_out.json"
             # input_file = ".tmp/dataset2/pcap_dump_2.json"
             # input_file = ".tmp/dataset4/pcap_dump.json"
-            input_file = ".tmp/dataset4/pcap_dump_augmented_1200delay.json"
+            input_file = ".tmp/dataset4/pcap_dump_augmented_0delay.json"
 
             # Read the number of lines for progress reporting
             max_itr = sum(1 for i in open(input_file, 'rb'))
@@ -261,7 +261,7 @@ async def main_loop():
 
     channel = grpc.aio.insecure_channel('localhost:50051')
 
-    await asyncio.wait_for(channel.channel_ready(), timeout=10.0)
+    await asyncio.wait_for(channel.channel_ready(), timeout=30.0)
     print("Connected to Preprocessing Server!")
 
     progress = tqdm(desc="Running Inference for PII",
@@ -494,7 +494,7 @@ async def main_loop():
 
         my_var = a + 1
 
-    output_viz_keyframes = True
+    output_viz_keyframes = False
 
     if (output_viz_keyframes):
 
