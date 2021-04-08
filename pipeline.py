@@ -15,6 +15,8 @@ from asyncio.events import get_event_loop
 from collections import defaultdict, deque
 from ctypes import c_void_p
 from functools import reduce
+import shutil
+import warnings
 
 import cudf
 import cupy as cp
@@ -169,7 +171,6 @@ class FileSourceStage2(SourceStage):
 
         self._filename = ".tmp/dataset4/pcap_dump_augmented_0delay.json"
         self._input_count = None
-        
 
     @property
     def name(self) -> str:
@@ -676,56 +677,296 @@ class InferenceStage(Stage):
         x.set_meta("ts_" + self.name, curr_time)
 
 
-class WriteClassificationStage(Stage):
+class AddClassificationsStage(Stage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        self._seq_length = c.model.seq_length
-        self._vocab_hash_file = c.model.vocab_hash_file
-
     @property
     def name(self) -> str:
-        return "write_classification"
+        return "add_class"
 
-    def pre_process_batch(self, x: MultiMessage):
+    def _add_labels(self, x: MultiResponseMessage):
+        # Keys
+        idx2label = {
+            0: 'address',
+            1: 'bank_acct',
+            2: 'credit_card',
+            3: 'email',
+            4: 'govt_id',
+            5: 'name',
+            6: 'password',
+            7: 'phone_num',
+            8: 'secret_keys',
+            9: 'user'
+        }
 
-        # Set the stride to 75%. Works well with powers of 2
-        stride = self._seq_length // 2
-        stride = stride + stride // 2
+        probs_np = (x.probs > 0.5).astype(cp.bool).get()
 
-        tokenized = tokenize_text_series(cudf.Series(x.data_col), self._seq_length, stride, self._vocab_hash_file)
+        for i, label in idx2label.items():
+            x.set_meta("si_" + label, probs_np[:, i].tolist())
 
-        # Create the inference memory. Keep in mind count here could be > than input count
-        memory = InferenceMemory(count=tokenized.input_ids.shape[0],
-                                 input_ids=tokenized.input_ids,
-                                 input_mask=tokenized.input_mask,
-                                 seq_ids=tokenized.segment_ids)
+        # Return list of strs to write out
+        return x
 
-        infer_message = MultiInferenceMessage(meta=x.meta,
-                                              mess_offset=x.mess_offset,
-                                              mess_count=x.mess_count,
-                                              memory=memory,
-                                              offset=0,
-                                              count=memory.count)
-
-        return infer_message
+    def write_to_file(self, x: typing.List[str]):
+        with open(self._output_file, "a") as f:
+            f.writelines(x)
 
     async def _build(self, input_stream: Stream) -> Stream:
 
-        stream = input_stream.async_map(self.pre_process_batch, executor=self._pipeline.thread_pool)
+        stream = input_stream
+
+        # Convert the messages to rows of strings
+        stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool)
+
+        # Return input unchanged
+        return stream
+
+
+class WriteToFileStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._output_file = ".tmp/dataset4/pcap_dump_pre_class_delete.json"
+        self._overwrite = True
+        self._ignore_columns = [r'^ID$', r'^ts_']
+
+        if (os.path.exists(self._output_file)):
+            if (self._overwrite):
+                os.remove(self._output_file)
+            else:
+                raise FileExistsError("Cannot output classifications to '{}'. File exists and overwrite = False".format(
+                    self._output_file))
+
+    @property
+    def name(self) -> str:
+        return "write_class"
+
+    def _convert_to_json(self, x: MultiResponseMessage):
+
+        # Get list of columns that pass ignore regex
+        columns = list(x.meta.df.columns)
+
+        for test in self._ignore_columns:
+            columns = [y for y in columns if not re.match(test, y)]
+
+        # Get metadata from columns
+        df = x.get_meta(columns)
+
+        def double_serialize(y: str):
+            try:
+                return json.dumps(json.dumps(json.loads(y)))
+            except:
+                return y
+
+        # Special processing for the data column (need to double serialize to match input)
+        if ("data" in df):
+            df["data"] = df["data"].apply(double_serialize)
+
+        # Convert to list of json string objects
+        output_strs = [json.dumps(y) + "\n" for y in df.to_dict(orient="records")]
+
+        # Return list of strs to write out
+        return output_strs
+
+    def write_to_file(self, x: typing.List[str]):
+        with open(self._output_file, "a") as f:
+            f.writelines(x)
+
+    async def _build(self, input_stream: Stream) -> Stream:
+
+        # Convert the messages to rows of strings
+        stream = input_stream.async_map(self._convert_to_json, executor=self._pipeline.thread_pool)
+
+        # Sink to file
+        stream.sink(self.write_to_file)
+
+        # Return input unchanged
+        return input_stream
+
+
+class FilterDetectionsStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        # Probability to consider a detection
+        self._threshold = 0.5
+
+    @property
+    def name(self) -> str:
+        return "filter_detect"
+
+    def filter(self, x: MultiResponseMessage) -> typing.List[MultiResponseMessage]:
+
+        # Unfortunately we have to convert this to a list in case there are non-contiguous groups
+        output_list = []
+
+        # Get per row detections
+        detections = (x.probs > self._threshold).any(axis=1)
+
+        # Surround in False to ensure we get an even number of pairs
+        detections = cp.concatenate([cp.array([False]), detections, cp.array([False])])
+
+        true_pairs = cp.where(detections[1:] != detections[:-1])[0].reshape((-1, 2))
+
+        for pair in true_pairs:
+            pair = tuple(pair.tolist())
+            mess_offset = x.mess_offset + pair[0]
+            mess_count = pair[1] - pair[0]
+
+            output_list.append(
+                MultiResponseMessage(x.meta,
+                                     mess_offset=mess_offset,
+                                     mess_count=mess_count,
+                                     memory=x.memory,
+                                     offset=pair[0],
+                                     count=mess_count))
+
+        return output_list
+
+    async def _build(self, input_stream: Stream) -> Stream:
+
+        stream = input_stream
+
+        # Reduce messages to only have detections
+        stream = stream.async_map(self.filter, executor=self._pipeline.thread_pool)
+
+        # Convert list back to single MultiResponseMessage
+        stream = stream.flatten()
+
+        # Filter out empty message groups
+        stream = stream.filter(lambda x: x.count > 0)
 
         return stream
 
-    def post_timestamps(self, x: MultiInferenceMessage):
 
-        curr_time = get_time_ms()
+class WriteToKafkaStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
 
-        # # Get IDs
-        # ids = x.id_list
+        self._kafka_conf = {'bootstrap.servers': c.kafka.bootstrap_servers}
 
-        # deltas = [curr_time - self._timestamps.pop(i) for i in ids]
+        self._output_topic = c.kafka.output_topic
 
-        x.set_meta("ts_" + self.name, curr_time)
+    @property
+    def name(self) -> str:
+        return "write_kafka"
+
+    async def _build(self, input_stream: Stream) -> Stream:
+
+        # Write to kafka
+        input_stream.to_kafka(self._output_topic, self._kafka_conf)
+
+        # Return input unchanged
+        return input_stream
+
+
+class GenerateVizFramesStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._out_dir = "./viz_frames"
+        self._overwrite = False
+
+        if (os.path.exists(self._out_dir)):
+            if (self._overwrite):
+                shutil.rmtree(self._out_dir)
+            elif (len(list(os.listdir(self._out_dir))) > 0):
+                warnings.warn(
+                    "Viz output directory '{}' already exists. Errors will occur if frames try to be written over existing files. Suggest emptying the directory or setting `overwrite=True`"
+                    .format(self._out_dir))
+
+        os.makedirs(self._out_dir, exist_ok=True)
+
+        self._first_timestamp = -1
+
+    @property
+    def name(self) -> str:
+        return "gen_viz"
+
+    @staticmethod
+    def round_to_sec(x):
+        return int(round(x / 1000.0) * 1000)
+
+    def _to_vis_df(self, x: MultiResponseMessage):
+
+        idx2label = {
+            0: 'address',
+            1: 'bank_acct',
+            2: 'credit_card',
+            3: 'email',
+            4: 'govt_id',
+            5: 'name',
+            6: 'password',
+            7: 'phone_num',
+            8: 'secret_keys',
+            9: 'user'
+        }
+
+        df = x.get_meta(["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "data"])
+
+        def indent_data(y: str):
+            try:
+                return json.dumps(json.loads(), indent=3)
+            except:
+                return y
+
+        df["data"] = df["data"].apply(indent_data)
+
+        pass_thresh = (x.probs >= 0.5).any(axis=1)
+        max_arg = x.probs.argmax(axis=1)
+
+        condlist = [pass_thresh]
+
+        choicelist = [max_arg]
+
+        index_sens_info = np.select(condlist, choicelist, default=len(idx2label))
+
+        df["si"] = pd.Series(np.choose(index_sens_info.get(), list(idx2label.values()) + ["none"]).tolist())
+
+        df["ts_round_sec"] = (df["timestamp"] / 1000.0).astype(int) * 1000
+
+        # Return a list of tuples of (ts_round_sec, dataframe)
+        return [(key, group) for key, group in df.groupby(df.ts_round_sec)]
+
+    def _write_viz_file(self, x: typing.List[typing.Tuple[int, pd.DataFrame]]):
+
+        curr_timestamp = x[0][0]
+
+        in_df = pd.concat([df for _, df in x], ignore_index=True).sort_values(by=["timestamp"])
+
+        # curr_timestamp = GenerateVizFramesStage.round_to_sec(in_df["timestamp"].iloc[0])
+
+        if (self._first_timestamp == -1):
+            self._first_timestamp = curr_timestamp
+
+        offset = (curr_timestamp - self._first_timestamp) / 1000
+
+        fn = os.path.join(self._out_dir, "{}.csv".format(offset))
+
+        assert not os.path.exists(fn)
+
+        in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si", "data"])
+
+    async def _build(self, input_stream: Stream) -> Stream:
+
+        stream = input_stream
+
+        # Convert stream to dataframes
+        stream = stream.map(self._to_vis_df)  # Convert group to dataframe
+
+        # Flatten the list of tuples
+        stream = stream.flatten()
+
+        # Partition by group times
+        stream = stream.partition(10000, timeout=10, key=lambda x: x[0])  # Group
+        # stream = stream.filter(lambda x: len(x) > 0)
+
+        stream.sink(self._write_viz_file)
+
+        # Return input unchanged
+        return input_stream
+
 
 class Pipeline():
     def __init__(self, c: Config):
@@ -741,7 +982,7 @@ class Pipeline():
 
         self._source_stream: Source = None
 
-        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
     @property
     def thread_pool(self):

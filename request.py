@@ -264,6 +264,10 @@ class MultiMessage:
     #     return self._meta
 
     @property
+    def input_json(self):
+        return self.meta.input_json[self.mess_offset:self.mess_offset + self.mess_count]
+
+    @property
     def data_col(self):
         return self.get_meta("data")
 
@@ -278,6 +282,10 @@ class MultiMessage:
     @property
     def id(self) -> typing.List[int]:
         return self.get_meta_list("ID")
+
+    @property
+    def timestamp(self) -> typing.List[int]:
+        return self.get_meta_list("timestamp")
 
     def get_meta(self, col_name: str):
         return self.meta.df.loc[self.mess_offset:self.mess_offset + self.mess_count, col_name]
@@ -357,5 +365,5 @@ class MultiResponseMessage(MultiMessage):
     count: int
 
     @property
-    def probs(self):
+    def probs(self) -> cp.ndarray:
         return self.memory.probs[self.offset:self.offset + self.count, :]

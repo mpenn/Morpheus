@@ -1,4 +1,4 @@
-from pipeline import BufferStage, TqdmStage
+from pipeline import AddClassificationsStage, BufferStage, FilterDetectionsStage, GenerateVizFramesStage, TqdmStage, WriteToFileStage
 from click.decorators import option
 import configargparse
 import docker
@@ -127,6 +127,13 @@ if __name__ == '__main__':
         from inference_triton_onnx import inference_worker
     else:
         raise Exception("Unknown inference pipeline: '{}'".format(c.general.pipeline))
+
+    # pipeline.add_stage(FilterDetectionsStage(c))
+
+    # pipeline.add_stage(AddClassificationsStage(c))
+
+    # pipeline.add_stage(WriteToFileStage(c))
+    pipeline.add_stage(GenerateVizFramesStage(c))
 
     pipeline.add_stage(TqdmStage(c, progress_desc="Inference Rate", smoothing=0.001, unit="inf"))
 
