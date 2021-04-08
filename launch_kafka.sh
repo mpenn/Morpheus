@@ -73,3 +73,9 @@ yarn demo modules/demo/graph --nodes=$(echo data/network_graph_viz_frames_multi_
  --params='"autoCenter":1,"strongGravityMode":0,"jitterTolerance":0.01,"scalingRatio":1,"gravity":5,"controlsVisible":0,"outboundAttraction":1,"linLogMode":1' --delay=100 --width=1920 --height=1080
 
  --nodes=$(echo data/network_graph_viz_frames_multi_label_Bartley1/{0..199}.0.nodes.csv | sed 's/ /,/g') --edges=$(echo data/network_graph_viz_frames_multi_label_Bartley1/{0..199}.0.edges.csv | sed 's/ /,/g') --params='"autoCenter":1,"strongGravityMode":0,"jitterTolerance":0.01,"scalingRatio":1,"gravity":5,"controlsVisible":0,"outboundAttraction":1,"linLogMode":1' --delay=100 --width=1920 --height=1080
+
+
+#  Perf analyzer
+docker run --net=host --gpus=all --rm -ti -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models nvcr.io/nvidia/tritonserver:21.02-py3-sdk /bin/bash
+cd install/bin/
+./perf_analyzer -u localhost:8001 -i gRPC -m mini_bert_trt --concurrency-range 4 -b 32 --shared-memory cuda

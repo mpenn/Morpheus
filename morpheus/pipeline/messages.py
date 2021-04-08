@@ -1,8 +1,8 @@
 import dataclasses
+from morpheus.utils.cudf_subword_helper import Feature
 import threading
 import cupy as cp
 import typing
-from cudf_subword_helper import Feature, tokenize_text_series
 import cudf
 import pandas as pd
 

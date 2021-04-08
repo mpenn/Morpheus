@@ -1,7 +1,7 @@
+from morpheus.config import ConfigOnnxToTRT
 import typing
 from torch.utils.dlpack import from_dlpack
 import tensorrt as trt
-from config import ConfigOnnxToTRT
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 

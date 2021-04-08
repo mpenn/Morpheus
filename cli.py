@@ -1,6 +1,6 @@
+from morpheus.config import Config, ConfigOnnxToTRT, auto_determine_bootstrap
 import click
-from config import Config, ConfigOnnxToTRT, auto_determine_bootstrap
-from pipeline import Pipeline
+from morpheus.pipeline import Pipeline
 
 DEFAULT_CONFIG = Config.default()
 
@@ -59,7 +59,7 @@ def onnx_to_trt(ctx: click.Context, **kwargs):
         if hasattr(c, param):
             setattr(c, param, kwargs[param])
 
-    from onnx_to_trt import gen_engine
+    from morpheus.utils.onnx_to_trt import gen_engine
 
     gen_engine(c)
 
@@ -136,9 +136,9 @@ def from_file(ctx: click.Context, **kwargs):
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
-    from pipeline import FileSourceStage2
+    from morpheus.pipeline.input.from_file import FileSourceStage
 
-    stage = FileSourceStage2(Config.get(), **kwargs)
+    stage = FileSourceStage(Config.get(), **kwargs)
 
     p.set_source(stage)
 
@@ -173,7 +173,7 @@ def from_kafka(ctx: click.Context, **kwargs):
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
 
-    from pipeline import KafkaSourceStage
+    from morpheus.pipeline.input.from_kafka import KafkaSourceStage
 
     stage = KafkaSourceStage(Config.get(), **kwargs)
 
@@ -196,9 +196,9 @@ def monitor(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import TqdmStage
+    from morpheus.pipeline.general_stages import MonitorStage
 
-    stage = TqdmStage(Config.get(), **kwargs)
+    stage = MonitorStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -214,7 +214,7 @@ def buffer(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import BufferStage
+    from morpheus.pipeline.general_stages import BufferStage
 
     stage = BufferStage(Config.get(), **kwargs)
 
@@ -231,7 +231,7 @@ def deserialize(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import DeserializeStage
+    from morpheus.pipeline.general_stages import DeserializeStage
 
     stage = DeserializeStage(Config.get(), **kwargs)
 
@@ -248,7 +248,7 @@ def preprocess(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import PreprocessStage
+    from morpheus.pipeline.general_stages import PreprocessStage
 
     stage = PreprocessStage(Config.get(), **kwargs)
 
@@ -267,7 +267,7 @@ def inf_triton(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from inference_triton import TritonInferenceStage
+    from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
 
     stage = TritonInferenceStage(Config.get(), **kwargs)
 
@@ -285,7 +285,7 @@ def add_class(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import AddClassificationsStage
+    from morpheus.pipeline.general_stages import AddClassificationsStage
 
     stage = AddClassificationsStage(Config.get(), **kwargs)
 
@@ -303,7 +303,7 @@ def filter(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import FilterDetectionsStage
+    from morpheus.pipeline.general_stages import FilterDetectionsStage
 
     stage = FilterDetectionsStage(Config.get(), **kwargs)
 
@@ -322,7 +322,7 @@ def to_file(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import WriteToFileStage
+    from morpheus.pipeline.output.to_file import WriteToFileStage
 
     stage = WriteToFileStage(Config.get(), **kwargs)
 
@@ -351,7 +351,7 @@ def to_kafka(ctx: click.Context, **kwargs):
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
 
-    from pipeline import WriteToKafkaStage
+    from morpheus.pipeline.output.to_kafka import WriteToKafkaStage
 
     stage = WriteToKafkaStage(Config.get(), **kwargs)
 
@@ -370,7 +370,7 @@ def gen_viz(ctx: click.Context, **kwargs):
 
     kwargs = _without_empty_args(kwargs)
 
-    from pipeline import GenerateVizFramesStage
+    from morpheus.pipeline.output.gen_viz_frames import GenerateVizFramesStage
 
     stage = GenerateVizFramesStage(Config.get(), **kwargs)
 

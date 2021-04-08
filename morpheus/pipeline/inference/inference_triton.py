@@ -1,21 +1,21 @@
 import asyncio
 import base64
+from morpheus.config import Config
 import threading
 
 from tornado.ioloop import IOLoop
-from config import Config
 from functools import partial
-from pipeline import InferenceStage
 import tritonclient.grpc as tritonclient
 from tritonclient.grpc.model_config_pb2 import DataType
 from tqdm import tqdm
 import typing
-from request import MultiInferenceMessage, MultiRequest, MultiResponse, ResponseData, ResponseMemory
+from morpheus.pipeline.messages import MultiInferenceMessage, MultiRequest, MultiResponse, ResponseData, ResponseMemory
 import queue
 import numpy as np
 import cupy as cp
 import tritonclient.utils.cuda_shared_memory as cudashm
 from tritonclient.utils import triton_to_np_dtype
+from morpheus.pipeline.inference.inference_stage import InferenceStage
 
 
 class RecursiveQueue(queue.Queue):
