@@ -1,6 +1,7 @@
 from functools import reduce
+from streamz.dask import DaskStream
 from tornado import gen
-from morpheus.pipeline.pipeline import SourceStage
+from morpheus.pipeline.pipeline import SourceStage, StreamPair
 from streamz.core import RefCounter, Stream
 from streamz import Source
 from tornado.ioloop import IOLoop
@@ -12,7 +13,9 @@ import typing
 import pandas as pd
 import asyncio
 from tqdm import tqdm
-
+from distributed.client import default_client
+import distributed
+from morpheus.utils.async_map import scatter_batch
 
 @Stream.register_api(staticmethod)
 class from_iterable_done(Source):
@@ -92,7 +95,7 @@ class FileSourceStage(SourceStage):
         # Return None for no max intput count
         return self._input_count
 
-    async def _build(self) -> Stream:
+    async def _build(self) -> StreamPair:
 
         df = cudf.read_json(self._filename, engine="cudf", lines=True)
 
@@ -100,13 +103,7 @@ class FileSourceStage(SourceStage):
 
         source: Source = Stream.from_iterable_done(self._generate_frames(df), asynchronous=True, loop=IOLoop.current())
 
-        def fix_df(x: cudf.DataFrame):
-            # Reset the index so they all get a unique index ID
-            return x[1].reset_index(drop=True)
-
-        # source = source.map(fix_df)
-
-        return source
+        return source, cudf.DataFrame
 
     def _generate_frames(self, df):
         count = 0
@@ -120,5 +117,6 @@ class FileSourceStage(SourceStage):
             # if (count >= 2):
             #     break
 
+        # Perform the callbacks
         for cb in self._done_callbacks:
             cb()

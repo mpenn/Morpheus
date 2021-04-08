@@ -1,3 +1,5 @@
+import cudf
+from morpheus.pipeline.pipeline import StreamPair
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
 from morpheus.pipeline import SourceStage
@@ -24,7 +26,7 @@ class KafkaSourceStage(SourceStage):
     def name(self) -> str:
         return "from-kafka"
 
-    async def _build(self) -> Stream:
+    async def _build(self) -> StreamPair:
 
         if (self._use_dask):
             from dask.distributed import Client
@@ -53,4 +55,4 @@ class KafkaSourceStage(SourceStage):
                                                        max_batch_size=self._max_batch_size)
 
         # Always gather here (no-op if not using dask)
-        return source.gather()
+        return source.gather(), cudf.DataFrame

@@ -1,3 +1,4 @@
+from morpheus.pipeline.pipeline import StreamPair
 from morpheus.pipeline.messages import MultiResponseMessage
 from streamz.core import Stream
 from streamz import Source
@@ -103,7 +104,7 @@ class GenerateVizFramesStage(Stage):
 
         in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si", "data"])
 
-    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+    async def _build(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 

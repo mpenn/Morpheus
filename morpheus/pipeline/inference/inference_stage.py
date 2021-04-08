@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from functools import reduce
+from morpheus.pipeline.pipeline import StreamFuture, StreamPair
 import queue
 import time
 import typing
@@ -16,7 +17,7 @@ from morpheus.utils.cudf_subword_helper import tokenize_text_series
 import cupy as cp
 import asyncio
 import numpy as np
-
+import typing_utils
 
 class InferenceStage(Stage):
     def __init__(self, c: Config):
@@ -30,25 +31,19 @@ class InferenceStage(Stage):
 
         self._max_batch_size = c.model_max_batch_size
 
-        # self._progress = tqdm(desc="Inferece",
-        #                       smoothing=0.001,
-        #                       dynamic_ncols=True,
-        #                       unit="inf",
-        #                       mininterval=1.0,
-        #                       maxinterval=2.0)
 
     @property
     def name(self) -> str:
         return "inference"
 
     def accepted_types(self) -> typing.Tuple:
-        return (MultiInferenceMessage, )
+        return (MultiInferenceMessage, StreamFuture[MultiInferenceMessage])
 
     @abstractmethod
     def _get_inference_fn(self) -> typing.Callable:
         pass
 
-    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+    async def _build(self, input_stream: StreamPair) -> StreamPair:
 
         wait_events = []
 
@@ -69,20 +64,30 @@ class InferenceStage(Stage):
         asyncio.gather(*wait_events, return_exceptions=True)
 
         stream = input_stream[0]
+        out_type = MultiResponseMessage
 
-        # First convert to manageable batches. If the batches are too large, we cant process them
-        stream = stream.async_map(self._split_batches, executor=self._pipeline.thread_pool)
+        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
+            # First convert to manageable batches. If the batches are too large, we cant process them
+            stream = stream.map(self._split_batches, max_batch_size=self._max_batch_size).gather()
 
-        # Queue the inference work
-        stream = stream.async_map(self._queue_inf_work)
+            # Queue the inference work
+            stream = stream.async_map(self._queue_inf_work)
 
-        stream = stream.async_map(self._convert_response, executor=self._pipeline.thread_pool)
+            stream = stream.scatter().map(self._convert_response)
+            out_type = StreamFuture[MultiResponseMessage]
+        else:
+            # First convert to manageable batches. If the batches are too large, we cant process them
+            stream = stream.async_map(self._split_batches, executor=self._pipeline.thread_pool, max_batch_size=self._max_batch_size)
 
-        return stream, MultiResponseMessage
+            # Queue the inference work
+            stream = stream.async_map(self._queue_inf_work)
 
-    def _split_batches(self, x: MultiInferenceMessage) -> typing.List[MultiInferenceMessage]:
+            stream = stream.async_map(self._convert_response, executor=self._pipeline.thread_pool)
 
-        # return [x]
+        return stream, out_type
+
+    @staticmethod
+    def _split_batches(x: MultiInferenceMessage, max_batch_size: int) -> typing.List[MultiInferenceMessage]:
 
         out_batches = []
 
@@ -99,7 +104,7 @@ class InferenceStage(Stage):
 
             poss_count = diff_ids[i] - diff_ids[head]
 
-            if (poss_count > self._max_batch_size):
+            if (poss_count > max_batch_size):
                 out_batches.append((diff_ids[head], diff_ids[tail]))
 
                 head = tail
@@ -114,8 +119,6 @@ class InferenceStage(Stage):
 
             out_resp.append(x.get_slice(start, stop))
 
-            # self._progress.update(out_resp[-1].mess_count)
-
         assert len(out_resp) > 0
 
         return out_resp
@@ -129,8 +132,6 @@ class InferenceStage(Stage):
         for y in x:
             fut = loop.create_future()
 
-            # self._progress.update(n=y.mess_count)
-
             self._inf_queue.put((y, fut))
 
             futures.append(fut)
@@ -139,18 +140,13 @@ class InferenceStage(Stage):
 
         return x, res
 
-    def _convert_response(self, x: typing.Tuple[typing.List[MultiInferenceMessage], typing.List[ResponseMemory]]):
+    @staticmethod
+    def _convert_response(x: typing.Tuple[typing.List[MultiInferenceMessage], typing.List[ResponseMemory]]):
 
         # Convert a MultiResponse into a MultiResponseMessage
         in_message = x[0]
         out_message = x[1]
 
-        # return MultiResponseMessage(meta=in_message[0].meta,
-        #                             mess_offset=in_message[0].mess_offset,
-        #                             mess_count=in_message[0].mess_count,
-        #                             memory=out_message[0],
-        #                             offset=0,
-        #                             count=out_message[0].count)
 
         assert len(in_message) == len(out_message)
 
@@ -200,10 +196,5 @@ class InferenceStage(Stage):
     def post_timestamps(self, x: MultiResponseMessage):
 
         curr_time = time.time()
-
-        # # Get IDs
-        # ids = x.id_list
-
-        # deltas = [curr_time - self._timestamps.pop(i) for i in ids]
 
         x.set_meta("ts_" + self.name, curr_time)

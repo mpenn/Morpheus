@@ -288,13 +288,13 @@ class MultiMessage:
         return self.get_meta_list("timestamp")
 
     def get_meta(self, col_name: str):
-        return self.meta.df.loc[self.mess_offset:self.mess_offset + self.mess_count, col_name]
+        return self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], col_name]
 
     def get_meta_list(self, col_name: str = None):
         return self.get_meta(col_name=col_name).to_list()
 
     def set_meta(self, col_name: str, value):
-        self.meta.df.loc[self.mess_offset:self.mess_offset + self.mess_count, col_name] = value
+        self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], col_name] = value
 
 
 @dataclasses.dataclass

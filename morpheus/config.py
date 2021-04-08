@@ -1,9 +1,5 @@
-import argparse
 import json
-import click
-import os
 import docker
-import torch
 import typing
 import dataclasses
 import pprint
@@ -101,6 +97,9 @@ class ConfigKafka():
     input_topic: str = "test_pcap"
     output_topic: str = "output_topic"
 
+@dataclasses.dataclass
+class ConfigDask():
+    use_processes: bool = False
 
 @dataclasses.dataclass
 class Config():
@@ -120,6 +119,9 @@ class Config():
     model_max_batch_size: int = 8
     model_seq_length: int = 256
     model_vocab_hash_file: str = "bert-base-cased-hash.txt"
+    use_dask: bool = False
+
+    dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
 
     @staticmethod
     def default() -> "Config":

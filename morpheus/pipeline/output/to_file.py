@@ -1,3 +1,5 @@
+from morpheus.pipeline.pipeline import StreamFuture, StreamPair
+import typing_utils
 from morpheus.pipeline.messages import MultiMessage
 from streamz.core import Stream
 from streamz import Source
@@ -12,12 +14,11 @@ import json
 import os
 
 class WriteToFileStage(Stage):
-    def __init__(self, c: Config, output_file: str, overwrite: bool):
+    def __init__(self, c: Config, filename: str, overwrite: bool):
         super().__init__(c)
 
-        self._output_file = output_file
+        self._output_file = filename
         self._overwrite = overwrite
-        self._ignore_columns = [r'^ID$', r'^ts_']
 
         if (os.path.exists(self._output_file)):
             if (self._overwrite):
@@ -31,43 +32,23 @@ class WriteToFileStage(Stage):
         return "to-file"
 
     def accepted_types(self) -> typing.Tuple:
-        return (MultiMessage, )
-
-    def _convert_to_json(self, x: MultiMessage):
-
-        # Get list of columns that pass ignore regex
-        columns = list(x.meta.df.columns)
-
-        for test in self._ignore_columns:
-            columns = [y for y in columns if not re.match(test, y)]
-
-        # Get metadata from columns
-        df = x.get_meta(columns)
-
-        def double_serialize(y: str):
-            try:
-                return json.dumps(json.dumps(json.loads(y)))
-            except:
-                return y
-
-        # Special processing for the data column (need to double serialize to match input)
-        if ("data" in df):
-            df["data"] = df["data"].apply(double_serialize)
-
-        # Convert to list of json string objects
-        output_strs = [json.dumps(y) + "\n" for y in df.to_dict(orient="records")]
-
-        # Return list of strs to write out
-        return output_strs
+        return (typing.List[str],)
 
     def write_to_file(self, x: typing.List[str]):
         with open(self._output_file, "a") as f:
-            f.writelines(x)
+            f.writelines("\n".join(x))
+            f.write("\n")
 
-    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+    async def _build(self, input_stream: StreamPair) -> StreamPair:
 
-        # Convert the messages to rows of strings
-        stream = input_stream[0].async_map(self._convert_to_json, executor=self._pipeline.thread_pool)
+        stream = input_stream[0]
+
+        # Wrap single strings into lists
+        if (typing_utils.issubtype(input_stream[1], StreamFuture[str]) or typing_utils.issubtype(input_stream[1], str)):
+            stream = stream.map(lambda x: [x])
+
+        # Do a gather just in case we are using dask
+        stream = stream.gather()
 
         # Sink to file
         stream.sink(self.write_to_file)

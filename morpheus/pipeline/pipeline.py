@@ -1,45 +1,22 @@
 import asyncio
 import concurrent.futures
-import dataclasses
-import io
-import json
+
+import distributed
+
 from morpheus.config import Config
-import os
 import queue
-import re
 import sys
-import threading
 import time
 import typing
 from abc import ABC, abstractmethod
-from asyncio.events import get_event_loop
-from collections import defaultdict, deque
-from ctypes import c_void_p
-from functools import reduce
-import shutil
-import warnings
 
 import cudf
-import cupy as cp
-# import pycuda.autoinit
-# import pycuda.driver as cuda
-import docker
-import grpc.aio
-import numpy as np
-import pandas as pd
-import streamz
-import torch
 from distributed.client import wait
 from streamz import Source
 from streamz.core import Stream
-from streamz.dataframe import DataFrame
-from torch.utils.dlpack import from_dlpack, to_dlpack
-from tornado import gen
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
-from tqdm.contrib import DummyTqdmFile
-
-from morpheus.utils.async_map import async_map
+import typing_utils
 
 # # Add generated proto output to the path. Stupid. See https://github.com/protocolbuffers/protobuf/issues/1491
 # sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "services")))
@@ -52,6 +29,22 @@ orig_out_err = sys.stdout, sys.stderr
 
 config = Config.get()
 
+def get_time_ms():
+    return round(time.time() * 1000)
+
+T = typing.TypeVar('T')
+
+# class StreamFuture(typing.Generic[T]):
+#     pass
+
+# StreamFuture = typing._alias(distributed.client.Future, typing.T_co)
+
+# class StreamFuture(distributed.client.Future, typing.Generic[T]):
+#     pass
+
+StreamFuture = typing._GenericAlias(distributed.client.Future, T, special=True, inst=False, name="StreamFuture")
+
+StreamPair = typing.Tuple[Stream, typing.Type]
 
 class StreamWrapper(ABC):
     def __init__(self, c: Config):
@@ -66,7 +59,7 @@ class StreamWrapper(ABC):
         pass
 
     @abstractmethod
-    async def build(self, input_stream: Stream) -> Stream:
+    async def build(self, input_stream: StreamPair) -> StreamPair:
         pass
 
 
@@ -85,80 +78,25 @@ class SourceStage(StreamWrapper):
     def add_done_callback(self, cb):
         self._done_callbacks.append(cb)
 
-    async def build(self, input_stream: Stream) -> Stream:
+    async def build(self, input_stream: StreamPair) -> StreamPair:
 
         assert input_stream is None, "Sources shouldnt have input streams"
 
         self._input_stream = None
 
-        self._output_stream = await self._build()
+        output = await self._build()
+
+        self._output_stream = output[0]
 
         if (self._post_sink_fn is not None):
-            self._output_stream.sink(self._post_sink_fn)
+            self._output_stream.gather().sink(self._post_sink_fn)
 
-        return self._output_stream
+        return output
 
     @abstractmethod
-    async def _build(self) -> Stream:
+    async def _build(self) -> StreamPair:
 
         pass
-
-# @Stream.register_api()
-# class source_done(Stream):
-#     """ Apply a function to every element in the stream
-
-#     Parameters
-#     ----------
-#     func: callable
-#     *args :
-#         The arguments to pass to the function.
-#     **kwargs:
-#         Keyword arguments to pass to func
-
-#     Examples
-#     --------
-#     >>> source = Stream()
-#     >>> source.map(lambda x: 2*x).sink(print)
-#     >>> for i in range(5):
-#     ...     source.emit(i)
-#     0
-#     2
-#     4
-#     6
-#     8
-#     """
-#     def __init__(self, upstream, func, *args, **kwargs):
-#         self.func = func
-#         # this is one of a few stream specific kwargs
-#         stream_name = kwargs.pop('stream_name', None)
-#         self.executor = kwargs.pop('executor', None)
-#         self.kwargs = kwargs
-#         self.args = args
-
-#         Stream.__init__(self, upstream, stream_name=stream_name, ensure_io_loop=True)
-
-#     @gen.coroutine
-#     def update(self, x, who=None, metadata=None):
-
-#         if (metadata is not None and any(map(lambda x: x.get("complete", False)), metadata)):
-#             return self._emit(x, metadata=metadata)
-#         else:
-
-
-#         try:
-#             self._retain_refs(metadata)
-#             r = self.func(x, *self.args, **self.kwargs)
-#             result = yield r
-#         except Exception as e:
-#             # logger.exception(e)
-#             print(e)
-#             raise
-#         else:
-#             emit = yield self._emit(result, metadata=metadata)
-
-#             # return emit
-#         finally:
-#             self._release_refs(metadata)
 
 class Stage(StreamWrapper):
     def __init__(self, c: Config):
@@ -173,12 +111,12 @@ class Stage(StreamWrapper):
     def accepted_types(self) -> typing.Tuple:
         pass
 
-    async def build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+    async def build(self, input_stream: StreamPair) -> StreamPair:
 
         assert input_stream is not None, "Sources must have input streams"
         
         # Check the type. Convert Any to object
-        if (not issubclass(input_stream[1], tuple(map(lambda x: object if x is typing.Any else x, self.accepted_types())))):
+        if (not typing_utils.issubtype(input_stream[1], typing.Union[self.accepted_types()])):
             raise RuntimeError("The {} stage cannot handle input of {}. Accepted input types: {}".format(
                 self.name, input_stream[1], self.accepted_types()))
 
@@ -192,13 +130,13 @@ class Stage(StreamWrapper):
         self._output_stream = output[0]
 
         if (self._post_sink_fn is not None):
-            self._output_stream.sink(self._post_sink_fn)
+            self._output_stream.gather().sink(self._post_sink_fn)
 
-        self._output_stream.add_done_callback(self._on_complete)
+        # self._output_stream.add_done_callback(self._on_complete)
 
         return output
 
-    async def _build(self, input_stream: typing.Tuple[Stream, typing.Type]) -> typing.Tuple[Stream, typing.Type]:
+    async def _build(self, input_stream: StreamPair) -> StreamPair:
 
         pass
 
@@ -225,6 +163,8 @@ class Pipeline():
 
         self.batch_size = c.pipeline_batch_size
 
+        self._use_dask = c.use_dask
+
     @property
     def thread_pool(self):
         return self._thread_pool
@@ -249,23 +189,34 @@ class Pipeline():
 
     async def build_and_start(self):
 
+        if (self._use_dask):
+            tqdm.write("====Launching Dask====")
+            from distributed import Client
+            self._client: Client = await Client(loop=IOLoop.current(), processes=True, asynchronous=True)
+
         tqdm.write("====Building Pipeline====")
 
-        self._source_stream = await self._source_stage.build(None)
+        source_stream_pair = await self._source_stage.build(None)
+        self._source_stream = source_stream_pair[0]
 
         self._source_stage.add_done_callback(self._on_input_complete)
 
         # Add the ID single threaded
-        current_stream = self._source_stream.map(self._add_id_col)
-        currend_stream_and_type = current_stream, cudf.DataFrame
+        current_stream_and_type = source_stream_pair
+        current_stream_and_type = current_stream_and_type[0].map(self._add_id_col), current_stream_and_type[1]
 
-        tqdm.write("Added source: {} -> {}".format(self._source_stage.name, currend_stream_and_type[1].__name__))
+
+        tqdm.write("Added source: {} -> {}".format(self._source_stage.name, current_stream_and_type[1].__name__))
+
+        # If using dask, scatter here
+        if (self._use_dask):
+            current_stream_and_type = current_stream_and_type[0].scatter(), StreamFuture[current_stream_and_type[1]]
 
         # Now loop over stages
         for s in self._stages:
-            currend_stream_and_type = await s.build(currend_stream_and_type)
+            current_stream_and_type = await s.build(current_stream_and_type)
 
-            tqdm.write("Added stage: {} -> {}".format(s.name, currend_stream_and_type[1].__name__))
+            tqdm.write("Added stage: {} -> {}".format(s.name, str(current_stream_and_type[1])))
 
         tqdm.write("====Starting Inference====")
 
