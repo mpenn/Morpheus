@@ -1,7 +1,7 @@
-name: "bert_trt"
+name: "mini_bert_trt"
 platform: "tensorrt_plan"
-max_batch_size: 8
-default_model_filename: "triton_bert_large_256-b1_8-b1_16-b1_32.engine"
+max_batch_size: 32
+default_model_filename: "mini_bert_b1-8_b1-16_b1-32.engine"
 
 input [
   {
@@ -10,26 +10,21 @@ input [
     dims: [ 256 ]
   },
   {
-    name: "segment_ids"
-    data_type: TYPE_INT32
-    dims: [ 256 ]
-  },
-  {
-    name: "input_mask"
+    name: "attention_mask"
     data_type: TYPE_INT32
     dims: [ 256 ]
   }
 ]
 output [
   {
-    name: "cls_squad_logits"
+    name: "output"
     data_type: TYPE_FP32
-    dims: [ 256, 2, 1, 1 ]
+    dims: [ 10 ]
   }
 ]
 
 dynamic_batching { 
-  preferred_batch_size: [ 1, 4, 8 ]
+  preferred_batch_size: [ 1, 4, 8, 12, 16, 20, 24, 28, 32 ]
   max_queue_delay_microseconds: 50000
 }
 
@@ -37,6 +32,6 @@ instance_group [
   {
     count: 1
     kind: KIND_GPU
-    profile: ["0"]
+    profile: ["2"]
   }
 ]
