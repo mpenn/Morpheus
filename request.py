@@ -1,8 +1,10 @@
 import dataclasses
+import threading
 import cupy as cp
 import typing
 from cudf_subword_helper import Feature, tokenize_text_series
 import cudf
+import pandas as pd
 
 
 @dataclasses.dataclass
@@ -75,14 +77,19 @@ class MultiRequest:
 
         return out
 
-    def create(input_ids: cp.ndarray, input_mask: cp.ndarray, segment_ids: cp.ndarray,
-               input_str: typing.List[str], timestamp: typing.List[int]) -> "MultiRequest":
-        data = RequestData(count=input_ids.shape[0],
-                           input_ids=input_ids,
-                           input_mask=input_mask,
-                           segment_ids=segment_ids,
-                           input_str=input_str,
-                           timestamp=timestamp,)
+    def create(input_ids: cp.ndarray,
+               input_mask: cp.ndarray,
+               segment_ids: cp.ndarray,
+               input_str: typing.List[str],
+               timestamp: typing.List[int]) -> "MultiRequest":
+        data = RequestData(
+            count=input_ids.shape[0],
+            input_ids=input_ids,
+            input_mask=input_mask,
+            segment_ids=segment_ids,
+            input_str=input_str,
+            timestamp=timestamp,
+        )
 
         out = MultiRequest(offset=0, count=data.count, data=data)
 
@@ -211,3 +218,144 @@ class SingleResponse:
             out.append(SingleResponse(data=data, offset=i))
 
         return out
+
+
+@dataclasses.dataclass
+class MessageMeta:
+    df: pd.DataFrame
+    input_json: typing.List[str]
+
+    @property
+    def count(self) -> int:
+        return len(self.df)
+
+
+message_counter = 0
+message_counter_lock = threading.Lock()
+
+
+def get_next_id():
+    with message_counter_lock:
+        next_id = message_counter
+        message_counter += 1
+        return next_id
+
+
+@dataclasses.dataclass
+class Message:
+    meta: MessageMeta = dataclasses.field(repr=False)
+    meta_idx: int
+
+
+@dataclasses.dataclass
+class MultiMessage:
+    # def __init__(self, meta: MessageMeta, count: int, offset: int):
+
+    #     self._meta = meta
+    #     self.count = count
+    #     self.offset = offset
+
+    meta: MessageMeta = dataclasses.field(repr=False)
+    mess_offset: int
+    mess_count: int
+
+    # @property
+    # def meta(self):
+    #     return self._meta
+
+    @property
+    def data_col(self):
+        return self.get_meta("data")
+
+    @property
+    def data(self) -> typing.List[str]:
+        return self.get_meta_list("data")
+
+    @property
+    def id_col(self):
+        return self.get_meta("ID")
+
+    @property
+    def id(self) -> typing.List[int]:
+        return self.get_meta_list("ID")
+
+    def get_meta(self, col_name: str):
+        return self.meta.df.loc[self.mess_offset:self.mess_offset + self.mess_count, col_name]
+
+    def get_meta_list(self, col_name: str = None):
+        return self.get_meta(col_name=col_name).to_list()
+
+    def set_meta(self, col_name: str, value):
+        self.meta.df.loc[self.mess_offset:self.mess_offset + self.mess_count, col_name] = value
+
+
+@dataclasses.dataclass
+class InferenceMemory:
+    count: int
+    input_ids: cp.ndarray
+    input_mask: cp.ndarray
+    seq_ids: cp.ndarray
+
+
+@dataclasses.dataclass
+class MultiInferenceMessage(MultiMessage):
+    # def __init__(self,
+    #              meta: MessageMeta,
+    #              count: int,
+    #              offset: int,
+    #              memory: InferenceMemory):
+    #     super().__init__(meta=meta, count=count, offset=offset)
+
+    #     self._memory = memory
+
+    memory: InferenceMemory = dataclasses.field(repr=False)
+    offset: int
+    count: int
+
+    @property
+    def input_ids(self):
+        return self.memory.input_ids[self.offset:self.offset + self.count, :]
+
+    @property
+    def input_mask(self):
+        return self.memory.input_mask[self.offset:self.offset + self.count, :]
+
+    @property
+    def seq_ids(self):
+        return self.memory.seq_ids[self.offset:self.offset + self.count, :]
+
+    def get_slice(self, start, stop):
+        mess_start = self.seq_ids[start, 0].item()
+        mess_stop = self.seq_ids[stop - 1, 0].item() + 1
+        return MultiInferenceMessage(meta=self.meta,
+                                     mess_offset=mess_start,
+                                     mess_count=mess_stop - mess_start,
+                                     memory=self.memory,
+                                     offset=start,
+                                     count=stop - start)
+
+
+@dataclasses.dataclass
+class ResponseMemory:
+    count: int
+    probs: cp.ndarray
+
+
+@dataclasses.dataclass
+class MultiResponseMessage(MultiMessage):
+    # def __init__(self,
+    #              meta: MessageMeta,
+    #              count: int,
+    #              offset: int,
+    #              memory: ResponseMemory):
+    #     super().__init__(meta=meta, count=count, offset=offset)
+
+    #     self._memory = memory
+
+    memory: ResponseMemory = dataclasses.field(repr=False)
+    offset: int
+    count: int
+
+    @property
+    def probs(self):
+        return self.memory.probs[self.offset:self.offset + self.count, :]

@@ -1,7 +1,7 @@
-name: "bert_trt"
+name: "mini_bert_trt"
 platform: "tensorrt_plan"
 max_batch_size: 8
-default_model_filename: "triton_bert_large_256-b1_8-b1_16-b1_32.engine"
+default_model_filename: "mini_bert.engine"
 
 input [
   {
@@ -10,21 +10,16 @@ input [
     dims: [ 256 ]
   },
   {
-    name: "segment_ids"
-    data_type: TYPE_INT32
-    dims: [ 256 ]
-  },
-  {
-    name: "input_mask"
+    name: "attention_mask"
     data_type: TYPE_INT32
     dims: [ 256 ]
   }
 ]
 output [
   {
-    name: "cls_squad_logits"
+    name: "output"
     data_type: TYPE_FP32
-    dims: [ 256, 2, 1, 1 ]
+    dims: [ 10 ]
   }
 ]
 

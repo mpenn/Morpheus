@@ -50,10 +50,13 @@ def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
     """
     #print("Tokenizing Text Series")
     if len(text_ser) == 0:
-        return {"token_ar": None, "attention_ar": None, "metadata": None}
+        return Feature(None, None, None)
 
     max_rows_tensor = len(text_ser) * 2
     max_length = seq_len
+
+    auto_stride = seq_len // 2
+    auto_stride = auto_stride + auto_stride // 2
 
     tokens, attention_masks, metadata = text_ser.str.subword_tokenize(
         vocab_hash_file,
@@ -61,7 +64,7 @@ def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
         max_rows_tensor=max_rows_tensor,
         stride=stride,
         max_length=max_length,
-        do_truncate=True,
+        do_truncate=False,
     )
     del text_ser
     ### reshape metadata into a matrix
@@ -70,14 +73,8 @@ def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
     ## Attention mask
     attention_masks = attention_masks.reshape(-1, max_length)
     
-    ### Hard coding segment_ids
-    segment_ids = cp.zeros(127,dtype=cp.int32)
-    segment_ids[11:106] = 1
-    
     output_f=Feature(input_ids=tokens,
             input_mask =attention_masks,
             segment_ids = metadata)    
-
-   
         
     return output_f

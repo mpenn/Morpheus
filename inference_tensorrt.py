@@ -22,6 +22,8 @@ def onnx_to_engine(runtime, onnx_file):
     matching_engine = os.path.splitext(onnx_file)[0] + ".engine"
 
     if (os.path.exists(matching_engine)):
+        print("Found matching engine file at '{}'. Loading the engine instead...".format(matching_engine))
+
         # Deserialize and return the engine
         with open(matching_engine, "rb") as f:
 
@@ -36,18 +38,34 @@ def onnx_to_engine(runtime, onnx_file):
                 for error in range(parser.num_errors):
                     print(parser.get_error(error))
                 raise Exception("Count not parse Onnx file. See log.")
-            
+
         # Now we need to build and serialize the model
         with builder.create_builder_config() as builder_config:
+
             builder_config.max_workspace_size = 16000 * (1024 * 1024)
             builder_config.set_flag(trt.BuilderFlag.FP16)
 
+            # Create the optimization files
+            prev_batch_size = 0
+            batch_sizes = [8]
+            for batch_size in sorted(batch_sizes):
+                profile = builder.create_optimization_profile()
+
+                min_shape = (prev_batch_size + 1, config.model.seq_length)
+                shape = (batch_size, config.model.seq_length)
+
+                for i in range(network.num_inputs):
+                    in_tensor = network.get_input(i)
+                    profile.set_shape(in_tensor.name, min=min_shape, opt=shape, max=shape)
+
+                builder_config.add_optimization_profile(profile)
+
             # Actually build the engine
-            print("Building engine")
+            print("Building engine. This may take a while...")
             engine = builder.build_engine(network, builder_config)
 
             # Now save a copy to prevent building next time
-            print("Writing engine to: {}".format())
+            print("Writing engine to: {}".format(matching_engine))
             serialized_engine = engine.serialize()
 
             with open(matching_engine, "wb") as f:
@@ -69,7 +87,7 @@ def build_engine(runtime, model_file):
         return onnx_to_engine(runtime, model_file)
 
 
-def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
+def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
 
     # pyc_dev = pycuda.autoinit.device
     # pyc_ctx = pyc_dev.retain_primary_context()
@@ -81,7 +99,7 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
     #                 unit="inf",
     #                 mininterval=1.0)
 
-    locked_profile = 2  # -1 to unlock
+    locked_profile = 0  # -1 to unlock
     bs_to_profile = {}
 
     def choose_profile(engine, context) -> int:
@@ -106,10 +124,14 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
             return selected_profile
 
-    model_file = "triton_models/bert_trt/1/triton_bert_large_128-b1_8-b1_16-b1_32.engine"
+    # model_file = "triton_models/bert_trt/1/triton_bert_large_256-b1_8-b1_16-b1_32.engine"
     # model_file = "triton_models/bert_trt/1/triton_bert_large_128-b8-b9.engine"
+    # model_file = "triton_models/pii_onnx/1/model_10labels_256seqV3.onnx"
+    model_file = ".tmp/models_onnx/mini_bert.onnx"
 
-    with trt.Runtime(TRT_LOGGER) as runtime, build_engine(runtime, model_file=model_file) as engine, engine.create_execution_context() as context:
+    with trt.Runtime(TRT_LOGGER) as runtime, \
+         build_engine(runtime, model_file=model_file) as engine, \
+         engine.create_execution_context() as context:
 
         # stream = cuda.Stream()
         stream = cp.cuda.Stream(non_blocking=True)
@@ -119,25 +141,38 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
         max_profile = 0
         num_binding_per_profile = engine.num_bindings // engine.num_optimization_profiles
 
+        num_inputs = 0
+
+        for i in range(num_binding_per_profile):
+            if (engine.binding_is_input(i)):
+                num_inputs += 1
+
+        output_binding_offset = num_inputs
+
+        def get_binding(profile: int, binding_offset: int):
+            return profile * num_binding_per_profile + binding_offset
+
+        def get_output_binding(profile: int):
+            return get_binding(profile, output_binding_offset)
+
         # Get the max size from the engine
         for idx in range(engine.num_optimization_profiles):
-            profile_in_shape = engine.get_profile_shape(profile_index=idx, binding=idx * num_binding_per_profile)
+            profile_in_shape = engine.get_profile_shape(profile_index=idx, binding=get_binding(idx, 0))
 
             # Activate the profile
             context.active_optimization_profile = idx
 
             # Ensure all inputs are set to the max value to calc the output
-            for i in range(3):
-                context.set_binding_shape(idx * num_binding_per_profile + i, profile_in_shape[2])
+            for i in range(num_inputs):
+                context.set_binding_shape(get_binding(idx, i), profile_in_shape[2])
 
-            prof_in_nbytes = trt.volume(profile_in_shape[2]) * engine.get_binding_dtype(idx * num_binding_per_profile).itemsize
+            prof_in_nbytes = trt.volume(profile_in_shape[2]) * engine.get_binding_dtype(get_binding(idx, 0)).itemsize
 
             assert context.all_binding_shapes_specified
 
             # Calc the output
             prof_out_nbytes = trt.volume(
-                context.get_binding_shape(idx * num_binding_per_profile +
-                                          3)) * engine.get_binding_dtype(idx * num_binding_per_profile + 3).itemsize
+                context.get_binding_shape(get_output_binding(idx))) * engine.get_binding_dtype(get_output_binding(idx)).itemsize
 
             if (prof_in_nbytes > input_nbytes_max):
                 input_nbytes_max = prof_in_nbytes
@@ -148,22 +183,21 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
             context.active_optimization_profile = locked_profile
 
             # Set the max size so we can determine the output max size
-            for i in range(3):
-                context.set_binding_shape(locked_profile * num_binding_per_profile + i,
-                                          engine.get_profile_shape(profile_index=locked_profile, binding=locked_profile * num_binding_per_profile + i)[2])
+            for i in range(num_inputs):
+                context.set_binding_shape(get_binding(locked_profile, i),
+                                          engine.get_profile_shape(profile_index=locked_profile, binding=get_binding(locked_profile, i))[2])
 
             assert context.all_binding_shapes_specified
 
             input_nbytes_max = trt.volume(context.get_binding_shape(
-                locked_profile * num_binding_per_profile)) * engine.get_binding_dtype(
-                    locked_profile * num_binding_per_profile).itemsize
+                get_binding(locked_profile, 0))) * engine.get_binding_dtype(
+                    get_binding(locked_profile, 0)).itemsize
             output_nbytes_max = trt.volume(
-                context.get_binding_shape(locked_profile * num_binding_per_profile +
-                                          3)) * engine.get_binding_dtype(locked_profile * num_binding_per_profile + 3).itemsize
+                context.get_binding_shape(get_output_binding(locked_profile))) * engine.get_binding_dtype(get_output_binding(locked_profile)).itemsize
 
         # Allocate device memory for inputs.
         # d_inputs = [cuda.mem_alloc(input_nbytes_max) for _ in range(3)]
-        d_inputs = [cp.cuda.alloc(input_nbytes_max) for _ in range(3)]
+        d_inputs = [cp.cuda.alloc(input_nbytes_max) for _ in range(num_inputs)]
 
         # Allocate output buffer by querying the size from the context. This may be different for different input shapes.
         # h_output = cuda.pagelocked_empty(tuple(context.get_binding_shape(3)), dtype=np.float32)
@@ -177,6 +211,9 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
         prev_event = cp.cuda.Event(block=True, disable_timing=True)
         stream.record(prev_event)
+
+        if (ready_event is not None):
+            loop.asyncio_loop.call_soon_threadsafe(ready_event.set)
 
         while True:
 
@@ -216,13 +253,11 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
 
                 previous_profile = curr_profile
 
-            binding_idx_offset = curr_profile * num_binding_per_profile
-
             # Now set the batch settings
             if (batch_size != previous_bs or True):
 
-                for binding in range(3):
-                    context.set_binding_shape(binding_idx_offset + binding, input_shape)
+                for binding in range(num_inputs):
+                    context.set_binding_shape(get_binding(curr_profile, binding), input_shape)
                 assert context.all_binding_shapes_specified
 
                 previous_bs = batch_size
@@ -244,11 +279,17 @@ def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):
             assert batch.segment_ids.nbytes <= input_nbytes_max
             assert batch.input_mask.nbytes <= input_nbytes_max
 
-            d_inputs[0].copy_from_device_async(batch.input_ids.data, batch.input_ids.nbytes, stream=stream)
-            d_inputs[1].copy_from_device_async(batch.segment_ids.data, batch.segment_ids.nbytes, stream=stream)
-            d_inputs[2].copy_from_device_async(batch.input_mask.data, batch.input_mask.nbytes, stream=stream)
+            if (len(d_inputs) == 3):
+                d_inputs[0].copy_from_device_async(batch.input_ids.data, batch.input_ids.nbytes, stream=stream)
+                d_inputs[1].copy_from_device_async(batch.segment_ids.data, batch.segment_ids.nbytes, stream=stream)
+                d_inputs[2].copy_from_device_async(batch.input_mask.data, batch.input_mask.nbytes, stream=stream)
+            elif (len(d_inputs) == 2):
+                d_inputs[0].copy_from_device_async(batch.input_ids.data, batch.input_ids.nbytes, stream=stream)
+                d_inputs[1].copy_from_device_async(batch.input_mask.data, batch.input_mask.nbytes, stream=stream)
+            else:
+                raise Exception("Unexpected number of inputs")
 
-            bindings = [0] * binding_idx_offset + [int(d_inp) for d_inp in d_inputs] + [int(d_output)]
+            bindings = [0] * get_binding(curr_profile, 0) + [int(d_inp) for d_inp in d_inputs] + [int(d_output)]
 
             # context.execute_async_v2(bindings=bindings, stream_handle=stream.handle)
             context.execute_async_v2(bindings=bindings, stream_handle=stream.ptr)

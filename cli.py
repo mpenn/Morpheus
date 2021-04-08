@@ -1,3 +1,4 @@
+from pipeline import BufferStage, TqdmStage
 from click.decorators import option
 import configargparse
 import docker
@@ -17,14 +18,26 @@ if __name__ == '__main__':
                                 env_var='CLX_INFERENCE_PIPELINE')
 
     model_group = p.add_argument_group(title="model", description="Options related to the model")
-    model_group.add_argument("--vocab_hash_file", type=str, default=DEFAULT_CONFIG.model.vocab_hash_file, env_var='CLX_MODEL_VOCAB_HASH_FILE')
+    model_group.add_argument("--vocab_hash_file",
+                             type=str,
+                             default=DEFAULT_CONFIG.model.vocab_hash_file,
+                             env_var='CLX_MODEL_VOCAB_HASH_FILE')
     model_group.add_argument("--seq_length", type=int, default=DEFAULT_CONFIG.model.seq_length, env_var='CLX_MODEL_SEQ_LENGTH')
-    model_group.add_argument("--max_batch_size", type=int, default=DEFAULT_CONFIG.model.max_batch_size, env_var='CLX_MODEL_MAX_BATCH_SIZE')
+    model_group.add_argument("--max_batch_size",
+                             type=int,
+                             default=DEFAULT_CONFIG.model.max_batch_size,
+                             env_var='CLX_MODEL_MAX_BATCH_SIZE')
 
     kafka_group = p.add_argument_group(title="kafka", description="Options related to Kafka")
-    kafka_group.add_argument("--bootstrap_servers", type=str, default=DEFAULT_CONFIG.kafka.bootstrap_servers, env_var='CLX_KAFKA_BOOTSTRAP_SERVERS')
+    kafka_group.add_argument("--bootstrap_servers",
+                             type=str,
+                             default=DEFAULT_CONFIG.kafka.bootstrap_servers,
+                             env_var='CLX_KAFKA_BOOTSTRAP_SERVERS')
     kafka_group.add_argument("--input_topic", type=str, default=DEFAULT_CONFIG.kafka.input_topic, env_var='CLX_KAFKA_INPUT_TOPIC')
-    kafka_group.add_argument("--output_topic", type=str, default=DEFAULT_CONFIG.kafka.output_topic, env_var='CLX_KAFKA_OUTPUT_TOPIC')
+    kafka_group.add_argument("--output_topic",
+                             type=str,
+                             default=DEFAULT_CONFIG.kafka.output_topic,
+                             env_var='CLX_KAFKA_OUTPUT_TOPIC')
 
     subparsers = p.add_subparsers(help='sub-command help')
 
@@ -75,17 +88,47 @@ if __name__ == '__main__':
 
         print("Auto determined Bootstrap Servers: {}".format(c.kafka.bootstrap_servers))
 
-
     stage = getattr(options, "stage", "pipeline")
 
-    if (stage == "pipeline"):
+    # if (stage == "pipeline"):
 
-        from grpc_pipeline import run_pipeline
+    #     from grpc_pipeline import run_pipeline
 
-        run_pipeline()
+    #     run_pipeline()
 
-    elif (stage == "preprocess"):
+    # elif (stage == "preprocess"):
 
-        from grpc_preprocessing import run
+    #     from grpc_preprocessing import run
 
-        run()
+    #     run()
+
+    from pipeline import Pipeline, SourceStage, Stage, FileSourceStage2, DeserializeStage, PreprocessStage, KafkaSourceStage
+
+    pipeline = Pipeline(c)
+
+    pipeline.set_source(FileSourceStage2(c))
+
+    pipeline.add_stage(TqdmStage(c, progress_desc="Input Message Rate"))
+
+    pipeline.add_stage(BufferStage(c, buffer_count=1000))
+
+    pipeline.add_stage(DeserializeStage(c))
+    pipeline.add_stage(PreprocessStage(c))
+
+    if (c.general.pipeline == "triton"):
+        from inference_triton import TritonInferenceStage
+        pipeline.add_stage(TritonInferenceStage(c))
+    elif (c.general.pipeline == "pytorch"):
+        from inference_pytorch import inference_worker
+    elif (c.general.pipeline == "tensorrt"):
+        from inference_tensorrt import inference_worker
+    elif (c.general.pipeline == "triton_onnx"):
+        from inference_triton_onnx import inference_worker
+    else:
+        raise Exception("Unknown inference pipeline: '{}'".format(c.general.pipeline))
+
+    pipeline.add_stage(TqdmStage(c, progress_desc="Inference Rate", smoothing=0.001, unit="inf"))
+
+    # pipeline.set_source(KafkaSourceStage(c))
+
+    pipeline.run()

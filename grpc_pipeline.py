@@ -132,9 +132,6 @@ class async_map(Stream):
 
 config = Config.get()
 
-total_log_count = 43862
-
-
 def grpc_to_cupy(in_grpc: request_pb2.CudaArrayPayload):
 
     # return cp.zeros(tuple(in_grpc.shape), dtype=np.dtype(in_grpc.typestr))
@@ -176,12 +173,6 @@ def batchsingle_to_multi(single_requests: typing.List[SingleRequest]):
 async def main_loop():
 
     inf_queue = queue.Queue()
-
-    def queue_batch(messages: MultiRequest):
-
-        # queue_progress.update(messages.count)
-
-        inf_queue.put(messages)
 
     def build_source() -> typing.Tuple[streamz.Source, int]:
 
@@ -261,7 +252,7 @@ async def main_loop():
 
     channel = grpc.aio.insecure_channel('localhost:50051')
 
-    await asyncio.wait_for(channel.channel_ready(), timeout=30.0)
+    await asyncio.wait_for(channel.channel_ready(), timeout=60.0)
     print("Connected to Preprocessing Server!")
 
     progress = tqdm(desc="Running Inference for PII",
@@ -340,6 +331,9 @@ async def main_loop():
     #     progress.update(inf_out[0].count)
 
     def out_sink(message):
+        if (progress.n == 0):
+            progress.unpause()
+
         progress.update(message.count)
         # print(message)
 
