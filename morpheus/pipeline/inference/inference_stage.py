@@ -112,9 +112,7 @@ class InferenceStage(Stage):
 
         for start, stop in out_batches:
 
-            
-
-            out_resp.append()
+            out_resp.append(x.get_slice(start, stop))
 
             # self._progress.update(out_resp[-1].mess_count)
 

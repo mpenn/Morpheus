@@ -1,18 +1,18 @@
 name: "mini_bert_trt"
 platform: "tensorrt_plan"
 max_batch_size: 32
-default_model_filename: "mini_bert_128seq_b1-8_b1-16_b1-32.engine"
+default_model_filename: "mini_bert_b1-8_b1-16_b1-32.engine"
 
 input [
   {
     name: "input_ids"
     data_type: TYPE_INT32
-    dims: [ 128 ]
+    dims: [ 256 ]
   },
   {
     name: "attention_mask"
     data_type: TYPE_INT32
-    dims: [ 128 ]
+    dims: [ 256 ]
   }
 ]
 output [
