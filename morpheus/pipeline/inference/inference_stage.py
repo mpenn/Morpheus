@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from functools import reduce
-from morpheus.pipeline.pipeline import StreamFuture, StreamPair
+from morpheus.pipeline.pipeline import StreamFuture, StreamPair, get_time_ms
 import queue
 import time
 import typing
@@ -195,6 +195,6 @@ class InferenceStage(Stage):
 
     def post_timestamps(self, x: MultiResponseMessage):
 
-        curr_time = time.time()
+        curr_time = get_time_ms()
 
         x.set_meta("ts_" + self.name, curr_time)
