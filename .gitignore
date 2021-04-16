@@ -186,6 +186,7 @@ tags
 .tmp
 viz_frames*
 notebooks/output
+dask-worker-space
 *.dirlock
 *.lock
 triton_models/**/*.onnx
