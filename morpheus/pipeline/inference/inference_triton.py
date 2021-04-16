@@ -1,21 +1,21 @@
 import asyncio
 import base64
-from morpheus.config import Config
-import threading
-
-from tornado.ioloop import IOLoop
-from functools import partial
-import tritonclient.grpc as tritonclient
-from tritonclient.grpc.model_config_pb2 import DataType
-from tqdm import tqdm
-import typing
-from morpheus.pipeline.messages import MultiInferenceMessage, MultiRequest, MultiResponse, ResponseData, ResponseMemory
 import queue
-import numpy as np
+import threading
+import typing
+from functools import partial
+
 import cupy as cp
-import tritonclient.utils.cuda_shared_memory as cudashm
+import numpy as np
+import tritonclient.grpc as tritonclient
+from tornado.ioloop import IOLoop
 from tritonclient.utils import triton_to_np_dtype
+
+from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.messages import ResponseMemory
 
 
 class RecursiveQueue(queue.Queue):
@@ -118,63 +118,6 @@ class ShmWrapper:
         return self._config[name]["ptr"]
 
 
-def inference_worker(loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
-
-    triton_client = tritonclient.InferenceServerClient(url="localhost:8001", verbose=False)
-
-    mem_pool = ResourcePool(lambda: 0, max_size=1000)
-
-    while True:
-
-        # Get the next work item
-        message: typing.Tuple[MultiInferenceMessage, asyncio.Future] = inf_queue.get(block=True)
-
-        batch = message[0]
-        fut = message[1]
-
-        # Acquire a shared memory wrapper
-        mem = mem_pool.borrow()
-
-        def infer_callback(f, result, error):
-            def tmp(r, e):
-                try:
-                    if (error):
-                        f.set_exception(e)
-                    else:
-                        f.set_result(
-                            MultiResponse(
-                                data=ResponseData(count=batch.count,
-                                                  probs=cp.zeros((batch.count, 10), dtype=np.int32),
-                                                  input_str=batch.input_str,
-                                                  timestamp=batch.timestamp),
-                                offset=0,
-                                count=batch.count,
-                            ))
-                finally:
-                    mem_pool.return_obj(mem)
-
-            loop.add_callback(tmp, result, error)
-
-        inputs: typing.List[tritonclient.InferInput] = [
-            tritonclient.InferInput("input_ids", list(batch.input_ids.shape), "INT32"),
-            tritonclient.InferInput("segment_ids", list(batch.input_ids.shape), "INT32"),
-            tritonclient.InferInput("input_mask", list(batch.input_mask.shape), "INT32"),
-        ]
-
-        input_ids_np = batch.input_ids.astype(np.int32).get()
-
-        inputs[0].set_data_from_numpy(input_ids_np)
-        inputs[1].set_data_from_numpy(np.zeros_like(input_ids_np))
-        inputs[2].set_data_from_numpy(batch.input_mask.astype(np.int32).get())
-
-        outputs = [
-            tritonclient.InferRequestedOutput("cls_squad_logits"),
-        ]
-
-        # Inference call
-        triton_client.async_infer(model_name="bert_trt", inputs=inputs, callback=partial(infer_callback, fut), outputs=outputs)
-
-
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
 class TritonInference:
     def __init__(self, c: Config, model_name: str, server_url: str):
@@ -242,41 +185,16 @@ class TritonInference:
                     ))
                 self._mem_pool.return_obj(m)
 
-            # if (error):
-            #     loop.call_soon_threadsafe(fut.set_exception, error)
-            # else:
-            #     # progress.update(n=batch.count)
-            #     loop.call_soon_threadsafe(fut.set_result, result)
             self._loop.add_callback(tmp, result, error)
 
-        inputs: typing.List[tritonclient.InferInput] = [
-            # tritonclient.InferInput("input_ids", list(batch.input_ids.shape), "INT32"),
-            # tritonclient.InferInput("attention_mask", list(batch.input_mask.shape), "INT32"),
-        ]
+        inputs: typing.List[tritonclient.InferInput] = []
 
         if (self._requires_seg_ids):
             inputs.append(tritonclient.InferInput("token_type_ids", list(batch.input_ids.shape), "INT32"))
 
-        # input_ids_np = batch.input_ids.astype(np.int32).get()
-
-        # inputs[0].set_data_from_numpy(input_ids_np)
-        # inputs[1].set_data_from_numpy(np.zeros_like(input_ids_np))
-
-        # if (self._requires_seg_ids):
-        #     inputs[2].set_data_from_numpy(batch.input_mask.astype(np.int32).get())
-
         outputs = [
             tritonclient.InferRequestedOutput("output"),
         ]
-
-        # # Copy the incoming memory to shared
-        # mem["input_ids"].copy_from_device(batch.input_ids.data, batch.input_ids.nbytes)
-        # mem["attention_mask"].copy_from_device(batch.input_mask.data, batch.input_mask.nbytes)
-
-        # inputs[0].set_shared_memory(mem.region_name, mem.get_bytes("input_ids"), mem.get_offset("input_ids"))
-        # inputs[1].set_shared_memory(mem.region_name, mem.get_bytes("attention_mask"), mem.get_offset("attention_mask"))
-
-        # outputs[0].set_shared_memory(mem.region_name, mem.get_bytes("output"), mem.get_offset("output"))
 
         inputs.append(mem.build_input("input_ids", batch.input_ids))
         inputs.append(mem.build_input("attention_mask", batch.input_mask))
@@ -310,11 +228,9 @@ class TritonInferenceStage(InferenceStage):
         super().__init__(c)
 
         self._model_name = model_name
-        self._server_url=server_url
+        self._server_url = server_url
 
         self._requires_seg_ids = False
-
-        # self._worker = TritonInference(c, model_name=model_name, server_url=server_url)
 
     def _get_inference_fn(self) -> typing.Callable:
 

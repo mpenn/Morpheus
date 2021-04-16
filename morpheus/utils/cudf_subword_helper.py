@@ -1,7 +1,7 @@
-import cudf
-import cupy as cp
 import collections
 
+import cudf
+import cupy as cp
 
 Feature = collections.namedtuple(  # pylint: disable=invalid-name
     "Feature",

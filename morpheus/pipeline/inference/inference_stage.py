@@ -1,23 +1,24 @@
+import asyncio
+import queue
+import threading
+import typing
 from abc import abstractmethod
 from functools import reduce
-from morpheus.pipeline.pipeline import StreamFuture, StreamPair, get_time_ms
-import queue
-import time
-import typing
+
+import cupy as cp
+import typing_utils
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
-from morpheus.pipeline import Stage
-from morpheus.pipeline.messages import InferenceMemory, MessageMeta, MultiInferenceMessage, MultiMessage, MultiResponseMessage, ResponseMemory
+
 from morpheus.config import Config
-from tqdm import tqdm
-import cudf
-import threading
-import json
-from morpheus.utils.cudf_subword_helper import tokenize_text_series
-import cupy as cp
-import asyncio
-import numpy as np
-import typing_utils
+from morpheus.pipeline import Stage
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.messages import ResponseMemory
+from morpheus.pipeline.pipeline import StreamFuture
+from morpheus.pipeline.pipeline import StreamPair
+from morpheus.pipeline.pipeline import get_time_ms
+
 
 class InferenceStage(Stage):
     def __init__(self, c: Config):
@@ -30,7 +31,6 @@ class InferenceStage(Stage):
         self._inf_queue = queue.Queue()
 
         self._max_batch_size = c.model_max_batch_size
-
 
     @property
     def name(self) -> str:
@@ -47,7 +47,7 @@ class InferenceStage(Stage):
 
         wait_events = []
 
-        for i in range(1):
+        for _ in range(1):
             ready_event = asyncio.Event()
 
             threading.Thread(target=self._get_inference_fn(),
@@ -77,7 +77,9 @@ class InferenceStage(Stage):
             out_type = StreamFuture[MultiResponseMessage]
         else:
             # First convert to manageable batches. If the batches are too large, we cant process them
-            stream = stream.async_map(self._split_batches, executor=self._pipeline.thread_pool, max_batch_size=self._max_batch_size)
+            stream = stream.async_map(self._split_batches,
+                                      executor=self._pipeline.thread_pool,
+                                      max_batch_size=self._max_batch_size)
 
             # Queue the inference work
             stream = stream.async_map(self._queue_inf_work)
@@ -147,7 +149,6 @@ class InferenceStage(Stage):
         in_message = x[0]
         out_message = x[1]
 
-
         assert len(in_message) == len(out_message)
 
         # Get the total output size
@@ -178,8 +179,8 @@ class InferenceStage(Stage):
                 mess_ids = inf.seq_ids[:, 0].get().tolist()
 
                 # Out message has more reponses, so we have to do key based blending of probs
-                for i, id in enumerate(mess_ids):
-                    memory.probs[id, :] = cp.maximum(memory.probs[id, :], res.probs[i, :])
+                for i, idx in enumerate(mess_ids):
+                    memory.probs[idx, :] = cp.maximum(memory.probs[idx, :], res.probs[i, :])
 
             saved_count += inf.mess_count
 

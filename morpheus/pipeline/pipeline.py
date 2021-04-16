@@ -1,54 +1,39 @@
 import asyncio
 import concurrent.futures
-
-import distributed
-
-from morpheus.config import Config
 import queue
 import sys
 import time
 import typing
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import cudf
+import distributed
+import typing_utils
 from distributed.client import wait
 from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
-import typing_utils
 
-# # Add generated proto output to the path. Stupid. See https://github.com/protocolbuffers/protobuf/issues/1491
-# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "services")))
-
-# from services import request_pb2, request_pb2_grpc
-
-# # Redirect printing to tqdm
-orig_out_err = sys.stdout, sys.stderr
-
+from morpheus.config import Config
 
 config = Config.get()
+
 
 def get_time_ms():
     return round(time.time() * 1000)
 
+
 T = typing.TypeVar('T')
-
-# class StreamFuture(typing.Generic[T]):
-#     pass
-
-# StreamFuture = typing._alias(distributed.client.Future, typing.T_co)
-
-# class StreamFuture(distributed.client.Future, typing.Generic[T]):
-#     pass
 
 StreamFuture = typing._GenericAlias(distributed.client.Future, T, special=True, inst=False, name="StreamFuture")
 
 StreamPair = typing.Tuple[Stream, typing.Type]
 
+
 class StreamWrapper(ABC):
     def __init__(self, c: Config):
-        # self._prev_stage: Stage = None
         self._input_stream: Stream = None
         self._output_stream: Stream = None
         self._pipeline: Pipeline = None
@@ -98,6 +83,7 @@ class SourceStage(StreamWrapper):
 
         pass
 
+
 class Stage(StreamWrapper):
     def __init__(self, c: Config):
         super().__init__(c)
@@ -114,7 +100,7 @@ class Stage(StreamWrapper):
     async def build(self, input_stream: StreamPair) -> StreamPair:
 
         assert input_stream is not None, "Sources must have input streams"
-        
+
         # Check the type. Convert Any to object
         if (not typing_utils.issubtype(input_stream[1], typing.Union[self.accepted_types()])):
             raise RuntimeError("The {} stage cannot handle input of {}. Accepted input types: {}".format(
@@ -205,7 +191,6 @@ class Pipeline():
         current_stream_and_type = source_stream_pair
         current_stream_and_type = current_stream_and_type[0].map(self._add_id_col), current_stream_and_type[1]
 
-
         tqdm.write("Added source: {} -> {}".format(self._source_stage.name, current_stream_and_type[1].__name__))
 
         # If using dask, scatter here
@@ -228,10 +213,6 @@ class Pipeline():
     def run(self):
 
         loop = asyncio.get_event_loop()
-
-        # from grpc_preprocessing import serve
-
-        # asyncio.ensure_future(serve())
 
         asyncio.ensure_future(self.build_and_start())
         try:

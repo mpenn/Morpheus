@@ -1,19 +1,18 @@
-from functools import reduce
-from morpheus.pipeline.pipeline import StreamPair
-import time
 import typing
-from streamz.core import Stream
-from tornado.ioloop import IOLoop
-from morpheus.pipeline import Stage
-from morpheus.pipeline.messages import InferenceMemory, MessageMeta, MultiInferenceMessage, MultiMessage, MultiResponseMessage
-from morpheus.config import Config
-from tqdm import tqdm
+from functools import reduce
+
 import cudf
-import threading
-import json
-from morpheus.utils.cudf_subword_helper import tokenize_text_series
 import cupy as cp
-import morpheus.utils.async_map
+from streamz.core import Stream
+from tqdm import tqdm
+
+from morpheus.config import Config
+from morpheus.pipeline import Stage
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.pipeline import StreamPair
+
+
 class BufferStage(Stage):
     def __init__(self, c: Config, count: int = 1000):
         super().__init__(c)
@@ -30,6 +29,7 @@ class BufferStage(Stage):
     async def _build(self, input_stream: StreamPair) -> StreamPair:
         return input_stream[0].buffer(self._buffer_count), input_stream[1]
 
+
 class DelayStage(Stage):
     def __init__(self, c: Config, duration: str):
         super().__init__(c)
@@ -45,6 +45,7 @@ class DelayStage(Stage):
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:
         return input_stream[0].time_delay(self._duration), input_stream[1]
+
 
 class TriggerStage(Stage):
     def __init__(self, c: Config):
@@ -198,6 +199,7 @@ class AddClassificationsStage(Stage):
         # Return input unchanged
         return stream, MultiResponseMessage
 
+
 class FilterDetectionsStage(Stage):
     def __init__(self, c: Config, threshold: float = 0.5):
         super().__init__(c)
@@ -254,4 +256,3 @@ class FilterDetectionsStage(Stage):
         stream = stream.filter(lambda x: x.count > 0)
 
         return stream, MultiResponseMessage
-

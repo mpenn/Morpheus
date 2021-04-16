@@ -1,11 +1,16 @@
 import asyncio
-import typing
-from tqdm import tqdm
-from request import MultiRequest, MultiResponse, ResponseData
 import queue
-import torch
-from torch.utils.dlpack import from_dlpack, to_dlpack
+import typing
+
 import cupy as cp
+from tqdm import tqdm
+
+import torch
+from request import MultiRequest
+from request import MultiResponse
+from request import ResponseData
+from torch.utils.dlpack import from_dlpack
+from torch.utils.dlpack import to_dlpack
 
 
 def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):

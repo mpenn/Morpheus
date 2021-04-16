@@ -1,14 +1,18 @@
 import asyncio
-from functools import partial
-import tritonclient.grpc as tritonclient
-from tritonclient.grpc.model_config_pb2 import DataType
-from tqdm import tqdm
-import typing
-from request import MultiRequest, MultiResponse, ResponseData
 import queue
-import numpy as np
+import typing
+from functools import partial
+
 import cupy as cp
+import numpy as np
+import tritonclient.grpc as tritonclient
 from scipy.special import expit
+from tqdm import tqdm
+from tritonclient.grpc.model_config_pb2 import DataType
+
+from request import MultiRequest
+from request import MultiResponse
+from request import ResponseData
 
 
 def inference_worker(loop: asyncio.BaseEventLoop, inf_queue: queue.Queue):

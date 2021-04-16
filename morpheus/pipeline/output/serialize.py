@@ -1,18 +1,15 @@
-from morpheus.pipeline.pipeline import StreamPair
-from morpheus.pipeline.messages import MultiMessage
-from streamz.core import Stream
-from morpheus.pipeline import Stage
-from morpheus.config import Config
-import typing
-import re
 import json
+import re
+import typing
+
+from morpheus.config import Config
+from morpheus.pipeline import Stage
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.pipeline import StreamPair
 
 
 class SerializeStage(Stage):
-    def __init__(self,
-                 c: Config,
-                 include: str = None,
-                 exclude: typing.List[str] = [r'^ID$', r'^ts_']):
+    def __init__(self, c: Config, include: str = None, exclude: typing.List[str] = [r'^ID$', r'^ts_']):
         super().__init__(c)
 
         self._include_columns = include
@@ -62,7 +59,7 @@ class SerializeStage(Stage):
     async def _build(self, input_stream: StreamPair) -> StreamPair:
 
         include_columns = None
-        
+
         if (self._include_columns is not None and len(self._include_columns) > 0):
             include_columns = re.compile("({})".format("|".join(self._include_columns)))
 

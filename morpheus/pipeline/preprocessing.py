@@ -1,20 +1,21 @@
-from functools import reduce
-from logging import StreamHandler
-from morpheus.pipeline.pipeline import StreamFuture, StreamPair, get_time_ms
+import json
 import time
 import typing
-from streamz.core import Stream
-from tornado.ioloop import IOLoop
-from morpheus.pipeline import Stage
-from morpheus.pipeline.messages import InferenceMemory, MessageMeta, MultiInferenceMessage, MultiMessage, MultiResponseMessage
-from morpheus.config import Config
-from tqdm import tqdm
+
 import cudf
-import threading
-import json
-from morpheus.utils.cudf_subword_helper import tokenize_text_series
-import cupy as cp
 import typing_utils
+
+from morpheus.config import Config
+from morpheus.pipeline import Stage
+from morpheus.pipeline.messages import InferenceMemory
+from morpheus.pipeline.messages import MessageMeta
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.pipeline import StreamFuture
+from morpheus.pipeline.pipeline import StreamPair
+from morpheus.pipeline.pipeline import get_time_ms
+from morpheus.utils.cudf_subword_helper import tokenize_text_series
+
 
 class DeserializeStage(Stage):
     def __init__(self, c: Config):

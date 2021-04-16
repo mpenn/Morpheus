@@ -1,21 +1,21 @@
+import asyncio
+import typing
 from functools import reduce
-from streamz.dask import DaskStream
-from tornado import gen
-from morpheus.pipeline.pipeline import SourceStage, StreamPair
-from streamz.core import RefCounter, Stream
-from streamz import Source
-from tornado.ioloop import IOLoop
-from morpheus.pipeline import Stage
-from morpheus.config import Config
+
 import cudf
 import numpy as np
-import typing
 import pandas as pd
-import asyncio
+from streamz import Source
+from streamz.core import RefCounter
+from streamz.core import Stream
+from tornado import gen
+from tornado.ioloop import IOLoop
 from tqdm import tqdm
-from distributed.client import default_client
-import distributed
-from morpheus.utils.async_map import scatter_batch
+
+from morpheus.config import Config
+from morpheus.pipeline.pipeline import SourceStage
+from morpheus.pipeline.pipeline import StreamPair
+
 
 @Stream.register_api(staticmethod)
 class from_iterable_done(Source):
@@ -35,7 +35,6 @@ class from_iterable_done(Source):
     >>> L
     [0, 1, 2]
     """
-
     def __init__(self, iterable, **kwargs):
         self._iterable = iterable
         super().__init__(**kwargs)
@@ -62,12 +61,11 @@ class from_iterable_done(Source):
             self._counters.append(counter)
             self._total_count += 1
 
-            meta = [{
-                "ref": counter
-            }]
+            meta = [{"ref": counter}]
 
             await asyncio.gather(*self._emit(x, metadata=meta))
         self.stopped = True
+
 
 def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
     """
@@ -77,6 +75,7 @@ def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
     x["data"] = x["data"].str.replace('\\n', '\n', regex=False)
 
     return x
+
 
 class FileSourceStage(SourceStage):
     def __init__(self, c: Config, filename: str):

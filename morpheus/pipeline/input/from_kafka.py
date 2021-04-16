@@ -1,9 +1,11 @@
 import cudf
-from morpheus.pipeline.pipeline import StreamPair
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
-from morpheus.pipeline import SourceStage
+
 from morpheus.config import Config
+from morpheus.pipeline import SourceStage
+from morpheus.pipeline.pipeline import StreamPair
+
 
 class KafkaSourceStage(SourceStage):
     def __init__(self,

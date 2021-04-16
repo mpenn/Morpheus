@@ -1,13 +1,10 @@
-import typing_utils
-from morpheus.pipeline.messages import MultiMessage
-from morpheus.pipeline.pipeline import Stage, StreamPair
 import typing
-from streamz.core import Stream
-from tornado.ioloop import IOLoop
-from morpheus.pipeline import SourceStage
+
+import typing_utils
+
 from morpheus.config import Config
-# from kafka import KafkaProducer
-# from kafka.producer.future import FutureRecordMetadata
+from morpheus.pipeline.pipeline import Stage
+from morpheus.pipeline.pipeline import StreamPair
 
 
 class WriteToKafkaStage(Stage):
@@ -25,12 +22,6 @@ class WriteToKafkaStage(Stage):
     def accepted_types(self) -> typing.Tuple:
         return (typing.List[str], )
 
-    # def _push_to_kafka(self, x: str):
-
-    #     fut: FutureRecordMetadata = self._producer.send(self._output_topic, x.encode("UTF-8"))
-
-    #     result = fut.get()
-
     async def _build(self, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
@@ -42,14 +33,6 @@ class WriteToKafkaStage(Stage):
 
         if (typing_utils.issubtype(input_type, typing.Iterable)):
             stream = stream.flatten()
-
-        # self._producer = KafkaProducer(bootstrap_servers=self._kafka_conf["bootstrap.servers"],
-        #                                acks=0,
-        #                                max_block_ms=4,
-        #                                batch_size=16,
-        #                                linger_ms=4)
-
-        # stream.sink(self._push_to_kafka)
 
         # Write to kafka
         stream = stream.to_kafka(self._output_topic, self._kafka_conf)

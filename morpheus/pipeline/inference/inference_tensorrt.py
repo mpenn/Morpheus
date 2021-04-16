@@ -1,18 +1,23 @@
 import asyncio
 import os
-
-from tornado.ioloop import IOLoop
-from pipeline import InferenceStage
-import typing
-from tqdm import tqdm
-from request import MultiInferenceMessage, MultiRequest, MultiResponse, ResponseData, ResponseMemory
 import queue
-import torch
-from torch.utils.dlpack import from_dlpack
+import typing
+from ctypes import c_void_p
+
 import cupy as cp
 import tensorrt as trt
+from tornado.ioloop import IOLoop
+from tqdm import tqdm
+
+import torch
 from config import Config
-from ctypes import c_void_p
+from pipeline import InferenceStage
+from request import MultiInferenceMessage
+from request import MultiRequest
+from request import MultiResponse
+from request import ResponseData
+from request import ResponseMemory
+from torch.utils.dlpack import from_dlpack
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 

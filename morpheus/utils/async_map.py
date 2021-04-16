@@ -1,13 +1,14 @@
+import asyncio
+from functools import partial
 from time import time
+
 from distributed.client import default_client
 from streamz import Stream
 from streamz.core import convert_interval
 from streamz.dask import DaskStream
 from tornado import gen
-import asyncio
-from functools import partial
-
 from tornado.queues import Queue
+
 
 @Stream.register_api()
 class async_map(Stream):

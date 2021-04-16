@@ -1,18 +1,17 @@
-from morpheus.pipeline.pipeline import StreamPair
-from morpheus.pipeline.messages import MultiResponseMessage
-from streamz.core import Stream
-from streamz import Source
-from tornado.ioloop import IOLoop
-from morpheus.pipeline import Stage
-from morpheus.config import Config
-import cudf
-import numpy as np
-import typing
-import os
-import warnings
-import shutil
 import json
+import os
+import shutil
+import typing
+import warnings
+
+import numpy as np
 import pandas as pd
+
+from morpheus.config import Config
+from morpheus.pipeline import Stage
+from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.pipeline import StreamPair
+
 
 class GenerateVizFramesStage(Stage):
     def __init__(self, c: Config, out_dir: str = "./viz_frames", overwrite: bool = False):

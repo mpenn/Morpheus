@@ -61,16 +61,16 @@
          "name": "Python: Onnx-To-TRT",
          "type": "python",
          "request": "launch",
-         "program": "${workspaceFolder}/cli_click.py",
+         "program": "${workspaceFolder}/cli.py",
          "console": "integratedTerminal",
          "justMyCode": false,
          "cwd": "${workspaceFolder}",
-         "env": {
-            "CLX_INFERENCE_PIPELINE": "pytorch",
-            "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
-            "CLX_MODEL_SEQ_LENGTH": "512",
-            "CLX_MODEL_MAX_BATCH_SIZE": "18",
-         },
+         // "env": {
+         //    "CLX_INFERENCE_PIPELINE": "pytorch",
+         //    "CLX_VOCAB_HASH_FILE": "bert-base-cased-hash.txt",
+         //    "CLX_MODEL_SEQ_LENGTH": "512",
+         //    "CLX_MODEL_MAX_BATCH_SIZE": "18",
+         // },
          "args": [
             "onnx-to-trt",
             // "--help"
@@ -99,7 +99,7 @@
          },
          // "argsExpansion": "none",
          "args": [
-            "dask",
+            // "dask",
             "pipeline",
             "--num_threads=8",
             "--model_max_batch_size=32",

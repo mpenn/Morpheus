@@ -1,17 +1,13 @@
-from morpheus.pipeline.pipeline import StreamFuture, StreamPair
-import typing_utils
-from morpheus.pipeline.messages import MultiMessage
-from streamz.core import Stream
-from streamz import Source
-from tornado.ioloop import IOLoop
-from morpheus.pipeline import Stage
-from morpheus.config import Config
-import cudf
-import numpy as np
-import typing
-import re
-import json
 import os
+import typing
+
+import typing_utils
+
+from morpheus.config import Config
+from morpheus.pipeline import Stage
+from morpheus.pipeline.pipeline import StreamFuture
+from morpheus.pipeline.pipeline import StreamPair
+
 
 class WriteToFileStage(Stage):
     def __init__(self, c: Config, filename: str, overwrite: bool):
@@ -32,7 +28,7 @@ class WriteToFileStage(Stage):
         return "to-file"
 
     def accepted_types(self) -> typing.Tuple:
-        return (typing.List[str],)
+        return (typing.List[str], )
 
     def write_to_file(self, x: typing.List[str]):
         with open(self._output_file, "a") as f:

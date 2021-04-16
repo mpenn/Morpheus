@@ -1,12 +1,14 @@
 import asyncio
-from morpheus.config import Config
-
-from tornado.ioloop import IOLoop
-import typing
-from morpheus.pipeline.messages import MultiInferenceMessage, ResponseMemory
 import queue
+import typing
+
 import cupy as cp
+from tornado.ioloop import IOLoop
+
+from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import ResponseMemory
 
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate

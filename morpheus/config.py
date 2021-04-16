@@ -1,8 +1,10 @@
-import json
-import docker
-import typing
 import dataclasses
+import json
 import pprint
+import typing
+
+import docker
+
 
 def auto_determine_bootstrap():
     kafka_compose_name = "kafka-docker"
@@ -97,9 +99,11 @@ class ConfigKafka():
     input_topic: str = "test_pcap"
     output_topic: str = "output_topic"
 
+
 @dataclasses.dataclass
 class ConfigDask():
     use_processes: bool = False
+
 
 @dataclasses.dataclass
 class Config():
@@ -109,10 +113,6 @@ class Config():
 
     __default: typing.ClassVar["Config"] = None
     __instance: typing.ClassVar["Config"] = None
-
-    # general: ConfigGeneral = dataclasses.field(default_factory=ConfigGeneral)
-    # model: ConfigModel = dataclasses.field(default_factory=ConfigModel)
-    # kafka: ConfigKafka = dataclasses.field(default_factory=ConfigKafka)
 
     pipeline_batch_size: int = 256
     num_threads: int = 1
@@ -150,120 +150,14 @@ class Config():
         if not Config.__is_creating:
             raise Exception("This class is a singleton! Use Config.default() or Config.get() for instances")
 
-    # def __getattr__(self, name):
-
-    #    if name in self._state:
-    #       return self._state[name]
-
-    #    # Otherwise return error
-    #    raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, name))
-
-    # def __delattr__(self, name):
-    #    if name in self._state:
-    #       del self._state[name]
-    #    else:
-    #       object.__delattr__(self, name)
-
     def load(self, filename: str):
         # Read the json file and store as
         raise NotImplementedError("load() has not been implemented yet.")
-
-        # TODO: Implemente loading from dict. See https://stackoverflow.com/a/53498623/634820
-        with open(filename) as f:
-            state_dict = json.load(f)
-
-            self.general = dataclasses.replace(self.general, **state_dict.general)
-            self.model = dataclasses.replace(self.model, **state_dict.model)
-            self.kafka = dataclasses.replace(self.kafka, **state_dict.kafka)
 
     def save(self, filename: str):
         # Read the json file and store as
         with open(filename, "w") as f:
             json.dump(dataclasses.asdict(self), f, indent=3, sort_keys=True)
-
-    # def load_preset_dataset(self, preset_name: str):
-
-    #    if preset_name in self._state["dataset"]["presets"]:
-
-    #       ds = self._state["dataset"]
-    #       preset = self._state["dataset"]["presets"][preset_name]
-
-    #       for param in ds:
-    #          if param in preset:
-    #             ds[param] = preset[param]
-    #    else:
-    #       # Otherwise return error
-    #       raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, preset_name))
-
-    # def pre_action(self, action_name: str):
-
-    #    # If description is null, set that automatically
-    #    if self._state["general"]["desc"] is None or len(self._state["general"]["desc"]) == 0:
-    #       raise click.BadOptionUsage("desc", "Must set description to identify run from others")
-    #       # self._state["general"]["desc"] = "training"
-
-    #    # Find the next run idx if not set
-    #    run_idx, desc = misc.find_next_result_dir(self.general["logs_dir"], self.general["run_idx"])
-
-    #    gpu_count = min(torch.cuda.device_count(),
-    #                    self._state["general"]["gpu_count"]) if self._state["general"]["gpu_count"] is not None else torch.cuda.device_count()
-
-    #    self.general["run_idx"] = run_idx
-    #    self.general["gpu_count"] = gpu_count
-
-    #    # fill out the schedule
-    #    self._complete_schedule()
-
-    #    # If desc is not none, then it comes from using a previous run again
-    #    if desc is not None:
-    #       self.general["desc"] = desc
-    #    else:
-    #       full_desc = self.build_description(action_name)
-
-    #       # Save the full description now
-    #       self.general["desc"] = full_desc
-
-    #    # Create the results dir
-    #    results_dir = self.results_dir
-
-    #    # Write out the config
-    #    self.save(os.path.join(results_dir, "config.json"))
-
-    # @property
-    # def results_dir(self):
-    #    if self._results_dir is None:
-    #       self._results_dir = misc.create_result_subdir(self.general["logs_dir"], self.general["run_idx"], self.general["desc"])
-
-    #    return self._results_dir
-
-    # def build_description(self, action: str) -> str:
-
-    #    ds_str = self._state["dataset"]["name"]
-
-    #    desc_str = self._state["general"]["desc"]
-
-    #    gpu_count = int(self._state["general"]["gpu_count"])
-    #    gpu_str = "1gpu" if gpu_count == 1 else f"{gpu_count}gpus"
-
-    #    # Start with the action
-    #    desc = f"{action}-{ds_str}-{desc_str}-{gpu_str}"
-
-    #    return desc
-
-    # def _complete_schedule(self):
-
-    #    resolutions = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
-
-    #    schedules: Dict[str, Dict[int, T]] = self.schedule
-
-    #    for key, sched in schedules._state.items():
-
-    #       curr_value = sched[4]
-
-    #       for res in sorted(resolutions):
-
-    #          curr_value = sched.get(res, curr_value)
-    #          sched[res] = curr_value
 
     def to_string(self):
         pp = pprint.PrettyPrinter(indent=2, width=80)
