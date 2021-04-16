@@ -118,7 +118,7 @@ class Config():
     num_threads: int = 1
     model_max_batch_size: int = 8
     model_seq_length: int = 256
-    model_vocab_hash_file: str = "bert-base-cased-hash.txt"
+    model_vocab_hash_file: str = "data/bert-base-cased-hash.txt"
     use_dask: bool = False
 
     dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)

@@ -105,6 +105,7 @@
             "--model_max_batch_size=32",
             "--model_seq_length=256",
             "--pipeline_batch_size=1024",
+            "--model_vocab_hash_file=./data/bert-base-cased-hash.txt"
             "from-file",
             "--filename=.tmp/dataset4/pcap_dump_augmented_0delay.json",
             // "from-kafka",
