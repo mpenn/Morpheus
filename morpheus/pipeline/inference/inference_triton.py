@@ -4,18 +4,17 @@ import queue
 import threading
 import typing
 from functools import partial
+import warnings
 
 import cupy as cp
 import numpy as np
 import tritonclient.grpc as tritonclient
-from tornado.ioloop import IOLoop
-from tritonclient.utils import triton_to_np_dtype
-
 from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
-from morpheus.pipeline.messages import MultiInferenceMessage
-from morpheus.pipeline.messages import MultiResponseMessage
-from morpheus.pipeline.messages import ResponseMemory
+from morpheus.pipeline.messages import (MultiInferenceMessage, MultiResponseMessage, ResponseMemory)
+from tornado.ioloop import IOLoop
+from tqdm import tqdm
+from tritonclient.utils import triton_to_np_dtype
 
 
 class RecursiveQueue(queue.Queue):
@@ -139,31 +138,59 @@ class TritonInference:
         self.triton_client.unregister_system_shared_memory()
         self.triton_client.unregister_cuda_shared_memory()
 
-        model_config = self.triton_client.get_model_metadata(self._model_name, as_json=True)
+        try:
+            model_meta = self.triton_client.get_model_metadata(self._model_name, as_json=True)
+            model_config = self.triton_client.get_model_config(self._model_name, as_json=True)["config"]
 
-        shm_config = {}
+            # Make sure the inputs/outputs match our config
+            if (int(model_meta["inputs"][0]["shape"][-1]) != self._seq_length):
+                raise RuntimeError("Mismatched Sequence Length. Config specified {} but model specified {}".format(
+                    self._seq_length, int(model_meta["inputs"][0]["shape"][-1])))
 
-        for x in model_config["inputs"] + model_config["outputs"]:
+            # Check batch size
+            if (model_config["max_batch_size"] != self._max_batch_size):
 
-            b = np.dtype(triton_to_np_dtype(x["datatype"])).itemsize
+                # If the model is more, thats fine. Gen warning
+                if (model_config["max_batch_size"] > self._max_batch_size):
+                    warnings.warn(
+                        "Model max batch size ({}) is more than configured max batch size ({}). May result in sub optimal performance"
+                        .format(model_config["max_batch_size"], self._max_batch_size))
 
-            for y in x["shape"]:
-                y_int = int(y)
+                # If the model is less, raise error. Cant send more to Triton than the max batch size
+                if (model_config["max_batch_size"] < self._max_batch_size):
+                    raise RuntimeError(
+                        "Model max batch size ({}) is less than configured max batch size ({}). Reduce max batch size to be less than or equal to model max batch size."
+                        .format(model_config["max_batch_size"], self._max_batch_size))
 
-                if (y_int == -1):
-                    y_int = self._max_batch_size
+                raise RuntimeError("Mismatched Sequence Length. Config specified {} but model specified {}".format(
+                    self._seq_length, model_meta["inputs"][0]["shape"][-1]))
 
-                b *= y_int
+            shm_config = {}
 
-            shm_config[x["name"]] = {
-                "bytes": b,
-                "type": x["datatype"],
-            }
+            for x in model_meta["inputs"] + model_meta["outputs"]:
 
-        def create_wrapper():
-            return ShmWrapper(self.triton_client, self._model_name, shm_config)
+                b = np.dtype(triton_to_np_dtype(x["datatype"])).itemsize
 
-        self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
+                for y in x["shape"]:
+                    y_int = int(y)
+
+                    if (y_int == -1):
+                        y_int = self._max_batch_size
+
+                    b *= y_int
+
+                shm_config[x["name"]] = {
+                    "bytes": b,
+                    "type": x["datatype"],
+                }
+
+            def create_wrapper():
+                return ShmWrapper(self.triton_client, self._model_name, shm_config)
+
+            self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
+
+        except Exception as ex:
+            tqdm.write("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex))
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
 

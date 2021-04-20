@@ -63,7 +63,7 @@ class from_iterable_done(Source):
 
             meta = [{"ref": counter}]
 
-            await asyncio.gather(*self._emit(x, metadata=meta))
+            await self._emit(x, metadata=meta)
         self.stopped = True
 
 
