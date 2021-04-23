@@ -52,18 +52,16 @@ class from_iterable_done(Source):
             tqdm.write("Mismatch. Sum: {}, Count: {}".format(sum_count, self._total_count))
 
     async def _run(self):
-        for x in self._iterable:
+        count = 0
+        async for x in self._iterable:
             if self.stopped:
                 break
 
-            counter = RefCounter(initial=0, cb=self._ref_callback, loop=self.loop)
-
-            self._counters.append(counter)
             self._total_count += 1
 
-            meta = [{"ref": counter}]
+            count += 1
 
-            await self._emit(x, metadata=meta)
+            await self._emit(x)
         self.stopped = True
 
 
@@ -72,7 +70,8 @@ def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
     Fixes parsing issues when reading from a file. `\n` gets converted to `\\n` for some reason
     """
 
-    x["data"] = x["data"].str.replace('\\n', '\n', regex=False)
+    if ("data" in x):
+        x["data"] = x["data"].str.replace('\\n', '\n', regex=False)
 
     return x
 
@@ -102,19 +101,21 @@ class FileSourceStage(SourceStage):
 
         source: Source = Stream.from_iterable_done(self._generate_frames(df), asynchronous=True, loop=IOLoop.current())
 
-        return source, cudf.DataFrame
+        return source, typing.List[cudf.DataFrame]
 
-    def _generate_frames(self, df):
+    async def _generate_frames(self, df):
         count = 0
+        out = []
 
         for x in df.groupby(np.arange(len(df)) // self._batch_size):
             y = x[1].reset_index(drop=True)
 
-            yield y
+            out.append(y)
             count += 1
 
-            # if (count >= 2):
-            #     break
+            # yield y
+
+        yield out
 
         # Perform the callbacks
         for cb in self._done_callbacks:

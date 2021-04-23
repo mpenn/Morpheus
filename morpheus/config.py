@@ -4,6 +4,7 @@ import pprint
 import typing
 
 import docker
+from enum import Enum
 
 
 def auto_determine_bootstrap():
@@ -72,7 +73,11 @@ class ConfigWrapper(object):
 
 
 @dataclasses.dataclass
-class ConfigOnnxToTRT():
+class ConfigBase():
+    pass
+
+@dataclasses.dataclass
+class ConfigOnnxToTRT(ConfigBase):
     input_model: str = None
     output_model: str = None
     batches: typing.List[typing.Tuple[int, int]] = dataclasses.field(default_factory=list)
@@ -81,32 +86,45 @@ class ConfigOnnxToTRT():
 
 
 @dataclasses.dataclass
-class ConfigGeneral():
+class ConfigGeneral(ConfigBase):
     debug = False
     pipeline: str = "pytorch"
 
 
 @dataclasses.dataclass
-class ConfigModel():
+class ConfigModel(ConfigBase):
     vocab_hash_file: str = "bert-base-cased-hash.txt"
     seq_length: int = 128
     max_batch_size: int = 8
 
 
 @dataclasses.dataclass
-class ConfigKafka():
+class ConfigKafka(ConfigBase):
     bootstrap_servers: str = "auto"
     input_topic: str = "test_pcap"
     output_topic: str = "output_topic"
 
 
 @dataclasses.dataclass
-class ConfigDask():
+class ConfigDask(ConfigBase):
     use_processes: bool = False
+
+@dataclasses.dataclass
+class ConfigNlp(ConfigBase):
+    model_vocab_hash_file: str = "data/bert-base-cased-hash.txt"
+    model_seq_length: int = 256
 
 
 @dataclasses.dataclass
-class Config():
+class ConfigFil(ConfigBase):
+    model_fea_length: int = 29
+
+class PipelineModes(str, Enum):
+    NLP = "NLP"
+    FIL = "FIL"
+
+@dataclasses.dataclass
+class Config(ConfigBase):
 
     # Flag to indicate we are creating a static instance. Prevents raising an error on creation
     __is_creating: typing.ClassVar[bool] = False
@@ -114,14 +132,24 @@ class Config():
     __default: typing.ClassVar["Config"] = None
     __instance: typing.ClassVar["Config"] = None
 
+    debug: bool = False
+
+    mode: PipelineModes = None
+
     pipeline_batch_size: int = 256
     num_threads: int = 1
     model_max_batch_size: int = 8
-    model_seq_length: int = 256
-    model_vocab_hash_file: str = "data/bert-base-cased-hash.txt"
+    
     use_dask: bool = False
 
     dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
+
+    nlp: ConfigNlp = dataclasses.field(default_factory=ConfigNlp)
+    fil: ConfigFil = dataclasses.field(default_factory=ConfigFil)
+
+    @property
+    def feature_length(self):
+        return self.nlp.model_seq_length if self.mode == PipelineModes.NLP else self.fil.model_fea_length
 
     @staticmethod
     def default() -> "Config":
@@ -160,6 +188,11 @@ class Config():
             json.dump(dataclasses.asdict(self), f, indent=3, sort_keys=True)
 
     def to_string(self):
-        pp = pprint.PrettyPrinter(indent=2, width=80)
+        # pp = pprint.PrettyPrinter(indent=2, width=80)
 
-        return pp.pformat(dataclasses.asdict(self))
+        # return pp.pformat(dataclasses.asdict(self))
+
+        # Using JSON serializer for now since its easier to read. pprint is more compact
+        return json.dumps(dataclasses.asdict(self), indent=2, sort_keys=True)
+
+

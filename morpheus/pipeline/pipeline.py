@@ -126,6 +126,9 @@ class Stage(StreamWrapper):
 
         pass
 
+    def on_start(self):
+        pass
+
     def _on_complete(self, stream: Stream):
 
         tqdm.write("Stage Complete: {}".format(self.name))
@@ -187,15 +190,24 @@ class Pipeline():
 
         self._source_stage.add_done_callback(self._on_input_complete)
 
+        source_stream_pair[0].sink(self._on_start)
+
         # Add the ID single threaded
         current_stream_and_type = source_stream_pair
-        current_stream_and_type = current_stream_and_type[0].map(self._add_id_col), current_stream_and_type[1]
+        # current_stream_and_type = current_stream_and_type[0].map(self._add_id_col), current_stream_and_type[1]
 
-        tqdm.write("Added source: {} -> {}".format(self._source_stage.name, current_stream_and_type[1].__name__))
+        tqdm.write("Added source: {} -> {}".format(self._source_stage.name, str(current_stream_and_type[1])))
 
         # If using dask, scatter here
         if (self._use_dask):
-            current_stream_and_type = current_stream_and_type[0].scatter(), StreamFuture[current_stream_and_type[1]]
+            if (typing_utils.issubtype(current_stream_and_type[1], typing.List)):
+                current_stream_and_type = (current_stream_and_type[0].scatter_batch().flatten(),
+                                           StreamFuture[typing.get_args(current_stream_and_type[1])[0]])
+            else:
+                current_stream_and_type = (current_stream_and_type[0].scatter(), StreamFuture[current_stream_and_type[1]])
+        else:
+            if (typing_utils.issubtype(current_stream_and_type[1], typing.List)):
+                current_stream_and_type = current_stream_and_type[0].flatten(), typing.get_args(current_stream_and_type[1])[0]
 
         # Now loop over stages
         for s in self._stages:
@@ -206,6 +218,14 @@ class Pipeline():
         tqdm.write("====Starting Inference====")
 
         self._source_stream.start()
+
+    def _on_start(self, _):
+
+        tqdm.write("Starting! Time: {}".format(time.time()))
+
+        # Loop over all stages and call on_start if it exists
+        for s in self._stages:
+            s.on_start()
 
     def _on_input_complete(self):
         tqdm.write("All Input Complete")

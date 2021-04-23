@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import collections
 import queue
 import threading
 import typing
@@ -9,12 +10,12 @@ import warnings
 import cupy as cp
 import numpy as np
 import tritonclient.grpc as tritonclient
-from morpheus.config import Config
+from morpheus.config import Config, PipelineModes
 from morpheus.pipeline.inference.inference_stage import InferenceStage
 from morpheus.pipeline.messages import (MultiInferenceMessage, MultiResponseMessage, ResponseMemory)
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
-from tritonclient.utils import triton_to_np_dtype
+from tritonclient.utils import InferenceServerException, triton_to_np_dtype
 
 
 class RecursiveQueue(queue.Queue):
@@ -69,7 +70,7 @@ class ShmWrapper:
 
     def __init__(self, client: tritonclient.InferenceServerClient, model_name: str, config: dict):
 
-        self._config = config
+        self._config = config.copy()
 
         self._total_bytes = 0
 
@@ -103,7 +104,7 @@ class ShmWrapper:
 
     def build_input(self, name: str, data: cp.ndarray) -> tritonclient.InferInput:
         # Create the input
-        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name]["type"])
+        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name]["datatype"])
 
         # Set the data
         self[name].copy_from_device(data.data, data.nbytes)
@@ -126,7 +127,13 @@ class TritonInference:
         self._requires_seg_ids = False
 
         self._max_batch_size = c.model_max_batch_size
-        self._seq_length = c.model_seq_length
+        self._fea_length = c.feature_length
+
+        # Whether or not the returned value needs a logits calc for the response
+        self._needs_logits = c.mode == PipelineModes.NLP
+
+        self._inputs: typing.Dict = {}
+        self._outputs: typing.Dict = {}
 
     def init(self, loop: IOLoop):
 
@@ -134,21 +141,25 @@ class TritonInference:
 
         self.triton_client = tritonclient.InferenceServerClient(url=self._server_url, verbose=False)
 
-        # To make sure no shared memory regions are registered with the server.
-        self.triton_client.unregister_system_shared_memory()
-        self.triton_client.unregister_cuda_shared_memory()
-
         try:
+            assert self.triton_client.is_server_live() and self.triton_client.is_server_ready(), "Server is not in ready state"
+
+            assert self.triton_client.is_model_ready(self._model_name), f"Triton model {self._model_name} is not ready"
+
+            # To make sure no shared memory regions are registered with the server.
+            self.triton_client.unregister_system_shared_memory()
+            self.triton_client.unregister_cuda_shared_memory()
+
             model_meta = self.triton_client.get_model_metadata(self._model_name, as_json=True)
             model_config = self.triton_client.get_model_config(self._model_name, as_json=True)["config"]
 
             # Make sure the inputs/outputs match our config
-            if (int(model_meta["inputs"][0]["shape"][-1]) != self._seq_length):
+            if (int(model_meta["inputs"][0]["shape"][-1]) != self._fea_length):
                 raise RuntimeError("Mismatched Sequence Length. Config specified {} but model specified {}".format(
-                    self._seq_length, int(model_meta["inputs"][0]["shape"][-1])))
+                    self._fea_length, int(model_meta["inputs"][0]["shape"][-1])))
 
             # Check batch size
-            if (model_config["max_batch_size"] != self._max_batch_size):
+            if (model_config.get("max_batch_size", 0) != self._max_batch_size):
 
                 # If the model is more, thats fine. Gen warning
                 if (model_config["max_batch_size"] > self._max_batch_size):
@@ -162,14 +173,12 @@ class TritonInference:
                         "Model max batch size ({}) is less than configured max batch size ({}). Reduce max batch size to be less than or equal to model max batch size."
                         .format(model_config["max_batch_size"], self._max_batch_size))
 
-                raise RuntimeError("Mismatched Sequence Length. Config specified {} but model specified {}".format(
-                    self._seq_length, model_meta["inputs"][0]["shape"][-1]))
-
             shm_config = {}
 
-            for x in model_meta["inputs"] + model_meta["outputs"]:
-
+            def build_inout(x: dict):
                 b = np.dtype(triton_to_np_dtype(x["datatype"])).itemsize
+
+                shape = []
 
                 for y in x["shape"]:
                     y_int = int(y)
@@ -177,59 +186,69 @@ class TritonInference:
                     if (y_int == -1):
                         y_int = self._max_batch_size
 
+                    shape.append(y_int)
+
                     b *= y_int
 
-                shm_config[x["name"]] = {
+                return {
+                    "name": x["name"],
                     "bytes": b,
-                    "type": x["datatype"],
+                    "datatype": x["datatype"],
+                    "shape": shape,
                 }
+
+            for x in model_meta["inputs"]:
+
+                self._inputs[x["name"]] = build_inout(x)
+
+            for x in model_meta["outputs"]:
+
+                assert x["name"] not in self._inputs, "Input/Output names must be unique from eachother"
+
+                self._outputs[x["name"]] = build_inout(x)
+
+            # Combine the inputs/outputs for the shared memory
+            shm_config = {**self._inputs, **self._outputs}
 
             def create_wrapper():
                 return ShmWrapper(self.triton_client, self._model_name, shm_config)
 
             self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
 
-        except Exception as ex:
+        except InferenceServerException as ex:
             tqdm.write("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex))
+            raise ex
+
+    def _infer_callback(self, f: asyncio.Future, m: ShmWrapper, result, error):
+        output = {key: result.as_numpy(key) for key in self._outputs}
+
+        if (self._needs_logits):
+            output = {key: 1.0 / (1.0 + np.exp(-val)) for key, val in output.items()}
+
+        def tmp(r, e):
+            if (e):
+                f.set_exception(e)
+            else:
+                f.set_result(ResponseMemory(
+                    count=output[list(output.keys())[0]].shape[0],
+                    probs=cp.array(output[list(output.keys())[0]]), # For now, only support one output
+                ))
+            self._mem_pool.return_obj(m)
+
+        self._loop.add_callback(tmp, result, error)
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
 
         mem: ShmWrapper = self._mem_pool.borrow()
 
-        def infer_callback(f, m, result, error):
+        inputs: typing.List[tritonclient.InferInput] = [mem.build_input(key, batch.get_input(key)) for key in self._inputs]
 
-            logits = result.as_numpy("output")
-
-            probs = 1.0 / (1.0 + np.exp(-logits))
-
-            def tmp(r, e):
-                if (e):
-                    f.set_exception(e)
-                else:
-                    f.set_result(ResponseMemory(
-                        count=probs.shape[0],
-                        probs=cp.array(probs),
-                    ))
-                self._mem_pool.return_obj(m)
-
-            self._loop.add_callback(tmp, result, error)
-
-        inputs: typing.List[tritonclient.InferInput] = []
-
-        if (self._requires_seg_ids):
-            inputs.append(tritonclient.InferInput("token_type_ids", list(batch.input_ids.shape), "INT32"))
-
-        outputs = [
-            tritonclient.InferRequestedOutput("output"),
-        ]
-
-        inputs.append(mem.build_input("input_ids", batch.input_ids))
-        inputs.append(mem.build_input("attention_mask", batch.input_mask))
+        outputs = [tritonclient.InferRequestedOutput(key) for key in self._outputs]
 
         # Inference call
         self.triton_client.async_infer(model_name=self._model_name,
                                        inputs=inputs,
-                                       callback=partial(infer_callback, fut, mem),
+                                       callback=partial(self._infer_callback, fut, mem),
                                        outputs=outputs)
 
     def main_loop(self, loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):

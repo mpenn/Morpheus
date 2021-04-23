@@ -1,16 +1,15 @@
+import time
 import typing
 from functools import reduce
 
 import cudf
 import cupy as cp
-from streamz.core import Stream
-from tqdm import tqdm
-
 from morpheus.config import Config
 from morpheus.pipeline import Stage
-from morpheus.pipeline.messages import MultiMessage
-from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.messages import MultiMessage, MultiResponseMessage
 from morpheus.pipeline.pipeline import StreamPair
+from streamz.core import Stream
+from tqdm import tqdm
 
 
 class BufferStage(Stage):
@@ -83,12 +82,11 @@ class MonitorStage(Stage):
                  determine_count_fn: typing.Callable[[typing.Any], int] = None):
         super().__init__(c)
 
-        self._progress = tqdm(desc=description,
-                              smoothing=smoothing,
-                              dynamic_ncols=True,
-                              unit=unit,
-                              mininterval=1.0,
-                              maxinterval=2.0)
+        self._progress: tqdm = None
+
+        self._description = description
+        self._smoothing = smoothing
+        self._unit = unit
 
         # self._pre_sink_fn = self.pre_timestamps
         self._post_sink_fn = self._progress_sink
@@ -101,6 +99,17 @@ class MonitorStage(Stage):
 
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any, )
+
+    def on_start(self):
+
+        self._progress = tqdm(desc=self._description,
+                              smoothing=self._smoothing,
+                              dynamic_ncols=True,
+                              unit=self._unit,
+                              mininterval=0.25,
+                              maxinterval=1.0)
+
+        self._progress.reset()
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:
 
@@ -120,12 +129,14 @@ class MonitorStage(Stage):
         if (self._determine_count_fn is None):
             return
 
-        # This starts the timer on the first message. Otherwise it sits from creation with no updates
-        if (self._progress.n == 0):
-            self._progress.unpause()
+        # # This starts the timer on the first message. Otherwise it sits from creation with no updates
+        # if (self._progress.n == 0):
+        #     self._progress.unpause()
 
         # Do our best to determine the count
         n = self._determine_count_fn(x)
+
+        # tqdm.write("Writing {}. Time: {}".format(n, time.time()))
 
         self._progress.update(n=n)
 

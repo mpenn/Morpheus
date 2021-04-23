@@ -24,8 +24,8 @@ class InferenceStage(Stage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        self._post_sink_fn = self.post_timestamps
-        self._seq_length = c.model_seq_length
+        # self._post_sink_fn = self.post_timestamps
+        self._fea_length = c.feature_length
 
         self._thread = None
         self._inf_queue = queue.Queue()

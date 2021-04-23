@@ -48,26 +48,25 @@ class async_map(Stream):
             loop = self.loop
             executor = self.executor
             f = self.func
-            
+
             async def get_value_with_executor(x):
                 return await loop.run_in_executor(executor, f, x)
 
             self.func = get_value_with_executor
 
-    @gen.coroutine
-    def update(self, x, who=None, metadata=None):
+    async def update(self, x, who=None, metadata=None):
         try:
             self._retain_refs(metadata)
-            r = self.func(x)
-            result = yield r
+            r = await self.func(x)
+            result = r
         except Exception as e:
             # logger.exception(e)
             print(e)
             raise
         else:
-            emit = yield self._emit(result, metadata=metadata)
+            emit = await self._emit(result, metadata=metadata)
 
-            # return emit
+            return emit
         finally:
             self._release_refs(metadata)
 
@@ -121,13 +120,13 @@ class scatter_batch(DaskStream):
         # we know the format exactly. We do not use a key to avoid
         # issues like https://github.com/python-streamz/streams/issues/397.
         future_as_list = await client.scatter(x, asynchronous=True, hash=False)
-        
-        emit_awaitables = []
-        
-        for y in future_as_list:
-            emit_awaitables.extend(self._emit(y))
 
-        f = await asyncio.gather(*emit_awaitables)
+        # emit_awaitables = []
+
+        # for y in future_as_list:
+        #     emit_awaitables.extend(self._emit(y))
+
+        f = await self._emit(future_as_list, metadata=metadata)
 
         self._release_refs(metadata)
 

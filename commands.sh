@@ -83,3 +83,7 @@ cd install/bin/
 
 curl --request GET \
   --url http://localhost:8000/v2/models/mini_bert_trt/versions/1/config
+
+
+# Run Triton with FIL
+docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models triton_fil:latest tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1

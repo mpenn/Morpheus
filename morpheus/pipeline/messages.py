@@ -32,13 +32,13 @@ class MultiMessage:
     def input_json(self):
         return self.meta.input_json[self.mess_offset:self.mess_offset + self.mess_count]
 
-    @property
-    def data_col(self):
-        return self.get_meta("data")
+    # @property
+    # def data_col(self):
+    #     return self.get_meta("data")
 
-    @property
-    def data(self) -> typing.List[str]:
-        return self.get_meta_list("data")
+    # @property
+    # def data(self) -> typing.List[str]:
+    #     return self.get_meta_list("data")
 
     @property
     def id_col(self):
@@ -65,9 +65,45 @@ class MultiMessage:
 @dataclasses.dataclass
 class InferenceMemory:
     count: int
-    input_ids: cp.ndarray
-    input_mask: cp.ndarray
-    seq_ids: cp.ndarray
+
+    inputs: typing.Dict[str, cp.ndarray] = dataclasses.field(default_factory=dict, init=False)
+
+    def __getattr__(self, name: str) -> typing.Any:
+
+        input_val = self.inputs.get(name, default=None)
+
+        if (input_val is not None):
+            return input_val
+
+        return super().__getattr__(name)
+
+    def __setattr__(self, name: str, value: typing.Any) -> None:
+
+        # If its a cupy array, set it to the inputs field
+        if (isinstance(value, cp.ndarray)):
+            self.inputs[name] = value
+            return
+
+        return super().__setattr__(name, value)
+
+
+@dataclasses.dataclass
+class InferenceMemoryNLP(InferenceMemory):
+
+    input_ids: dataclasses.InitVar[cp.ndarray]
+    input_mask: dataclasses.InitVar[cp.ndarray]
+    seq_ids: dataclasses.InitVar[cp.ndarray]
+
+
+@dataclasses.dataclass
+class InferenceMemoryFIL(InferenceMemory):
+
+    input__0: dataclasses.InitVar[cp.ndarray]
+    seq_ids: dataclasses.InitVar[cp.ndarray]
+
+    def __post_init__(self, input__0, seq_ids):
+        self.input__0 = input__0
+        self.seq_ids = seq_ids
 
 
 @dataclasses.dataclass
@@ -78,16 +114,20 @@ class MultiInferenceMessage(MultiMessage):
     count: int
 
     @property
-    def input_ids(self):
-        return self.memory.input_ids[self.offset:self.offset + self.count, :]
+    def inputs(self):
+        return {key: self.get_input(key) for key in self.memory.inputs.keys()}
 
-    @property
-    def input_mask(self):
-        return self.memory.input_mask[self.offset:self.offset + self.count, :]
+    def __getattr__(self, name: str) -> typing.Any:
 
-    @property
-    def seq_ids(self):
-        return self.memory.seq_ids[self.offset:self.offset + self.count, :]
+        input_val = self.memory.inputs.get(name, default=None)
+
+        if (input_val is not None):
+            return input_val[self.offset:self.offset + self.count, :]
+
+        return super().__getattr__(name)
+
+    def get_input(self, name: str):
+        return self.memory.inputs[name][self.offset:self.offset + self.count, :]
 
     def get_slice(self, start, stop):
         mess_start = self.seq_ids[start, 0].item()
@@ -98,6 +138,32 @@ class MultiInferenceMessage(MultiMessage):
                                      memory=self.memory,
                                      offset=start,
                                      count=stop - start)
+
+
+@dataclasses.dataclass
+class MultiInferenceNLPMessage(MultiInferenceMessage):
+    @property
+    def input_ids(self):
+        return self.get_input("input_ids")
+
+    @property
+    def input_mask(self):
+        return self.get_input("input_mask")
+
+    @property
+    def seq_ids(self):
+        return self.get_input("seq_ids")
+
+
+@dataclasses.dataclass
+class MultiInferenceFILMessage(MultiInferenceMessage):
+    @property
+    def input__0(self):
+        return self.get_input("input__0")
+
+    @property
+    def seq_ids(self):
+        return self.get_input("seq_ids")
 
 
 @dataclasses.dataclass
