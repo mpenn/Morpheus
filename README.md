@@ -155,11 +155,11 @@ The Morpheus pipeline can be configured in two ways:
 1. Manual configuration in Python script.
 2. Configuration via the provided CLI
 
-## Starting the Pipeline (via Manual Python Config)
+### Starting the Pipeline (via Manual Python Config)
 
 See the `cli.py` file for examples on how to config via Python. More detailed instructions will be provided in the future.
 
-## Starting the Pipeline (via CLI)
+### Starting the Pipeline (via CLI)
 
 The provided CLI (see `cli.py`) is capable of running the included tools as well as any linear pipeline. Instructions for using the CLI can be queried with:
 ```bash
@@ -186,7 +186,7 @@ Options:
   --help             Show this message and exit.  [default: False]
 ```
 
-### Configuring Pipeline Stages
+#### CLI Stage Configuration
 
 When configuring a pipeline via the CLI, you start with the command `python cli.py run pipeline` and then list the stages in order from start to finish. The order that the commands are placed in will be the order that data flows from start to end. The output of each stage will be linked to the input of the next. For example, to build a simple pipeline that reads from kafka, deserializes messages, serializes them, and then writes to a file, use the following:
 ```bash
