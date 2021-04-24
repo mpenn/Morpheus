@@ -1,6 +1,9 @@
+import inspect
 import json
 import time
 import typing
+from abc import abstractclassmethod, abstractmethod
+from functools import partial
 
 import cudf
 import cupy as cp
@@ -25,7 +28,8 @@ class DeserializeStage(Stage):
 
         self._use_dask = c.use_dask
 
-        # self._post_sink_fn = self.post_timestamps
+        # Mark these stages to log timestamps if requested
+        self._should_log_timestamps = True
 
     @property
     def name(self) -> str:
@@ -82,45 +86,11 @@ class DeserializeStage(Stage):
         x.set_meta("ts_" + self.name, curr_time)
 
 
-class PreprocessNLPStage(Stage):
+class PreprocessBaseStage(Stage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        # self._post_sink_fn = self.post_timestamps
-        self._seq_length = c.feature_length
-        self._vocab_hash_file = c.nlp.model_vocab_hash_file
-
-        self.features = [
-            "nvidia_smi_log.gpu.pci.tx_util",
-            "nvidia_smi_log.gpu.pci.rx_util",
-            "nvidia_smi_log.gpu.fb_memory_usage.used",
-            "nvidia_smi_log.gpu.fb_memory_usage.free",
-            "nvidia_smi_log.gpu.bar1_memory_usage.total",
-            "nvidia_smi_log.gpu.bar1_memory_usage.used",
-            "nvidia_smi_log.gpu.bar1_memory_usage.free",
-            "nvidia_smi_log.gpu.utilization.gpu_util",
-            "nvidia_smi_log.gpu.utilization.memory_util",
-            "nvidia_smi_log.gpu.temperature.gpu_temp",
-            "nvidia_smi_log.gpu.temperature.gpu_temp_max_threshold",
-            "nvidia_smi_log.gpu.temperature.gpu_temp_slow_threshold",
-            "nvidia_smi_log.gpu.temperature.gpu_temp_max_gpu_threshold",
-            "nvidia_smi_log.gpu.temperature.memory_temp",
-            "nvidia_smi_log.gpu.temperature.gpu_temp_max_mem_threshold",
-            "nvidia_smi_log.gpu.power_readings.power_draw",
-            "nvidia_smi_log.gpu.clocks.graphics_clock",
-            "nvidia_smi_log.gpu.clocks.sm_clock",
-            "nvidia_smi_log.gpu.clocks.mem_clock",
-            "nvidia_smi_log.gpu.clocks.video_clock",
-            "nvidia_smi_log.gpu.applications_clocks.graphics_clock",
-            "nvidia_smi_log.gpu.applications_clocks.mem_clock",
-            "nvidia_smi_log.gpu.default_applications_clocks.graphics_clock",
-            "nvidia_smi_log.gpu.default_applications_clocks.mem_clock",
-            "nvidia_smi_log.gpu.max_clocks.graphics_clock",
-            "nvidia_smi_log.gpu.max_clocks.sm_clock",
-            "nvidia_smi_log.gpu.max_clocks.mem_clock",
-            "nvidia_smi_log.gpu.max_clocks.video_clock",
-            "nvidia_smi_log.gpu.max_customer_boost_clocks.graphics_clock",
-        ]
+        self._should_log_timestamps = True
 
     @property
     def name(self) -> str:
@@ -129,8 +99,45 @@ class PreprocessNLPStage(Stage):
     def accepted_types(self) -> typing.Tuple:
         return (MultiMessage, StreamFuture[MultiMessage])
 
+    @abstractmethod
+    def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
+        pass
+
+    async def _build(self, input_stream: StreamPair) -> StreamPair:
+
+        stream = input_stream[0]
+        out_type = MultiInferenceMessage
+
+        preprocess_fn = self._get_preprocess_fn()
+
+        preproc_sig = inspect.signature(preprocess_fn)
+
+        # If the innerfunction returns a type annotation, update the output type
+        if (preproc_sig.return_annotation and typing_utils.issubtype(preproc_sig.return_annotation, out_type)):
+            out_type = preproc_sig.return_annotation
+
+        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
+            stream = stream.map(preprocess_fn)
+            out_type = StreamFuture[out_type]
+        else:
+            stream = stream.async_map(preprocess_fn, executor=self._pipeline.thread_pool)
+
+        return stream, out_type
+
+
+class PreprocessNLPStage(PreprocessBaseStage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._seq_length = c.feature_length
+        self._vocab_hash_file = c.nlp.model_vocab_hash_file
+
+        # Set the stride to 75%. Works well with powers of 2
+        self._stride = self._seq_length // 2
+        self._stride = self._stride + self._stride // 2
+
     @staticmethod
-    def pre_process_batch(x: MultiMessage, seq_len: int, stride: int, vocab_hash_file: str):
+    def pre_process_batch(x: MultiMessage, seq_len: int, stride: int, vocab_hash_file: str) -> MultiInferenceNLPMessage:
 
         tokenized = tokenize_text_series(cudf.Series(x.get_meta("data")), seq_len, stride, vocab_hash_file)
 
@@ -149,44 +156,18 @@ class PreprocessNLPStage(Stage):
 
         return infer_message
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
-
-        # Set the stride to 75%. Works well with powers of 2
-        stride = self._seq_length // 2
-        stride = stride + stride // 2
-
-        stream = input_stream[0]
-        out_type = MultiInferenceMessage
-
-        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-            stream = stream.map(PreprocessNLPStage.pre_process_batch,
-                                stride=stride,
-                                seq_len=self._seq_length,
-                                vocab_hash_file=self._vocab_hash_file)
-            out_type = StreamFuture[MultiInferenceMessage]
-        else:
-            stream = stream.async_map(PreprocessNLPStage.pre_process_batch,
-                                      executor=self._pipeline.thread_pool,
-                                      stride=stride,
-                                      seq_len=self._seq_length,
-                                      vocab_hash_file=self._vocab_hash_file)
-
-        return stream, out_type
-
-    def post_timestamps(self, x: MultiInferenceMessage):
-
-        curr_time = get_time_ms()
-
-        x.set_meta("ts_" + self.name, curr_time)
+    def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
+        return partial(PreprocessNLPStage.pre_process_batch,
+                       stride=self._stride,
+                       seq_len=self._seq_length,
+                       vocab_hash_file=self._vocab_hash_file)
 
 
-class PreprocessFILStage(Stage):
+class PreprocessFILStage(PreprocessBaseStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        # self._post_sink_fn = self.post_timestamps
-        self._seq_length = 29  # Model takes 29 features right now
-        # self._vocab_hash_file = c.model_vocab_hash_file
+        self._fea_length = c.feature_length
 
         self.features = [
             "nvidia_smi_log.gpu.pci.tx_util",
@@ -220,15 +201,10 @@ class PreprocessFILStage(Stage):
             "nvidia_smi_log.gpu.max_customer_boost_clocks.graphics_clock",
         ]
 
-    @property
-    def name(self) -> str:
-        return "preprocess"
-
-    def accepted_types(self) -> typing.Tuple:
-        return (MultiMessage, StreamFuture[MultiMessage])
+        assert self._fea_length == len(self.features), f"Number of features in preprocessing {len(self.features)}, does not match configuration {self._fea_length}"
 
     @staticmethod
-    def pre_process_batch(x: MultiMessage, seq_len: int, fea_cols: typing.List[str]):
+    def pre_process_batch(x: MultiMessage, fea_len: int, fea_cols: typing.List[str]) -> MultiInferenceFILMessage:
 
         # Drop some extra columns we dont need
         x.meta.df.drop(x.meta.df.columns.difference(fea_cols + ["ts_start", "ts_deserialize"]), 1, inplace=True)
@@ -244,7 +220,7 @@ class PreprocessFILStage(Stage):
 
         seg_ids = cp.zeros((count, 3), dtype=cp.uint32)
         seg_ids[:, 0] = cp.arange(0, count, dtype=cp.uint32)
-        seg_ids[:, 2] = seq_len - 1
+        seg_ids[:, 2] = fea_len - 1
 
         # Create the inference memory. Keep in mind count here could be > than input count
         memory = InferenceMemoryFIL(count=count, input__0=data, seq_ids=seg_ids)
@@ -258,28 +234,5 @@ class PreprocessFILStage(Stage):
 
         return infer_message
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
-
-        # Set the stride to 75%. Works well with powers of 2
-        stride = self._seq_length // 2
-        stride = stride + stride // 2
-
-        stream = input_stream[0]
-        out_type = MultiInferenceMessage
-
-        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-            stream = stream.map(PreprocessFILStage.pre_process_batch, seq_len=self._seq_length, fea_cols=self.features)
-            out_type = StreamFuture[MultiInferenceMessage]
-        else:
-            stream = stream.async_map(PreprocessFILStage.pre_process_batch,
-                                      executor=self._pipeline.thread_pool,
-                                      seq_len=self._seq_length,
-                                      fea_cols=self.features)
-
-        return stream, out_type
-
-    def post_timestamps(self, x: MultiInferenceMessage):
-
-        curr_time = get_time_ms()
-
-        x.set_meta("ts_" + self.name, curr_time)
+    def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
+        return partial(PreprocessFILStage.pre_process_batch, fea_len=self._fea_length, fea_cols=self.features)

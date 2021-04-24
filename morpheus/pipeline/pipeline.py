@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+from morpheus.pipeline.messages import MultiMessage
 import queue
 import sys
 import time
@@ -91,7 +92,8 @@ class Stage(StreamWrapper):
         self._pre_sink_fn: typing.Callable[[typing.Any], None] = None
         self._post_sink_fn: typing.Callable[[typing.Any], None] = None
 
-        self._timestamps: typing.Dict[int, int] = {}
+        # Derived classes should set this to true to log timestamps in debug builds
+        self._should_log_timestamps = False
 
     @abstractmethod
     def accepted_types(self) -> typing.Tuple:
@@ -117,6 +119,18 @@ class Stage(StreamWrapper):
 
         if (self._post_sink_fn is not None):
             self._output_stream.gather().sink(self._post_sink_fn)
+
+        if (Config.get().debug and self._should_log_timestamps):
+            # Cache the name property. Removes dependency on self in callback
+            cached_name = self.name
+
+            def post_timestamps(self, x: MultiMessage):
+
+                curr_time = get_time_ms()
+
+                x.set_meta("ts_" + cached_name, curr_time)
+
+            self._output_stream.gather().sink(post_timestamps)
 
         # self._output_stream.add_done_callback(self._on_complete)
 

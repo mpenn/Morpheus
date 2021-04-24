@@ -1,6 +1,8 @@
+from abc import abstractmethod
 import asyncio
 import base64
 import collections
+import dataclasses
 import queue
 import threading
 import typing
@@ -16,6 +18,17 @@ from morpheus.pipeline.messages import (MultiInferenceMessage, MultiResponseMess
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
 from tritonclient.utils import InferenceServerException, triton_to_np_dtype
+
+
+@dataclasses.dataclass()
+class TritonInOut:
+    name: str  # Name of the input/output in the model
+    bytes: int  # Total bytes
+    datatype: str  # Triton string for datatype
+    shape: typing.List[int]
+    mapped_name: str  # Name of the input/output in the pipeline
+    offset: int = 0
+    ptr: cp.cuda.MemoryPointer = None
 
 
 class RecursiveQueue(queue.Queue):
@@ -68,15 +81,15 @@ class ResourcePool:
 class ShmWrapper:
     total_count = 0
 
-    def __init__(self, client: tritonclient.InferenceServerClient, model_name: str, config: dict):
+    def __init__(self, client: tritonclient.InferenceServerClient, model_name: str, config: typing.Dict[str, TritonInOut]):
 
         self._config = config.copy()
 
         self._total_bytes = 0
 
         for key in self._config.keys():
-            self._config[key]["offset"] = self._total_bytes
-            self._total_bytes += self._config[key]["bytes"]
+            self._config[key].offset = self._total_bytes
+            self._total_bytes += self._config[key].bytes
 
         self.region_name = model_name + "_{}".format(ShmWrapper.total_count)
         ShmWrapper.total_count += 1
@@ -86,7 +99,7 @@ class ShmWrapper:
 
         # Get memory pointers for each object
         for key in self._config.keys():
-            self._config[key]["ptr"] = cp.cuda.MemoryPointer(self._memory, self._config[key]["offset"])
+            self._config[key].ptr = cp.cuda.MemoryPointer(self._memory, self._config[key].offset)
 
         # Now get the registered IPC handle
         self._ipc_handle = cp.cuda.runtime.ipcGetMemHandle(self._memory.ptr)
@@ -96,15 +109,15 @@ class ShmWrapper:
 
     def get_bytes(self, name: str):
 
-        return self._config[name]["bytes"]
+        return self._config[name].bytes
 
     def get_offset(self, name: str):
 
-        return self._config[name]["offset"]
+        return self._config[name].offset
 
     def build_input(self, name: str, data: cp.ndarray) -> tritonclient.InferInput:
         # Create the input
-        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name]["datatype"])
+        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
 
         # Set the data
         self[name].copy_from_device(data.data, data.nbytes)
@@ -115,14 +128,15 @@ class ShmWrapper:
         return triton_input
 
     def __getitem__(self, name: str) -> cp.cuda.MemoryPointer:
-        return self._config[name]["ptr"]
+        return self._config[name].ptr
 
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
 class TritonInference:
-    def __init__(self, c: Config, model_name: str, server_url: str):
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str]):
         self._model_name = model_name
         self._server_url = server_url
+        self._inout_mapping = inout_mapping
 
         self._requires_seg_ids = False
 
@@ -132,8 +146,8 @@ class TritonInference:
         # Whether or not the returned value needs a logits calc for the response
         self._needs_logits = c.mode == PipelineModes.NLP
 
-        self._inputs: typing.Dict = {}
-        self._outputs: typing.Dict = {}
+        self._inputs: typing.Dict[str, TritonInOut] = {}
+        self._outputs: typing.Dict[str, TritonInOut] = {}
 
     def init(self, loop: IOLoop):
 
@@ -190,12 +204,9 @@ class TritonInference:
 
                     b *= y_int
 
-                return {
-                    "name": x["name"],
-                    "bytes": b,
-                    "datatype": x["datatype"],
-                    "shape": shape,
-                }
+                mapped_name = x["name"] if x["name"] not in self._inout_mapping else self._inout_mapping[x["name"]]
+
+                return TritonInOut(name=x["name"], bytes=b, datatype=x["datatype"], shape=shape, mapped_name=mapped_name)
 
             for x in model_meta["inputs"]:
 
@@ -219,31 +230,43 @@ class TritonInference:
             tqdm.write("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex))
             raise ex
 
-    def _infer_callback(self, f: asyncio.Future, m: ShmWrapper, result, error):
-        output = {key: result.as_numpy(key) for key in self._outputs}
+    @abstractmethod
+    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:
+        pass
 
-        if (self._needs_logits):
-            output = {key: 1.0 / (1.0 + np.exp(-val)) for key, val in output.items()}
+    def _infer_callback(self,
+                        f: asyncio.Future,
+                        m: ShmWrapper,
+                        result: tritonclient.InferResult,
+                        error: tritonclient.InferenceServerException):
 
-        def tmp(r, e):
-            if (e):
-                f.set_exception(e)
-            else:
-                f.set_result(ResponseMemory(
-                    count=output[list(output.keys())[0]].shape[0],
-                    probs=cp.array(output[list(output.keys())[0]]), # For now, only support one output
-                ))
+        # If its an error, return that here
+        if (error is not None):
+            self._loop.add_callback(f.set_exception, error)
+            return
+
+        # Build response
+        response_mem = self._build_response(result)
+
+        def tmp(mem: ResponseMemory):
+            # Set result on future
+            f.set_result(mem)
+
+            # Return mempool obj
             self._mem_pool.return_obj(m)
 
-        self._loop.add_callback(tmp, result, error)
+        # We have to schedule a callback here to set the future result on the asyncio thread
+        self._loop.add_callback(tmp, response_mem)
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
 
         mem: ShmWrapper = self._mem_pool.borrow()
 
-        inputs: typing.List[tritonclient.InferInput] = [mem.build_input(key, batch.get_input(key)) for key in self._inputs]
+        inputs: typing.List[tritonclient.InferInput] = [
+            mem.build_input(input.name, batch.get_input(input.mapped_name)) for input in self._inputs.values()
+        ]
 
-        outputs = [tritonclient.InferRequestedOutput(key) for key in self._outputs]
+        outputs = [tritonclient.InferRequestedOutput(output.name) for output in self._outputs.values()]
 
         # Inference call
         self.triton_client.async_infer(model_name=self._model_name,
@@ -269,6 +292,49 @@ class TritonInference:
             self.process(batch, fut)
 
 
+class TritonInferenceNLP(TritonInference):
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
+
+        # Some models use different names for the same thing. Set that here but allow user customization
+        default_mapping = {
+            "attention_mask": "input_mask",
+        }
+
+        default_mapping.update(inout_mapping)
+
+        super().__init__(c, model_name, server_url, default_mapping)
+
+    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:
+
+        output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
+
+        if (self._needs_logits):
+            output = {key: 1.0 / (1.0 + np.exp(-val)) for key, val in output.items()}
+
+        mem = ResponseMemory(
+            count=output[list(output.keys())[0]].shape[0],
+            probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
+        )
+
+        return mem
+
+
+class TritonInferenceFIL(TritonInference):
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
+        super().__init__(c, model_name, server_url, inout_mapping)
+
+    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:
+
+        output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
+
+        mem = ResponseMemory(
+            count=output[list(output.keys())[0]].shape[0],
+            probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
+        )
+
+        return mem
+
+
 class TritonInferenceStage(InferenceStage):
     def __init__(self, c: Config, model_name: str, server_url: str):
         super().__init__(c)
@@ -280,6 +346,11 @@ class TritonInferenceStage(InferenceStage):
 
     def _get_inference_fn(self) -> typing.Callable:
 
-        worker = TritonInference(Config.get(), model_name=self._model_name, server_url=self._server_url)
+        if (Config.get().mode == PipelineModes.NLP):
+            worker = TritonInferenceNLP(Config.get(), model_name=self._model_name, server_url=self._server_url)
+        elif (Config.get().mode == PipelineModes.FIL):
+            worker = TritonInferenceFIL(Config.get(), model_name=self._model_name, server_url=self._server_url)
+        else:
+            raise NotImplementedError("Unknown config mode")
 
         return worker.main_loop

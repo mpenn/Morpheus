@@ -94,6 +94,11 @@ class InferenceMemoryNLP(InferenceMemory):
     input_mask: dataclasses.InitVar[cp.ndarray]
     seq_ids: dataclasses.InitVar[cp.ndarray]
 
+    def __post_init__(self, input_ids, input_mask, seq_ids):
+        self.input_ids = input_ids
+        self.input_mask = input_mask
+        self.seq_ids = seq_ids
+
 
 @dataclasses.dataclass
 class InferenceMemoryFIL(InferenceMemory):
@@ -119,7 +124,7 @@ class MultiInferenceMessage(MultiMessage):
 
     def __getattr__(self, name: str) -> typing.Any:
 
-        input_val = self.memory.inputs.get(name, default=None)
+        input_val = self.memory.inputs.get(name, None)
 
         if (input_val is not None):
             return input_val[self.offset:self.offset + self.count, :]

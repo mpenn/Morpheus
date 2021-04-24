@@ -32,6 +32,9 @@ class InferenceStage(Stage):
 
         self._max_batch_size = c.model_max_batch_size
 
+        # Mark these stages to log timestamps if requested
+        self._should_log_timestamps = True
+
     @property
     def name(self) -> str:
         return "inference"
@@ -61,7 +64,7 @@ class InferenceStage(Stage):
             # Wait for the inference thread to be ready
             wait_events.append(ready_event.wait())
 
-        asyncio.gather(*wait_events, return_exceptions=True)
+        await asyncio.gather(*wait_events, return_exceptions=True)
 
         stream = input_stream[0]
         out_type = MultiResponseMessage
@@ -193,9 +196,3 @@ class InferenceStage(Stage):
                                     memory=memory,
                                     offset=0,
                                     count=memory.count)
-
-    def post_timestamps(self, x: MultiResponseMessage):
-
-        curr_time = get_time_ms()
-
-        x.set_meta("ts_" + self.name, curr_time)
