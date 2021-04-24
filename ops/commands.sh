@@ -85,5 +85,10 @@ curl --request GET \
   --url http://localhost:8000/v2/models/mini_bert_trt/versions/1/config
 
 
+# Build FIL Backend for Triton
+git clone git@github.com:wphicks/triton_fil_backend.git
+cd triton_fil_backend
+docker build -t triton_fil -f ops/Dockerfile .
+
 # Run Triton with FIL
 docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models triton_fil:latest tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1
