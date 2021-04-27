@@ -38,6 +38,11 @@ NVIDIA Morpheus is an open AI application framework that provides cybersecurity 
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [The NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker)
+- [Streamz/CuStreamz](https://streamz.readthedocs.io/)
+  - The default version of `streamz` has several bugs when using an async, Dask stream. To fix this, we are temporarily using a fork of the `streamz` library. Please install with:
+    ```bash
+    pip install git+https://github.com/mdemoret-nv/streamz.git@async
+    ```
 
 ### Installation
 
