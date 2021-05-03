@@ -1,36 +1,44 @@
-FROM rapidsai/rapidsai-clx-nightly:0.18-cuda11.0-runtime-ubuntu18.04-py3.7
-LABEL maintainer="NVIDIA CORPORATION"
+ARG FROM_IMAGE=gpuci/miniconda-cuda
+ARG CUDA_VER=11.0
+ARG LINUX_VER=ubuntu18.04
+FROM ${FROM_IMAGE}:${CUDA_VER}-runtime-${LINUX_VER} AS base
 
-# SHELL ["/bin/bash", "-c"]
+# Required arguments
+ARG IMAGE_TYPE=base
+ARG RAPIDS_CHANNEL=rapidsai-nightly
+ARG RAPIDS_VER=0.19
+ARG PYTHON_VER=3.8
 
-# Update conda to 4.8+
-# RUN source activate base && conda update -y -n base -c defaults conda
-RUN gpuci_conda_retry install -y -n base -c defaults \
-    "conda=4.9.2"
+# Capture argument used for FROM
+ARG CUDA_VER
 
-# # From https://pythonspeed.com/articles/activate-conda-dockerfile/
-# SHELL ["conda", "run", "-n", "rapids", "/bin/bash", "-c"]
+# Enables "source activate conda"
+SHELL ["/bin/bash", "-c"]
 
-# RUN conda --version
+RUN /opt/conda/bin/conda create -n morpheus \
+  -c rapidsai \
+  -c nvidia \
+  -c conda-forge \
+  -c defaults \
+  pip \
+  cudatoolkit=${CUDA_VER} \
+  cuml=${RAPIDS_VER} \
+  cudf_kafka=${RAPIDS_VER} \
+  custreamz=${RAPIDS_VER} \
+  python=${PYTHON_VER} \
+  tqdm \
+  && sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
 
-# Setup user account
-ARG uid=1000
-ARG gid=1000
-RUN groupadd -r -f -g ${gid} trtuser && useradd -r -u ${uid} -g ${gid} -ms /bin/bash trtuser
-RUN usermod -aG sudo trtuser
-RUN echo 'trtuser:nvidia' | chpasswd
-RUN mkdir -p /workspace && chown trtuser /workspace
+SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
+
+RUN pip install nvidia-pyindex \
+  && pip install xgboost grpcio-channelz click configargparse docker tritonclient[all] typing-utils \
+  && pip uninstall streamz \
+  && pip install git+https://github.com/mdemoret-nv/streamz.git@async
 
 WORKDIR /workspace
 
-RUN cd /workspace
-
-RUN source activate rapids && pip install click configargparse docker
-
 COPY . ./
 
-USER trtuser
-
-# ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "rapids"]
-
-CMD python cli.py
+ENTRYPOINT [ "/usr/bin/tini", "--" ]
+CMD [ "/bin/bash" ]
