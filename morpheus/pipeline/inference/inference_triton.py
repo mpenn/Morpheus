@@ -327,9 +327,16 @@ class TritonInferenceFIL(TritonInference):
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
+        probs = cp.array(output[list(output.keys())[0]])
+        probs_shape = probs.shape
+        count = probs_shape[0]
+        
+        if len(probs_shape) != 2:
+            probs = probs.reshape((count, 1))
+        
         mem = ResponseMemory(
-            count=output[list(output.keys())[0]].shape[0],
-            probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
+            count=count,
+            probs=probs,  # For now, only support one output
         )
 
         return mem
