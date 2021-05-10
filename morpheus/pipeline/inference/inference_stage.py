@@ -55,6 +55,7 @@ class InferenceStage(Stage):
 
             threading.Thread(target=self._get_inference_fn(),
                              daemon=True,
+                             name="Inference Thread",
                              args=(
                                  IOLoop.current(),
                                  self._inf_queue,

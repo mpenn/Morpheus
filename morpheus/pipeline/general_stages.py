@@ -136,8 +136,6 @@ class MonitorStage(Stage):
         # Do our best to determine the count
         n = self._determine_count_fn(x)
 
-        # tqdm.write("Writing {}. Time: {}".format(n, time.time()))
-
         self._progress.update(n=n)
 
     def _auto_count_fn(self, x):

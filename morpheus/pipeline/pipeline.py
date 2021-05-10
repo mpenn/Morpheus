@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import logging
 from morpheus.pipeline.messages import MultiMessage
 import queue
 import sys
@@ -21,6 +22,7 @@ from morpheus.config import Config
 
 config = Config.get()
 
+logger = logging.getLogger(__name__)
 
 def get_time_ms():
     return round(time.time() * 1000)
@@ -145,7 +147,7 @@ class Stage(StreamWrapper):
 
     def _on_complete(self, stream: Stream):
 
-        tqdm.write("Stage Complete: {}".format(self.name))
+        logger.debug("Stage Complete: {}".format(self.name))
 
 
 class Pipeline():
@@ -193,11 +195,11 @@ class Pipeline():
     async def build_and_start(self):
 
         if (self._use_dask):
-            tqdm.write("====Launching Dask====")
+            logger.info("====Launching Dask====")
             from distributed import Client
             self._client: Client = await Client(loop=IOLoop.current(), processes=True, asynchronous=True)
 
-        tqdm.write("====Building Pipeline====")
+        logger.info("====Building Pipeline====")
 
         source_stream_pair = await self._source_stage.build(None)
         self._source_stream = source_stream_pair[0]
@@ -210,7 +212,7 @@ class Pipeline():
         current_stream_and_type = source_stream_pair
         # current_stream_and_type = current_stream_and_type[0].map(self._add_id_col), current_stream_and_type[1]
 
-        tqdm.write("Added source: {} -> {}".format(self._source_stage.name, str(current_stream_and_type[1])))
+        logger.info("Added source: {} -> {}".format(self._source_stage.name, str(current_stream_and_type[1])))
 
         # If using dask, scatter here
         if (self._use_dask):
@@ -227,32 +229,42 @@ class Pipeline():
         for s in self._stages:
             current_stream_and_type = await s.build(current_stream_and_type)
 
-            tqdm.write("Added stage: {} -> {}".format(s.name, str(current_stream_and_type[1])))
+            logger.info("Added stage: {} -> {}".format(s.name, str(current_stream_and_type[1])))
 
-        tqdm.write("====Starting Inference====")
+        logger.info("====Starting Inference====")
 
         self._source_stream.start()
 
     def _on_start(self, _):
 
-        tqdm.write("Starting! Time: {}".format(time.time()))
+        logger.debug("Starting! Time: {}".format(time.time()))
 
         # Loop over all stages and call on_start if it exists
         for s in self._stages:
             s.on_start()
 
     def _on_input_complete(self):
-        tqdm.write("All Input Complete")
+        logger.debug("All Input Complete")
 
     def run(self):
 
         loop = asyncio.get_event_loop()
 
+        def error_handler(l, context: dict):
+
+            msg = "Unhandled exception in async loop! Exception: \n{}".format(context["message"])
+            exception = context.get("exception", Exception())
+
+            logger.critical(msg)
+
+        loop.set_exception_handler(error_handler)
+
         asyncio.ensure_future(self.build_and_start())
+
         try:
             loop.run_forever()
         except KeyboardInterrupt:
             pass
         finally:
             loop.close()
-            print("Exited")
+            logger.debug("Exited")

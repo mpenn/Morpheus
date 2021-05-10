@@ -69,6 +69,7 @@
          },
          // "argsExpansion": "none",
          "args": [
+            "--log_level=DEBUG",
             "run",
             "--num_threads=8",
             "--pipeline_batch_size=1024",

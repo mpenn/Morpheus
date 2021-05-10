@@ -1,4 +1,5 @@
 from functools import update_wrapper
+import logging
 from click import decorators
 import psutil
 import warnings
@@ -6,6 +7,7 @@ from click.globals import get_current_context
 from morpheus.config import Config, ConfigBase, ConfigOnnxToTRT, PipelineModes, auto_determine_bootstrap
 import click
 from morpheus.pipeline import Pipeline
+from morpheus.utils.logging import configure_logging
 
 # pylint: disable=line-too-long, import-outside-toplevel, invalid-name
 
@@ -17,6 +19,8 @@ ALIASES = {
     "pipeline": "pipeline-nlp",
 }
 
+global logger
+logger = logging.getLogger("morpheus.cli")
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -90,14 +94,43 @@ def prepare_command(config: ConfigBase = None):
     return inner_prepare_command
 
 
+log_levels = list(logging._nameToLevel.keys())
+
+if ("NOTSET" in log_levels):
+    log_levels.remove("NOTSET")
+
+
+def _parse_log_level(ctx, param, value):
+    x = logging._nameToLevel.get(value.upper(), None)
+    if x is None:
+        raise click.BadParameter('Must be one of {}. Passed: {} CRITICAL, ERROR, WARNING, INFO or DEBUG, not {}'.format(value))
+    return x
+
+
 @click.group(chain=False, invoke_without_command=True, cls=AliasedGroup, **command_kwargs)
 @click.option('--debug/--no-debug', default=False)
+@click.option("--log_level",
+              default=DEFAULT_CONFIG.log_level,
+              type=click.Choice(log_levels, case_sensitive=False),
+              callback=_parse_log_level,
+              help="Specify the logging level to use.")
+@click.option('--log_config_file',
+              default=DEFAULT_CONFIG.log_config_file,
+              type=click.Path(exists=True, dir_okay=False),
+              help="Config file to use to configure logging. Use only for advanced situations. Can accept both JSON and ini style configurations")
 @prepare_command(Config.get())
-def cli(ctx: click.Context, **kwargs):
+def cli(ctx: click.Context, log_level: int = DEFAULT_CONFIG.log_level, log_config_file: str = DEFAULT_CONFIG.log_config_file, **kwargs):
 
     # ensure that ctx.obj exists and is a dict (in case `cli()` is called
     # by means other than the `if` block below
     ctx.ensure_object(dict)
+
+    # Configure the logging
+    configure_logging(log_level=log_level, log_config_file=log_config_file)
+
+    # Re-get the logger class
+    global logger
+    logger = logging.getLogger("morpheus.cli")
 
 
 @cli.group(short_help="Run a utility tool", **command_kwargs)
@@ -116,7 +149,7 @@ def tools(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def onnx_to_trt(ctx: click.Context, **kwargs):
 
-    print("Generating onnx file")
+    logger.info("Generating onnx file")
 
     # Convert batches to a list
     kwargs["batches"] = list(kwargs["batches"])
@@ -158,7 +191,7 @@ def run(ctx: click.Context, **kwargs):
 @prepare_command(Config.get().dask)
 def dask(ctx: click.Context, **kwargs):
 
-    print("Using Dask")
+    click.echo(click.style("Using Dask", fg="yellow"))
 
     Config.get().use_dask = True
 
@@ -188,7 +221,7 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     """
 
-    print("Building pipeline")
+    click.secho("Configuring Pipeline via CLI", fg="green")
 
     config = Config.get()
 
@@ -220,7 +253,7 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     """
 
-    print("Building pipeline")
+    click.secho("Configuring Pipeline via CLI", fg="green")
 
     config = Config.get()
 
@@ -234,10 +267,9 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 @click.pass_context
 def post_pipeline(ctx: click.Context, stages, **kwargs):
 
-    print("Config: ")
-    print(Config.get().to_string())
+    logger.info("Config: \n{}".format(Config.get().to_string()))
 
-    print("Running pipeline... Ctrl+C to Quit")
+    click.secho("Starting pipeline via CLI... Ctrl+C to Quit", fg="red")
 
     pipeline: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -398,6 +430,7 @@ def preprocess_nlp(ctx: click.Context, **kwargs):
     p.add_stage(stage)
 
     return stage
+
 
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
 @prepare_command(False)

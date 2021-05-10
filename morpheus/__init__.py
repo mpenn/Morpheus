@@ -16,3 +16,9 @@ from ._version import get_versions
 __version__ = get_versions()['version']
 
 del get_versions
+
+import logging
+
+# Create a default null logger to prevent log messages from being propagated to users of this library unless otherwise configured.
+# Use the `utils.logging` module to configure Morpheus logging
+logging.getLogger(__name__).addHandler(logging.NullHandler())
