@@ -1,5 +1,6 @@
 import asyncio
 from functools import partial
+import logging
 from time import time
 
 from distributed.client import default_client
@@ -9,6 +10,7 @@ from streamz.dask import DaskStream
 from tornado import gen
 from tornado.queues import Queue
 
+logger = logging.getLogger(__name__)
 
 @Stream.register_api()
 class async_map(Stream):
@@ -60,8 +62,7 @@ class async_map(Stream):
             r = await self.func(x)
             result = r
         except Exception as e:
-            # logger.exception(e)
-            print(e)
+            logger.exception(e)
             raise
         else:
             emit = await self._emit(result, metadata=metadata)

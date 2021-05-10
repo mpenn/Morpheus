@@ -3,6 +3,7 @@ import asyncio
 import base64
 import collections
 import dataclasses
+import logging
 import queue
 import threading
 import typing
@@ -19,6 +20,7 @@ from tornado.ioloop import IOLoop
 from tqdm import tqdm
 from tritonclient.utils import InferenceServerException, triton_to_np_dtype
 
+logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass()
 class TritonInOut:
@@ -227,7 +229,7 @@ class TritonInference:
             self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
 
         except InferenceServerException as ex:
-            tqdm.write("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex))
+            logger.exception("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex), exc_info=True)
             raise ex
 
     @abstractmethod

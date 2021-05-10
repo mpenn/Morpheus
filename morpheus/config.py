@@ -2,10 +2,12 @@ import dataclasses
 import json
 import pprint
 import typing
+import logging
 
 import docker
 from enum import Enum
 
+logger = logging.getLogger(__name__)
 
 def auto_determine_bootstrap():
     kafka_compose_name = "kafka-docker"
@@ -25,7 +27,7 @@ def auto_determine_bootstrap():
     bootstrap_servers = ",".join(
         [bridge_ip + ":" + c.ports["9092/tcp"][0]["HostPort"] for c in kafka_net.containers if "9092/tcp" in c.ports])
 
-    print("Auto determined Bootstrap Servers: {}".format(bootstrap_servers))
+    logger.info("Auto determined Bootstrap Servers: {}".format(bootstrap_servers))
 
     return bootstrap_servers
 
@@ -133,6 +135,8 @@ class Config(ConfigBase):
     __instance: typing.ClassVar["Config"] = None
 
     debug: bool = False
+    log_level: int = logging.WARN
+    log_config_file: str = None
 
     mode: PipelineModes = None
 

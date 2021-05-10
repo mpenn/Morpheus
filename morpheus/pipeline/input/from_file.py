@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import typing
 from functools import reduce
 
@@ -16,6 +17,7 @@ from morpheus.config import Config
 from morpheus.pipeline.pipeline import SourceStage
 from morpheus.pipeline.pipeline import StreamPair
 
+logger = logging.getLogger(__name__)
 
 @Stream.register_api(staticmethod)
 class from_iterable_done(Source):
@@ -49,7 +51,7 @@ class from_iterable_done(Source):
         sum_count = reduce(lambda count, x: count + min(x.count, 1), self._counters, 0)
 
         if (sum_count != self._total_count):
-            tqdm.write("Mismatch. Sum: {}, Count: {}".format(sum_count, self._total_count))
+            logger.debug("Mismatch. Sum: {}, Count: {}".format(sum_count, self._total_count))
 
     async def _run(self):
         count = 0
