@@ -1,19 +1,30 @@
-from functools import update_wrapper
 import logging
-from click import decorators
-import psutil
 import warnings
-from click.globals import get_current_context
-from morpheus.config import Config, ConfigBase, ConfigOnnxToTRT, PipelineModes, auto_determine_bootstrap
+from functools import update_wrapper
+
 import click
-from morpheus.pipeline import Pipeline
+import click_completion
+import psutil
+from click import decorators
+from click.globals import get_current_context
+
+from morpheus.config import (Config, ConfigBase, ConfigOnnxToTRT, PipelineModes, auto_determine_bootstrap)
 from morpheus.utils.logging import configure_logging
 
 # pylint: disable=line-too-long, import-outside-toplevel, invalid-name
 
+# Init click completion to help with installing autocomplete.
+click_completion.init()
+
+# NOTE: This file will get executed when hitting <TAB> for autocompletion. Any classes that require a long import time should be
+# locally imported. For example, `morpheus.Pipeline` takes a long time to import and must be locally imported for each function
+
 DEFAULT_CONFIG = Config.default()
 
-command_kwargs = {"context_settings": dict(show_default=True, )}
+command_kwargs = {
+    "context_settings": dict(show_default=True, ),
+    "no_args_is_help": True,
+}
 
 ALIASES = {
     "pipeline": "pipeline-nlp",
@@ -21,6 +32,7 @@ ALIASES = {
 
 global logger
 logger = logging.getLogger("morpheus.cli")
+
 
 class AliasedGroup(click.Group):
     def get_command(self, ctx, cmd_name):
@@ -110,16 +122,23 @@ def _parse_log_level(ctx, param, value):
 @click.group(chain=False, invoke_without_command=True, cls=AliasedGroup, **command_kwargs)
 @click.option('--debug/--no-debug', default=False)
 @click.option("--log_level",
-              default=DEFAULT_CONFIG.log_level,
+              default=logging.getLevelName(DEFAULT_CONFIG.log_level),
               type=click.Choice(log_levels, case_sensitive=False),
               callback=_parse_log_level,
               help="Specify the logging level to use.")
-@click.option('--log_config_file',
-              default=DEFAULT_CONFIG.log_config_file,
-              type=click.Path(exists=True, dir_okay=False),
-              help="Config file to use to configure logging. Use only for advanced situations. Can accept both JSON and ini style configurations")
+@click.option(
+    '--log_config_file',
+    default=DEFAULT_CONFIG.log_config_file,
+    type=click.Path(exists=True, dir_okay=False),
+    help=
+    "Config file to use to configure logging. Use only for advanced situations. Can accept both JSON and ini style configurations"
+)
+@click.version_option()
 @prepare_command(Config.get())
-def cli(ctx: click.Context, log_level: int = DEFAULT_CONFIG.log_level, log_config_file: str = DEFAULT_CONFIG.log_config_file, **kwargs):
+def cli(ctx: click.Context,
+        log_level: int = DEFAULT_CONFIG.log_level,
+        log_config_file: str = DEFAULT_CONFIG.log_config_file,
+        **kwargs):
 
     # ensure that ctx.obj exists and is a dict (in case `cli()` is called
     # by means other than the `if` block below
@@ -163,6 +182,32 @@ def onnx_to_trt(ctx: click.Context, **kwargs):
     from morpheus.utils.onnx_to_trt import gen_engine
 
     gen_engine(c)
+
+
+@tools.group(short_help="Utility for installing/updating/removing shell completion for Morpheus", **command_kwargs)
+def autocomplete(**kwargs):
+    pass
+
+
+@autocomplete.command(short_help="Show the Morpheus shell command completion code")
+@click.option('-i', '--case-insensitive/--no-case-insensitive', help="Case insensitive completion")
+@click.argument('shell', required=False, type=click_completion.DocumentedChoice(click_completion.core.shells))
+def show(shell, case_insensitive):
+    """Show the click-completion-command completion code"""
+    extra_env = {'_CLICK_COMPLETION_COMMAND_CASE_INSENSITIVE_COMPLETE': 'ON'} if case_insensitive else {}
+    click.echo(click_completion.core.get_code(shell, extra_env=extra_env))
+
+
+@autocomplete.command(short_help="Install the Morpheus shell command completion")
+@click.option('--append/--overwrite', help="Append the completion code to the file", default=None)
+@click.option('-i', '--case-insensitive/--no-case-insensitive', help="Case insensitive completion")
+@click.argument('shell', required=False, type=click_completion.DocumentedChoice(click_completion.core.shells))
+@click.argument('path', required=False)
+def install(append, case_insensitive, shell, path):
+    """Install the click-completion-command completion"""
+    extra_env = {'_CLICK_COMPLETION_COMMAND_CASE_INSENSITIVE_COMPLETE': 'ON'} if case_insensitive else {}
+    shell, path = click_completion.core.install(shell=shell, path=path, append=append, extra_env=extra_env)
+    click.echo('%s completion installed in %s' % (shell, path))
 
 
 @cli.group(short_help="Run one of the available pipelines", cls=AliasedGroup, **command_kwargs)
@@ -227,6 +272,8 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     config.mode = PipelineModes.NLP
 
+    from morpheus.pipeline import Pipeline
+
     ctx.obj = Pipeline(config)
 
     return ctx.obj
@@ -259,6 +306,8 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     config.mode = PipelineModes.FIL
 
+    from morpheus.pipeline import Pipeline
+
     ctx.obj = Pipeline(config)
 
     return ctx.obj
@@ -285,6 +334,8 @@ pipeline_fil.result_callback = post_pipeline
 @click.option('--filename', type=click.Path(exists=True, dir_okay=False), help="Input filename")
 @prepare_command(False)
 def from_file(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -317,6 +368,8 @@ def from_file(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def from_kafka(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
@@ -341,6 +394,8 @@ def from_kafka(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def monitor(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     from morpheus.pipeline.general_stages import MonitorStage
@@ -357,6 +412,8 @@ def monitor(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def buffer(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     from morpheus.pipeline.general_stages import BufferStage
@@ -372,6 +429,8 @@ def buffer(ctx: click.Context, **kwargs):
 @click.option('--duration', type=str, help="Time to delay messages in the pipeline. Follows the pandas interval format")
 @prepare_command(False)
 def delay(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -391,6 +450,8 @@ def delay(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def trigger(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     from morpheus.pipeline.general_stages import TriggerStage
@@ -405,6 +466,8 @@ def trigger(ctx: click.Context, **kwargs):
 @click.command(short_help="Deserialize source data from JSON", **command_kwargs)
 @prepare_command(False)
 def deserialize(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -421,6 +484,8 @@ def deserialize(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def preprocess_nlp(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     from morpheus.pipeline.preprocessing import PreprocessNLPStage
@@ -435,6 +500,8 @@ def preprocess_nlp(ctx: click.Context, **kwargs):
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
 @prepare_command(False)
 def preprocess_fil(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -453,9 +520,12 @@ def preprocess_fil(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def inf_triton(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
-    from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
+    from morpheus.pipeline.inference.inference_triton import \
+        TritonInferenceStage
 
     stage = TritonInferenceStage(Config.get(), **kwargs)
 
@@ -468,9 +538,12 @@ def inf_triton(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def inf_identity(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
-    from morpheus.pipeline.inference.inference_identity import IdentityInferenceStage
+    from morpheus.pipeline.inference.inference_identity import \
+        IdentityInferenceStage
 
     stage = IdentityInferenceStage(Config.get(), **kwargs)
 
@@ -483,6 +556,8 @@ def inf_identity(ctx: click.Context, **kwargs):
 @click.option('--threshold', type=float, default=0.5, required=True, help="Level to consider True/False")
 @prepare_command(False)
 def add_class(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -499,6 +574,8 @@ def add_class(ctx: click.Context, **kwargs):
 @click.option('--threshold', type=float, default=0.5, required=True, help="")
 @prepare_command(False)
 def filter(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -533,6 +610,8 @@ def filter(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def serialize(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     kwargs["include"] = list(kwargs["include"])
@@ -552,6 +631,8 @@ def serialize(ctx: click.Context, **kwargs):
 @click.option('--overwrite', is_flag=True, help="")
 @prepare_command(False)
 def to_file(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import Pipeline
 
     p: Pipeline = ctx.ensure_object(Pipeline)
 
@@ -577,6 +658,8 @@ def to_file(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def to_kafka(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
@@ -597,6 +680,8 @@ def to_kafka(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def gen_viz(ctx: click.Context, **kwargs):
 
+    from morpheus.pipeline import Pipeline
+
     p: Pipeline = ctx.ensure_object(Pipeline)
 
     from morpheus.pipeline.output.gen_viz_frames import GenerateVizFramesStage
@@ -608,13 +693,16 @@ def gen_viz(ctx: click.Context, **kwargs):
     return stage
 
 
+# Manually create the subcommands for each command (necessary since commands can be used on multiple groups)
 run.add_command(dask)
 run.add_command(pipeline_nlp)
 run.add_command(pipeline_fil)
 
+# Wrap both pipelines in dask commands
 dask.add_command(pipeline_nlp)
 dask.add_command(pipeline_fil)
 
+# NLP Pipeline
 pipeline_nlp.add_command(add_class)
 pipeline_nlp.add_command(buffer)
 pipeline_nlp.add_command(delay)
@@ -630,16 +718,14 @@ pipeline_nlp.add_command(preprocess_nlp)
 pipeline_nlp.add_command(serialize)
 pipeline_nlp.add_command(to_file)
 pipeline_nlp.add_command(to_kafka)
-# pipeline_nlp.add_command(trigger)
 
-# pipeline_fil.add_command(add_class)
+# FIL Pipeline
 pipeline_fil.add_command(buffer)
 pipeline_fil.add_command(delay)
 pipeline_fil.add_command(deserialize)
 pipeline_fil.add_command(filter)
 pipeline_fil.add_command(from_kafka)
 pipeline_fil.add_command(from_file)
-# pipeline_fil.add_command(gen_viz)
 pipeline_fil.add_command(inf_identity)
 pipeline_fil.add_command(inf_triton)
 pipeline_fil.add_command(monitor)
@@ -647,7 +733,11 @@ pipeline_fil.add_command(preprocess_fil)
 pipeline_fil.add_command(serialize)
 pipeline_fil.add_command(to_file)
 pipeline_fil.add_command(to_kafka)
-# pipeline_nlp.add_command(trigger)
+
+
+def run_cli():
+    cli(obj={}, auto_envvar_prefix='CLX', show_default=True)
+
 
 if __name__ == '__main__':
-    cli(obj={}, auto_envvar_prefix='CLX', show_default=True)
+    run_cli()
