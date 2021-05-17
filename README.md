@@ -50,7 +50,7 @@ NVIDIA Morpheus is an open AI application framework that provides cybersecurity 
 
 Pre-built Morpheus containers will be available from NGC in the future. In the meantime, you will need to build the container manually or run the code locally.
 
-#### Building locally
+#### Building locally (inside a container)
 
 To manually build the container, run the following from the repo root:
 
@@ -59,6 +59,24 @@ docker build -t morpheus -f ops/Dockerfile .
 ```
 
 This will create the `morpheus:latest` docker image. The commands to run Morpheus in the container or locally are the same. See the [Running Morpheus](#running-morpheus) section for more info.
+
+#### Building locally (outside a container)
+
+To build Morpheus outside of a container, first ensure all of the necessary requirements are installed (listed above). Then, from the repo root, run the following:
+
+```bash
+# For non-developers
+pip install .
+
+# For developers (Installs a symlink that allows updating the code)
+pip install -e .
+```
+
+Additionally, shell command completion can be installed with:
+```bash
+morpheus tools autocomplete install
+```
+This will autodetermine your shell and the proper install location. See `morpheus tools autocomplete install --help` for more info on options and available shells.
 
 ## Running Morpheus
 
@@ -158,18 +176,18 @@ See the Readme in [this](github.com:wphicks/triton_fil_backend) repo for more in
 
 The Morpheus pipeline can be configured in two ways:
 1. Manual configuration in Python script.
-2. Configuration via the provided CLI
+2. Configuration via the provided CLI (i.e. `morpheus`)
 
 ### Starting the Pipeline (via Manual Python Config)
 
-See the `cli.py` file for examples on how to config via Python. More detailed instructions will be provided in the future.
+See the `./examples` directory for examples on how to config via Python. More detailed instructions will be provided in the future.
 
 ### Starting the Pipeline (via CLI)
 
-The provided CLI (see `cli.py`) is capable of running the included tools as well as any linear pipeline. Instructions for using the CLI can be queried with:
+The provided CLI (`morpheus`) is capable of running the included tools as well as any linear pipeline. Instructions for using the CLI can be queried with:
 ```bash
-$ python cli.py --help
-Usage: cli.py [OPTIONS] COMMAND [ARGS]...
+$ morpheus
+Usage: morpheus [OPTIONS] COMMAND [ARGS]...
 
 Options:
   --debug / --no-debug  [default: False]
@@ -179,11 +197,11 @@ Commands:
   run    Run one of the available pipelines
   tools  Run a utility tool
 ```
-Each command in the CLI has it's own help information. Use `python cli.py [command] [...sub-command] --help` to get instructions for each command and sub command. For example:
+Each command in the CLI has it's own help information. Use `morpheus [command] [...sub-command] --help` to get instructions for each command and sub command. For example:
 ```bash
-$ python cli.py run pipeline-nlp inf-triton --help
+$ morpheus run pipeline-nlp inf-triton --help
 
-Usage: cli.py run pipeline-nlp inf-triton [OPTIONS]
+Usage: morpheus run pipeline-nlp inf-triton [OPTIONS]
 
 Options:
   --model_name TEXT  Model name in Triton to send messages to  [required]
@@ -193,9 +211,9 @@ Options:
 
 #### CLI Stage Configuration
 
-When configuring a pipeline via the CLI, you start with the command `python cli.py run pipeline` and then list the stages in order from start to finish. The order that the commands are placed in will be the order that data flows from start to end. The output of each stage will be linked to the input of the next. For example, to build a simple pipeline that reads from kafka, deserializes messages, serializes them, and then writes to a file, use the following:
+When configuring a pipeline via the CLI, you start with the command `morpheus run pipeline` and then list the stages in order from start to finish. The order that the commands are placed in will be the order that data flows from start to end. The output of each stage will be linked to the input of the next. For example, to build a simple pipeline that reads from kafka, deserializes messages, serializes them, and then writes to a file, use the following:
 ```bash
-$ python cli.py run pipeline-nlp from-kafka --input_topic test_pcap deserialize serialize to-file --filename .tmp/temp_out.json
+$ morpheus run pipeline-nlp from-kafka --input_topic test_pcap deserialize serialize to-file --filename .tmp/temp_out.json
 ```
 You should see some output similar to:
 ```log
@@ -208,7 +226,7 @@ Added stage: to-file -> typing.List[str]
 ```
 This is important because it shows you the order of the stages and the output type of each one. Since some stages cannot accept all types of inputs, Morpheus will report an error if you have configured your pipeline incorrectly. For example, if we run the same command as above but forget the `serialize` stage, you will see the following:
 ```bash
-$ python cli.py run pipeline-nlp from-kafka --input_topic test_pcap deserialize to-file --filename .tmp/temp_out.json --overwrite
+$ morpheus run pipeline-nlp from-kafka --input_topic test_pcap deserialize to-file --filename .tmp/temp_out.json --overwrite
 
 ====Building Pipeline====
 Added source: from-kafka -> <class 'cudf.core.dataframe.DataFrame'>
@@ -227,8 +245,8 @@ This indicates that the `to-file` stage cannot accept the input type of `morpheu
 
 A complete list of the pipeline stages will be added in the future. For now, you can query the available stages for each pipeline type via:
 ```bash
-$ python cli.py run pipeline-nlp --help
-Usage: cli.py run pipeline-nlp [OPTIONS] COMMAND1 [ARGS]... [COMMAND2
+$ morpheus run pipeline-nlp --help
+Usage: morpheus run pipeline-nlp [OPTIONS] COMMAND1 [ARGS]... [COMMAND2
                                [ARGS]...]...
 
 <Help Paragraph Omitted>
@@ -252,8 +270,8 @@ Commands:
 ```
 And for the FIL pipeline:
 ```bash
-$ python cli.py run pipeline-fil --help
-Usage: cli.py run pipeline-fil [OPTIONS] COMMAND1 [ARGS]... [COMMAND2
+$ morpheus run pipeline-fil --help
+Usage: morpheus run pipeline-fil [OPTIONS] COMMAND1 [ARGS]... [COMMAND2
                                [ARGS]...]...
 
 <Help Paragraph Omitted>

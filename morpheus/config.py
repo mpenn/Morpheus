@@ -1,15 +1,16 @@
 import dataclasses
 import json
-import pprint
 import typing
 import logging
 
-import docker
 from enum import Enum
 
 logger = logging.getLogger(__name__)
 
 def auto_determine_bootstrap():
+
+    import docker
+
     kafka_compose_name = "kafka-docker"
 
     docker_client = docker.from_env()

@@ -1,24 +1,22 @@
 import asyncio
 import concurrent.futures
 import logging
-from morpheus.pipeline.messages import MultiMessage
 import queue
 import sys
 import time
 import typing
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import cudf
 import distributed
 import typing_utils
 from distributed.client import wait
+from morpheus.config import Config
+from morpheus.pipeline.messages import MultiMessage
 from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
-
-from morpheus.config import Config
 
 config = Config.get()
 
