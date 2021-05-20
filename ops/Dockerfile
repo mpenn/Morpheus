@@ -12,6 +12,12 @@ ARG PYTHON_VER=3.8
 # Capture argument used for FROM
 ARG CUDA_VER
 
+# Install build-essential. Needed to call `make`
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+      build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Enables "source activate conda"
 SHELL ["/bin/bash", "-c"]
 
@@ -29,16 +35,25 @@ RUN /opt/conda/bin/conda create -n morpheus \
   tqdm \
   && sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
 
+# Enables all RUN commands to use the conda env
 SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
 
-RUN pip install nvidia-pyindex \
-  && pip install xgboost grpcio-channelz click configargparse docker tritonclient[all] typing-utils \
-  && pip uninstall streamz \
-  && pip install git+https://github.com/mdemoret-nv/streamz.git@async
+# Install nvidia-pyindex which is needed for tritonclient[all] but must be
+# installed before setup is run
+RUN pip install nvidia-pyindex
 
 WORKDIR /workspace
 
 COPY . ./
 
-ENTRYPOINT [ "/usr/bin/tini", "--" ]
-CMD [ "/bin/bash" ]
+# Installs morpheus and put CLI on PATH
+RUN pip install .
+
+# Set the entrypoint to use the entrypoint.sh script which sets the conda env
+ENTRYPOINT [ "/usr/bin/tini", "--", "ops/entrypoint.sh" ]
+
+# Reset the shell back to normal
+SHELL ["/bin/bash", "-c"]
+
+# Use morpheus by default
+CMD [ "morpheus" ]
