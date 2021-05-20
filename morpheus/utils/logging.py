@@ -101,9 +101,9 @@ def configure_logging(log_level: int, log_config_file: str = None):
     log_config_file: str, optional (default = None): Instructs Morpheus to configure logging via a config file. These config
         files can be complex and are outlined in the Python logging documentation. Will accept either a ``.ini`` file which will
         be loaded via `logging.config.fileConfig()` (See
-        `here<https://docs.python.org/3/library/logging.config.html#logging.config.fileConfig>`_) or a ``.json`` file which will
+        `here <https://docs.python.org/3/library/logging.config.html#logging.config.fileConfig>`__) or a ``.json`` file which will
         be loaded via `logging.config.dictConfig()` (See
-        `here<https://docs.python.org/3/library/logging.config.html#logging.config.dictConfig>`_). Defaults to None.
+        `here <https://docs.python.org/3/library/logging.config.html#logging.config.dictConfig>`__). Defaults to None.
     """
 
     if (log_config_file is not None):

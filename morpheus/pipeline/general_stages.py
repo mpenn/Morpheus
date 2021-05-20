@@ -13,6 +13,16 @@ from tqdm import tqdm
 
 
 class BufferStage(Stage):
+    """
+    The input messages are buffered by this stage class for faster access to downstream stages. Allows
+    upstream stages to run faster than downstream stages.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config, count: int = 1000):
         super().__init__(c)
 
@@ -23,6 +33,15 @@ class BufferStage(Stage):
         return "buffer"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types
+
+        """
         return (typing.Any, )
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:
@@ -30,6 +49,16 @@ class BufferStage(Stage):
 
 
 class DelayStage(Stage):
+    """
+    Delay stage class. Used to buffer all inputs until the timeout duration is hit. At that point all messages
+    will be dumped into downstream stages. Useful for testing performance of one stage at a time.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config, duration: str):
         super().__init__(c)
 
@@ -40,6 +69,15 @@ class DelayStage(Stage):
         return "delay"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types
+
+        """
         return (typing.Any, )
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:
@@ -47,6 +85,16 @@ class DelayStage(Stage):
 
 
 class TriggerStage(Stage):
+    """
+    This stage will buffer all inputs until the source stage is complete. At that point all messages
+    will be dumped into downstream stages. Useful for testing performance of one stage at a time.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -55,6 +103,15 @@ class TriggerStage(Stage):
         return "trigger"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types
+
+        """
         return (typing.Any, )
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:
@@ -74,6 +131,27 @@ class TriggerStage(Stage):
 
 
 class MonitorStage(Stage):
+    """
+    Monitor stage used to monitor stage performance metrics using Tqdm. Each Monitor Stage will represent one
+    line in the console window showing throughput statistics. Can be set up to show an instantaneous
+    throughput or average input.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    description : str
+        Name to show for this Monitor Stage in the console window
+    smoothing : int
+        Smoothing parameter to determine how much the throughput should be averaged. 0 = Instantaneous, 1 =
+        Average.
+    unit : str
+        Units to show in the rate value.
+    determine_count_fn : typing.Callable[[typing.Any], int]
+        Custom function for determining the count in a message. Gets called for each message. Allows for
+        correct counting of batched and sliced messages.
+
+    """
     def __init__(self,
                  c: Config,
                  description: str = "Progress",
@@ -98,6 +176,15 @@ class MonitorStage(Stage):
         return "monitor"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types
+
+        """
         return (typing.Any, )
 
     def on_start(self):
@@ -163,6 +250,18 @@ class MonitorStage(Stage):
 
 
 class AddClassificationsStage(Stage):
+    """
+    Add classification labels based on probabilities calculated in inference stage. Uses default threshold of
+    0.5 for predictions.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    threshold : float
+        Threshold to classify, default is 0.5
+
+    """
     def __init__(self, c: Config, threshold: float = 0.5):
         super().__init__(c)
 
@@ -173,6 +272,15 @@ class AddClassificationsStage(Stage):
         return "add-class"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple[MultiResponseMessage, ]
+            Accepted input types
+
+        """
         return (MultiResponseMessage, )
 
     def _add_labels(self, x: MultiResponseMessage):
@@ -210,6 +318,17 @@ class AddClassificationsStage(Stage):
 
 
 class FilterDetectionsStage(Stage):
+    """
+    This Stage class is used to filter results based on a given criteria.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    threshold : float
+        Threshold to classify, default is 0.5
+
+    """
     def __init__(self, c: Config, threshold: float = 0.5):
         super().__init__(c)
 
@@ -221,10 +340,32 @@ class FilterDetectionsStage(Stage):
         return "filter"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple[MultiResponseMessage, ]
+            Accepted input types
+
+        """
         return (MultiResponseMessage, )
 
     def filter(self, x: MultiResponseMessage) -> typing.List[MultiResponseMessage]:
+        """
+        This function uses a threshold value to filter the messages.
 
+        Parameters
+        ----------
+        x : morpheus.messages.MultiResponseMessage
+            MultiResponseMessage
+
+        Returns
+        -------
+        typing.List[MultiResponseMessage]
+            list of filtered messages
+
+        """
         # Unfortunately we have to convert this to a list in case there are non-contiguous groups
         output_list = []
 

@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 
 @Stream.register_api()
 class async_map(Stream):
-    """ Apply a function to every element in the stream
+    """
+    Apply a function to every element in the stream
 
     Parameters
     ----------
-    func: callable
+    func : typing.Callable
+        The function to call for each mapped value
     *args :
         The arguments to pass to the function.
-    **kwargs:
+    **kwargs: dict
         Keyword arguments to pass to func
 
     Examples
@@ -74,7 +76,7 @@ class async_map(Stream):
 
 @Stream.register_api()
 class time_delay(Stream):
-    """ Add a time delay to results """
+    """Add a time delay to results"""
     _graphviz_shape = 'octagon'
 
     def __init__(self, upstream, interval, **kwargs):
@@ -107,8 +109,9 @@ class time_delay(Stream):
 
 @Stream.register_api()
 class scatter_batch(DaskStream):
-    """ Convert local stream to Dask Stream
-
+    """
+    Convert local stream to Dask Stream
+    
     All elements flowing through the input will be scattered out to the cluster
     """
     async def update(self, x, who=None, metadata=None):

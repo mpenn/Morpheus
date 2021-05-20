@@ -9,7 +9,20 @@ from morpheus.pipeline.pipeline import StreamPair
 
 
 class SerializeStage(Stage):
-    def __init__(self, c: Config, include: str = None, exclude: typing.List[str] = [r'^ID$', r'^ts_']):
+    """
+    This class converts a `MultiMessage` object into a list of strings for writing out to file or Kafka.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    include : list[str]
+        Attributes that are required send to downstream stage. 
+    exclude : typing.List[str]
+        Attributes that are not required send to downstream stage.
+
+    """
+    def __init__(self, c: Config, include: typing.List[str] = None, exclude: typing.List[str] = [r'^ID$', r'^ts_']):
         super().__init__(c)
 
         self._include_columns = include
@@ -20,11 +33,32 @@ class SerializeStage(Stage):
         return "serialize"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple(morpheus.pipeline.messages.MultiMessage, )
+            Accepted input types
+
+        """
         return (MultiMessage, )
 
     @staticmethod
     def convert_to_json(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
+        """
+        Converts dataframe to entries to JSON lines.
 
+        Parameters
+        ----------
+        x : morpheus.pipeline.messages.MultiMessage
+            MultiMessage instance that contains data.
+        include_columns : typing.Pattern
+            Columns that are required send to downstream stage.
+        exclude_columns : typing.List[typing.Pattern])
+            Columns that are not required send to downstream stage.
+
+        """
         columns: typing.List[str] = []
 
         # First build up list of included. If no include regex is specified, select all

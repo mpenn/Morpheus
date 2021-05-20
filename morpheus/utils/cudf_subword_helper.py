@@ -11,15 +11,18 @@ Feature = collections.namedtuple(  # pylint: disable=invalid-name
 ### Model loading utils
 def create_vocab_table(vocabpath):
     """
-        Create Vocabulary tables from the vocab.txt file
-        
-        Parameters:
-        ___________
-        vocabpath: Path of vocablary file
-        Returns:
-        ___________
+    Create Vocabulary tables from the vocab.txt file
+
+    Parameters
+    ----------
+    vocabpath : str
+        Path of vocablary file
+
+    Returns
+    -------
+    np.array
         id2vocab: np.array, dtype=<U5
-        vocab2id: dict that maps strings to int
+
     """
     id2vocab = []
     vocab2id = {}
@@ -33,19 +36,23 @@ def create_vocab_table(vocabpath):
 
 def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
     """
-        This function tokenizes a text series using the bert subword_tokenizer and vocab-hash
-        
-        Parameters
-        __________
+    This function tokenizes a text series using the bert subword_tokenizer and vocab-hash
 
-        text_ser: Text Series to tokenize
-        seq_len: Sequence Length to use (We add to special tokens for ner classification job)
-        stride : Stride for the tokenizer
-        vocab_hash_file: vocab_hash_file to use (Created using `perfect_hash.py` with compact flag)
+    Parameters
+    ----------
+    text_ser : cudf.Series
+        Text Series to tokenize
+    seq_len : int
+        Sequence Length to use (We add to special tokens for ner classification job)
+    stride : int
+        Stride for the tokenizer
+    vocab_hash_file : str
+        vocab_hash_file to use (Created using `perfect_hash.py` with compact flag)
 
-        Returns
-        _______
-         A dictionary with these keys {'token_ar':,'attention_ar':,'metadata':}
+    Returns
+    -------
+    dict
+        A dictionary with these keys {'token_ar':,'attention_ar':,'metadata':}
 
     """
     #print("Tokenizing Text Series")

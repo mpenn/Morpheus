@@ -1,13 +1,20 @@
-import typing
-
-import tensorrt as trt
-
 from morpheus.config import ConfigOnnxToTRT
-
-TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 
 
 def gen_engine(c: ConfigOnnxToTRT):
+    """
+    This class converts an Onnx model to a TRT model.
+
+    Parameters
+    ----------
+    c : morpheus.config.ConfigOnnxToTRT
+        Onnc to TRT generator configuration.
+
+    """
+
+    # Local imports to avoid requiring TensorRT to generate the docs
+    import tensorrt as trt
+    TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
 
     input_model = c.input_model
 

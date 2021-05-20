@@ -21,6 +21,75 @@ from morpheus.pipeline.pipeline import get_time_ms
 
 
 class InferenceStage(Stage):
+    """
+    This class serves as the base for any inference stage. Inference stages operate differently than other
+    stages due to the fact that they operate in a separate thread and have their own batch size which is
+    separate from the pipeline batch size. Processing the inference work in a separate thread is necessary to
+    support inference types that may require exclusive use of a single thread (i.e. TensorRT) without blocking
+    the main asyncio thread.
+
+    Changing batch sizes for the inference stage requires breaking messages into smaller slices, running
+    inference on the smaller slices, then recombining the inference output into the original batch size. This
+    inference base class handles breaking and recombining batches and queing the inference work to be
+    processed on another thread.
+
+    Breaking and recombining batches is processed normally on the asyncio Main Thread, while individual
+    inference slices are added to a queue which will be processed by the dedicated inference thread. Each
+    individual inference slice is added to the queue as a `(asyncio.Future, morpheus.MultiInferenceMessage)`
+    tuple. Once the inference thread has completed a `~morpheus.pipeline.messages.MultiInferenceMessage`, it
+    signals the work is complete using the `asyncio.Future` object. The inference stage waits for all
+    `asyncio.Future` objects in a pipeline batch to be complete before recombining the inference slices into
+    larger batchs.
+
+    Inference stages that derive from this class need to only implement the `_get_inference_fn` method. The
+    `_get_inference_fn()` should return a callable with the signature `typing.Callable[[tornado.IOLoop,
+    asyncio.Queue, asyncio.Event], None]`. The structure of most inference functions will follow the form:
+
+    #.  Perform initialization
+
+        #.  Once complete, signal to the pipeline that the inference stage is ready with:
+
+            .. code-block:: python
+
+                loop.asyncio_loop.call_soon_threadsafe(ready_event.set)
+
+    #.  While the pipeline is running:
+
+        #.  Get an item of work from the `asyncio.Queue`. Block if the queue is empty
+        
+            #.  Each item of work will contain a tuple in the form:
+
+                .. code-block:: python
+
+                    (asyncio.Future, morpheus.MultiInferenceMessage)
+
+        #.  Process the `~morpheus.pipeline.messages.MultiInferenceMessage`
+
+            #.  This will be unique to each `InferenceStage`
+
+        #.  Signal the completion of the item of work
+
+            #.  Successful completion or an exception is signaled using the `asyncio.Future` object in the
+                unit of work tuple
+            #.  Exceptions can be set with :py:meth:`asyncio.Future.set_exception`
+            #.  Successful results can be set with :py:meth:`asyncio.Future.set_result`
+            #.  Keep in mind that these are `asyncio.Future` objects, not `concurrent.futures.Future`. Setting
+                exceptions or results must be done from the Asyncio Main Thread. Therefore, calling
+                :py:meth:`~asyncio.Future.set_exception`/:py:meth:`~asyncio.Future.set_result` should be
+                queued on the Asyncio Main Thread using:
+
+                .. code-block:: python
+
+                    loop.add_callback(future.set_exception, my_exception)
+                    # OR
+                    loop.add_callback(future.set_result, my_result)
+
+    Parameters
+    ----------
+    c : `morpheus.config.Config`
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -40,10 +109,29 @@ class InferenceStage(Stage):
         return "inference"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Returns accepted input types to this stage.
+
+        Returns
+        -------
+        typing.Tuple(morpheus.pipeline.messages.MultiInferenceMessage, morpheus.pipeline.StreamFuture[morpheus.pipeline.messages.MultiInferenceMessage])
+            Accepted input types
+
+        """
         return (MultiInferenceMessage, StreamFuture[MultiInferenceMessage])
 
     @abstractmethod
     def _get_inference_fn(self) -> typing.Callable:
+        """
+        Returns the main inference function to be run in a separate thread.
+
+        :meta public:
+
+        Returns
+        -------
+            typing.Callable: 
+                Callable function that takes parameters ``(tornado.IOLoop, asyncio.Queue, asyncio.Event)``
+        """
         pass
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:

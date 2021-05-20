@@ -10,6 +10,20 @@ from morpheus.pipeline.pipeline import StreamPair
 
 
 class WriteToFileStage(Stage):
+    """
+    This class writes messages to a file. This class does not buffer or keep the file open between messages.
+    It should not be used in production code.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance.
+    filename : str
+        Name of the file from which the messages will be written
+    overwrite : bool
+        Overwrite file if exists. Will generate an error otherwise
+
+    """
     def __init__(self, c: Config, filename: str, overwrite: bool):
         super().__init__(c)
 
@@ -28,9 +42,27 @@ class WriteToFileStage(Stage):
         return "to-file"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Returns accepted input types for this stage.
+
+        Returns
+        -------
+        typing.Tuple[List[str], ]
+            Accepted input types
+
+        """
         return (typing.List[str], )
 
     def write_to_file(self, x: typing.List[str]):
+        """
+        Messages are written to a file using this function.
+
+        Parameters
+        ----------
+        x : typing.List[str]
+            Messages that should be written to a file.
+
+        """
         with open(self._output_file, "a") as f:
             f.writelines("\n".join(x))
             f.write("\n")

@@ -8,6 +8,19 @@ from morpheus.pipeline.pipeline import StreamPair
 
 
 class WriteToKafkaStage(Stage):
+    """
+    Write messages to a Kafka cluster.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    bootstrap_servers : str
+        Kafka cluster bootstrap servers separated by comma
+    output_topic : str
+        Output kafka topic
+
+    """
     def __init__(self, c: Config, bootstrap_servers: str, output_topic: str):
         super().__init__(c)
 
@@ -20,6 +33,15 @@ class WriteToKafkaStage(Stage):
         return "to-kafka"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Returns accepted input types for this stage.
+
+        Returns
+        -------
+        typing.Tuple[list[str], ]
+            Accepted input types
+
+        """
         return (typing.List[str], )
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:

@@ -12,10 +12,12 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+import os
+import sys
 
+sys.path.insert(0, os.path.abspath('sphinxext'))
+
+from github_link import make_linkcode_resolve  # noqa
 
 # -- Project information -----------------------------------------------------
 
@@ -28,7 +30,6 @@ version = '0.1'
 # The full version, including alpha/beta/rc tags
 release = '0.1.0'
 
-
 # -- General configuration ---------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
@@ -39,15 +40,44 @@ release = '0.1.0'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'nbsphinx',
-    'sphinx.ext.intersphinx',
+    'numpydoc',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosummary',
-    'numpydoc',
-    'IPython.sphinxext.ipython_console_highlighting',
-    'IPython.sphinxext.ipython_directive',
-    'nbsphinx'
+    'sphinx.ext.doctest',
+    'sphinx.ext.intersphinx',
+    'sphinx.ext.linkcode',
+    "IPython.sphinxext.ipython_console_highlighting",
+    "IPython.sphinxext.ipython_directive",
+    "nbsphinx",
 ]
+
+## Include Python objects as they appear in source files
+## Default: alphabetically ('alphabetical')
+# autodoc_member_order = 'groupwise'
+## Default flags used by autodoc directives
+# autodoc_default_options = {
+#     'members': True,
+#     'show-inheritance': True,
+# }
+
+autosummary_imported_members = False
+autosummary_generate = True  # Generate autodoc stubs with summaries from code
+autoclass_content = "class"  # Dont show __init__
+html_show_sourcelink = False  # Remove 'view source code' from top of page (for html, not python)
+autodoc_inherit_docstrings = True  # If no docstring, inherit from base class
+set_type_checking_flag = True  # Enable 'expensive' imports for sphinx_autodoc_typehints
+nbsphinx_allow_errors = True  # Continue through Jupyter errors
+autodoc_typehints = "description"  # Sphinx-native method. Not as good as sphinx_autodoc_typehints
+autodoc_typehints_description_target = "documented"  # Dont double up on type hints
+add_module_names = False  # Remove namespaces from class/method signatures
+autodoc_mock_imports = [
+    "streamz",
+    "morpheus.cli", # Dont document the CLI in Sphinx
+]
+
+# Config numpydoc
+numpydoc_show_inherited_class_members = True
+numpydoc_class_members_toctree = False
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -56,7 +86,7 @@ templates_path = ['_templates']
 # You can specify multiple suffix as a list of string:
 #
 # source_suffix = ['.rst', '.md']
-source_suffix = '.rst'
+source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 
 # The master toctree document.
 master_doc = 'index'
@@ -71,11 +101,10 @@ language = None
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path .
-exclude_patterns = []
+exclude_patterns = ["_build"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
-
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -89,12 +118,17 @@ html_theme = "sphinx_rtd_theme"
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
-# html_theme_options = {}
+html_theme_options = {
+    'collapse_navigation': False,
+    'navigation_depth': 6,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+
+html_js_files = ["example_mod.js"]
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -106,12 +140,10 @@ html_static_path = ['_static']
 #
 # html_sidebars = {}
 
-
 # -- Options for HTMLHelp output ---------------------------------------------
 
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'morpheusdoc'
-
 
 # -- Options for LaTeX output ------------------------------------------------
 
@@ -137,20 +169,14 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'morpheus.tex', 'Morpheus Documentation',
-     'NVIDIA', 'manual'),
+    (master_doc, 'morpheus.tex', 'Morpheus Documentation', 'NVIDIA', 'manual'),
 ]
-
 
 # -- Options for manual page output ------------------------------------------
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [
-    (master_doc, 'morpheus', 'Morpheus Documentation',
-     [author], 1)
-]
-
+man_pages = [(master_doc, 'morpheus', 'Morpheus Documentation', [author], 1)]
 
 # -- Options for Texinfo output ----------------------------------------------
 
@@ -158,23 +184,31 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'morpheus', 'Morpheus Documentation',
-     author, 'morpheus', 'One line description of project.',
-     'Miscellaneous'),
+    (master_doc, 'morpheus', 'Morpheus Documentation', author, 'morpheus', 'One line description of project.', 'Miscellaneous'),
 ]
-
-
 
 # -- Extension configuration -------------------------------------------------
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {'https://docs.python.org/': None}
-
-
-# Config numpydoc
-numpydoc_show_inherited_class_members = False
-numpydoc_class_members_toctree = False
+intersphinx_mapping = {
+    "python": ('https://docs.python.org/', None), "scipy": ('https://docs.scipy.org/doc/scipy/reference', None)
+}
 
 
 def setup(app):
-    app.add_stylesheet('params.css')
+    app.add_css_file('copybutton.css')
+    app.add_css_file('infoboxes.css')
+    app.add_css_file('params.css')
+    app.add_css_file('references.css')
+
+
+# The following is used by sphinx.ext.linkcode to provide links to github
+linkcode_resolve = make_linkcode_resolve(
+    'morpheus', 'https://gitlab-master.nvidia.com/morpheus/'
+    'morpheus/-/blob/{revision}/'
+    '{package}/{path}#L{lineno}')
+
+# Set the default role for interpreted code (anything surrounded in `single
+# backticks`) to be a python object. See
+# https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-default_role
+default_role = "py:obj"

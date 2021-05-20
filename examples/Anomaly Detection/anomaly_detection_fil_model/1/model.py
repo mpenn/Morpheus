@@ -43,7 +43,7 @@ class TritonPythonModel:
         # Get outputconfiguration
         #output_config = pb_utils.get_output_config_by_name(model_config, "output")
         
-        model_filepath = '/models/ad_fil_model/1/xgboost.model'
+        model_filepath = '/models/anomaly_detection_fil_model/1/xgboost.model'
         
         self.column_names_dct = {0:'ack',1:'psh',2:'rst',
                              3:'syn',4:'fin',5:'ppm',
