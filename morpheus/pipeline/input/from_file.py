@@ -19,23 +19,25 @@ from morpheus.pipeline.pipeline import StreamPair
 
 logger = logging.getLogger(__name__)
 
+
 @Stream.register_api(staticmethod)
 class from_iterable_done(Source):
-    """ Emits items from an iterable.
+    """
+    Emits items from an iterable.
 
     Parameters
     ----------
-    iterable: iterable
+    iterable : iterable
         An iterable to emit messages from.
 
     Examples
     --------
-
     >>> source = Stream.from_iterable(range(3))
     >>> L = source.sink_to_list()
     >>> source.start()
     >>> L
     [0, 1, 2]
+
     """
     def __init__(self, iterable, **kwargs):
         self._iterable = iterable
@@ -69,7 +71,8 @@ class from_iterable_done(Source):
 
 def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
     """
-    Fixes parsing issues when reading from a file. `\n` gets converted to `\\n` for some reason
+    Fixes parsing issues when reading from a file. When loading a JSON file, cuDF converts ``\\n`` to
+    ``\\\\n`` for some reason
     """
 
     if ("data" in x):
@@ -79,6 +82,18 @@ def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
 
 
 class FileSourceStage(SourceStage):
+    """
+    This class Load messages from a file and dumps the contents into the pipeline immediately. Useful for
+    testing throughput.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance.
+    filename : str
+        Name of the file from which the messages will be read. Must be JSON lines.
+
+    """
     def __init__(self, c: Config, filename: str):
         super().__init__(c)
 
@@ -92,7 +107,7 @@ class FileSourceStage(SourceStage):
 
     @property
     def input_count(self) -> int:
-        # Return None for no max intput count
+        """Return None for no max intput count"""
         return self._input_count
 
     async def _build(self) -> StreamPair:
@@ -114,8 +129,6 @@ class FileSourceStage(SourceStage):
 
             out.append(y)
             count += 1
-
-            # yield y
 
         yield out
 

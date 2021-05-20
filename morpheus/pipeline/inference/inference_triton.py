@@ -22,8 +22,30 @@ from tritonclient.utils import InferenceServerException, triton_to_np_dtype
 
 logger = logging.getLogger(__name__)
 
+
 @dataclasses.dataclass()
 class TritonInOut:
+    """
+    Data class for model input and output configuration
+
+    Parameters
+    ----------
+    name : str
+        Name of the input/output in the model
+    bytes : int
+        Total bytes
+    datatype : str
+        Triton string for datatype
+    shape : typing.List[int]
+        Shape of input/output
+    mapped_name : str
+        Name of the input/output in the pipeline
+    offset : int
+        Offset, default value is 0
+    ptr : cp.cuda.MemoryPointer
+        Cupy cuda memory pointer for the input/output
+
+    """
     name: str  # Name of the input/output in the model
     bytes: int  # Total bytes
     datatype: str  # Triton string for datatype
@@ -34,6 +56,15 @@ class TritonInOut:
 
 
 class RecursiveQueue(queue.Queue):
+    """
+    Recursive queue class. Uses a `threading.RLock` instead of a `threading.Lock` for synchronization.
+
+    Parameters
+    ----------
+    maxsize : int
+        Max queue size. Default value is 0 which is unbounded.
+
+    """
     def __init__(self, maxsize=0):
         super().__init__(maxsize=maxsize)
 
@@ -46,6 +77,23 @@ class RecursiveQueue(queue.Queue):
 
 
 class ResourcePool:
+    """
+    This class provides a bounded pool of resources. Users of the pool can borrow a resource where they will
+    get exclusive access to that resource until it is returned. New objects will be created if the pool is
+    empty when a user requets to borrow a resource. If the max size has been hit, the user thread will be
+    blocked until another thread returns a resource.
+
+    Parameters
+    ----------
+    create_fn : typing.Callable[[], typing.Any]
+
+        Function used to create new resource objects when needed.
+
+    max_size : int, default = 10000
+
+        Maximum number of messages in a queue.
+
+    """
     def __init__(self, create_fn: typing.Callable[[], typing.Any], max_size: int = 1000):
         self._create_fn = create_fn
         self._max_size = max_size
@@ -81,10 +129,27 @@ class ResourcePool:
 
 
 class ShmWrapper:
+    """
+    This class is a wrapper around a CUDA shared memory object shared between this process and a Triton server
+    instance. Since the Triton server only accepts numpy arrays as inputs, we can use this special class to
+    pass memory references of inputs on the device to the server without having to go to the host eliminating
+    serialization and network overhead.
+
+    Parameters
+    ----------
+    client : tritonclient.InferenceServerClient
+        Triton inference server client instance
+    model_name : str
+        Name of the model. Specifies which model can handle the inference requests that are sent to Triton
+        inference server.
+    config : typing.Dict[str, TritonInOut]
+        Model input and output configuration. Keys represent the input/output names. Values will be a
+        `TritonInOut` object
+
+    """
     total_count = 0
 
     def __init__(self, client: tritonclient.InferenceServerClient, model_name: str, config: typing.Dict[str, TritonInOut]):
-
         self._config = config.copy()
 
         self._total_bytes = 0
@@ -110,14 +175,51 @@ class ShmWrapper:
         client.register_cuda_shared_memory(self.region_name, base64.b64encode(self._ipc_handle), 0, self._total_bytes)
 
     def get_bytes(self, name: str):
+        """
+        Get the bytes needed for a particular input/output.
 
+        Parameters
+        ----------
+        name : str
+            Configuration name.
+
+        Returns
+        -------
+        bytes
+            Configuration as bytes
+
+        """
         return self._config[name].bytes
 
     def get_offset(self, name: str):
+        """
+        Get the offset needed for a particular input/output.
 
+        Parameters
+        ----------
+        name : str
+            Configuration input/output name.
+
+        Returns
+        -------
+        int
+            Configuration offset
+
+        """
         return self._config[name].offset
 
     def build_input(self, name: str, data: cp.ndarray) -> tritonclient.InferInput:
+        """
+        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`. Utilizes the config option passed in the constructor to determine the shape/size/type.
+
+        Parameters
+        ----------
+        name : str
+            Inference input name.
+        data : cp.ndarray
+            Inference input data.
+
+        """
         # Create the input
         triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
 
@@ -130,12 +232,47 @@ class ShmWrapper:
         return triton_input
 
     def __getitem__(self, name: str) -> cp.cuda.MemoryPointer:
+        """
+        Returns the `cupy.cuda.MemoryPointer` object to the internal `ShmWrapper` for the specified
+        input/output name.
+
+        :meta public:
+
+        Parameters
+        ----------
+            name : str
+                Input/output name.
+
+        Returns
+        -------
+            cp.cuda.MemoryPointer :
+                Returns the shared memory pointer for this input/output
+
+        """
         return self._config[name].ptr
 
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
 class TritonInference:
+    """
+    This is a base class for all Triton inference server requests.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    model_name : str
+        Name of the model specifies which model can handle the inference requests that are sent to Triton
+        inference server.
+    server_url : str
+        Triton server gRPC URL including the port. 
+    inout_mapping : typing.Dict[str, str]
+        Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
+        Morpheus names do not match the model
+
+    """
     def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str]):
+
         self._model_name = model_name
         self._server_url = server_url
         self._inout_mapping = inout_mapping
@@ -152,6 +289,15 @@ class TritonInference:
         self._outputs: typing.Dict[str, TritonInOut] = {}
 
     def init(self, loop: IOLoop):
+        """
+        This function instantiate triton client and memory allocation for inference input and output.
+
+        Parameters
+        ----------
+        loop : IOLoop
+            Loop to send the response generated by future requests
+
+        """
 
         self._loop = loop
 
@@ -229,7 +375,8 @@ class TritonInference:
             self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
 
         except InferenceServerException as ex:
-            logger.exception("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex), exc_info=True)
+            logger.exception("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex),
+                             exc_info=True)
             raise ex
 
     @abstractmethod
@@ -261,7 +408,17 @@ class TritonInference:
         self._loop.add_callback(tmp, response_mem)
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
+        """
+        This function sends batch of events as a requests to Triton inference server using triton client API.
 
+        Parameters
+        ----------
+        batch : MultiInferenceMessage
+            Batch of inference messages
+        fut : asyncio.Future
+            Future to capture responses
+
+        """
         mem: ShmWrapper = self._mem_pool.borrow()
 
         inputs: typing.List[tritonclient.InferInput] = [
@@ -277,7 +434,20 @@ class TritonInference:
                                        outputs=outputs)
 
     def main_loop(self, loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
+        """
+        This function consumes messages (of type `MultiInferenceMessage`) posted to the internal queue and
+        initiate calls to Triton inference server calls.
 
+        Parameters
+        ----------
+        loop : IOLoop
+            Loop to send the response generated by future requests
+        inf_queue : queue.Queue
+            Internal queue used as middleware to consume messages by multi threaded TritonInference
+        ready_event : asyncio.Event
+            ready_event
+
+        """
         self.init(loop)
 
         if (ready_event is not None):
@@ -295,8 +465,24 @@ class TritonInference:
 
 
 class TritonInferenceNLP(TritonInference):
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
+    """
+    This class extends TritonInference to deal with scenario-specific NLP models inference requests like building response.
 
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    model_name : str
+        Name of the model specifies which model can handle the inference requests that are sent to Triton
+        inference server.
+    server_url : str
+        Triton server gRPC URL including the port. 
+    inout_mapping : typing.Dict[str, str]
+        Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
+        Morpheus names do not match the model
+
+    """
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
         # Some models use different names for the same thing. Set that here but allow user customization
         default_mapping = {
             "attention_mask": "input_mask",
@@ -322,6 +508,24 @@ class TritonInferenceNLP(TritonInference):
 
 
 class TritonInferenceFIL(TritonInference):
+    """
+    This class extends `TritonInference` to deal with scenario-specific FIL models inference requests like
+    building response.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    model_name : str
+        Name of the model specifies which model can handle the inference requests that are sent to Triton
+        inference server.
+    server_url : str
+        Triton server gRPC URL including the port. 
+    inout_mapping : typing.Dict[str, str]
+        Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
+        Morpheus names do not match the model
+
+    """
     def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
         super().__init__(c, model_name, server_url, inout_mapping)
 
@@ -329,22 +533,28 @@ class TritonInferenceFIL(TritonInference):
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
-        probs = cp.array(output[list(output.keys())[0]])
-        probs_shape = probs.shape
-        count = probs_shape[0]
-        
-        if len(probs_shape) != 2:
-            probs = probs.reshape((count, 1))
-        
         mem = ResponseMemory(
-            count=count,
-            probs=probs,  # For now, only support one output
+            count=output[list(output.keys())[0]].shape[0],
+            probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
         )
 
         return mem
 
 
 class TritonInferenceStage(InferenceStage):
+    """
+    This class specifies which inference implementation category (Ex: NLP/FIL) is needed for inferencing.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    model_name : str
+        Name of the model specifies which model can handle the inference requests that are sent to Triton inference server.
+    server_url : str
+        Triton server URL
+
+    """
     def __init__(self, c: Config, model_name: str, server_url: str):
         super().__init__(c)
 

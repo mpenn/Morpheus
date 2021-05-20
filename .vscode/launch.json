@@ -206,5 +206,21 @@
             // "--help",
          ]
       },
+      {
+         "name": "Python: Sphinx",
+         "type": "python",
+         "request": "launch",
+         "module": "sphinx.cmd.build",
+         "console": "integratedTerminal",
+         "cwd": "${workspaceFolder}/docs",
+         "args": [
+            "-b",
+            "html",
+            "-aE",
+            "source",
+            "build",
+         ],
+         "justMyCode": false
+      },
    ]
 }

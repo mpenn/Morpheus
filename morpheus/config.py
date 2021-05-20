@@ -1,3 +1,7 @@
+"""
+Contains configuration objects used to run pipeline and utilities.
+"""
+
 import dataclasses
 import json
 import typing
@@ -8,7 +12,7 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 def auto_determine_bootstrap():
-
+    """Auto determine bootstrap servers for kafka cluster."""
     import docker
 
     kafka_compose_name = "kafka-docker"
@@ -34,6 +38,15 @@ def auto_determine_bootstrap():
 
 
 class ConfigWrapper(object):
+    """
+    Config wrapper class
+
+    Parameters
+    ----------
+    internal_dict : dict
+        internal dictionary
+
+    """
     def __init__(self, internal_dict: dict):
 
         self._state = internal_dict
@@ -77,10 +90,28 @@ class ConfigWrapper(object):
 
 @dataclasses.dataclass
 class ConfigBase():
+    """This is the base class for pipeline configuration."""
     pass
 
 @dataclasses.dataclass
 class ConfigOnnxToTRT(ConfigBase):
+    """
+    Configuration class for the OnnxToTRT migration process.
+
+    Parameters
+    ----------
+    input_model : str
+        Input model file.
+    output_model : str
+        Output model file.
+    batches : typing.List[typing.Tuple[int, int]]
+        Batches of input data
+    seq_length : int
+        Sequence length
+    max_workspace_size : int
+        Maximum workspace size, default 16000 MB
+
+    """
     input_model: str = None
     output_model: str = None
     batches: typing.List[typing.Tuple[int, int]] = dataclasses.field(default_factory=list)
@@ -90,12 +121,40 @@ class ConfigOnnxToTRT(ConfigBase):
 
 @dataclasses.dataclass
 class ConfigGeneral(ConfigBase):
+    """
+    General pipeline configuration class.
+
+    Parameters
+    ----------
+    debug : bool
+        Debug flag to run pipeline in debug mode, default is set False.
+    pipeline : str
+        Pipeline name.
+
+    """
     debug = False
     pipeline: str = "pytorch"
 
 
 @dataclasses.dataclass
 class ConfigModel(ConfigBase):
+    """
+    Pipeline model configuration class.
+
+    Parameters
+    ----------
+    vocab_hash_file : str
+        Path to hash file containing vocabulary of words with token-ids. This can be created from the raw
+        vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function. Default value is
+        'bert-base-cased-hash.txt'
+    seq_length : int
+        Limits the length of the sequence returned. If tokenized string is shorter than max_length, output
+        will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False,
+        there will be multiple returned sequences containing the overflowing token-ids. Default value is 128
+    max_batch_size : int
+        Model max batch size. Default value is 8
+
+    """
     vocab_hash_file: str = "bert-base-cased-hash.txt"
     seq_length: int = 128
     max_batch_size: int = 8
@@ -103,6 +162,19 @@ class ConfigModel(ConfigBase):
 
 @dataclasses.dataclass
 class ConfigKafka(ConfigBase):
+    """
+    Pipeline Kafka configuration class.
+
+    Parameters
+    ----------
+    bootstrap_servers : str
+        Bootstrap server hostname and port number to connect Kafka cluster.
+    input_topic : str
+        Input Kafka topic to consume messages
+    output_topic : str
+        Output Kafka topic to publish messages
+
+    """
     bootstrap_servers: str = "auto"
     input_topic: str = "test_pcap"
     output_topic: str = "output_topic"
@@ -110,25 +182,82 @@ class ConfigKafka(ConfigBase):
 
 @dataclasses.dataclass
 class ConfigDask(ConfigBase):
+    """
+    Pipeline Dask configuration class.
+
+    Parameters
+    ----------
+    use_processes : bool
+        This parameter determines whether pipeline should be run in dask mode.
+
+    """
     use_processes: bool = False
 
 @dataclasses.dataclass
 class ConfigNlp(ConfigBase):
+    """
+    NLP category pipeline configuration class.
+
+    Parameters
+    ----------
+    model_vocab_hash_file : str
+        Path to hash file containing vocabulary of words with token-ids. This can be created from the raw
+        vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function. Default value is
+        'data/bert-base-cased-hash.txt'
+    model_seq_length : int
+        Limits the length of the sequence returned. If tokenized string is shorter than max_length, output
+        will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False,
+        there will be multiple returned sequences containing the overflowing token-ids. Default value is 256
+
+    """
     model_vocab_hash_file: str = "data/bert-base-cased-hash.txt"
     model_seq_length: int = 256
 
 
 @dataclasses.dataclass
 class ConfigFil(ConfigBase):
+    """
+    FIL category pipeline configuration class.
+
+    Parameters
+    ----------
+    model_fea_length : int
+        The number of features used to infer a model. Default value is 29
+
+    """
     model_fea_length: int = 29
 
 class PipelineModes(str, Enum):
+    """The type of usecases that can be executed by the pipeline is determined by the enum."""
     NLP = "NLP"
     FIL = "FIL"
 
 @dataclasses.dataclass
 class Config(ConfigBase):
+    """
+    Pipeline configuration class.
 
+    Parameters
+    ----------
+    debug : bool
+        Flag to run pipeline in debug mode. Default value is False
+    mode : PipelineModes
+        Determines type of pipeline Ex: FIL or NLP
+    pipeline_batch_size : int
+        Determines number of messages per batch. Default value is 256
+    num_threads : int
+        Number threads to process each batch of messages. Default value is 1
+    model_max_batch_size : 8
+        In a single batch, the maximum number of messages to send to the model for inference. Default value is
+        8
+    use_dask :
+        Determines if the pipeline should be executed using the Dask scheduler. Default value is False
+    nlp : morpheus.config.ConfigNlp
+        NLP category models pipeline configuration.
+    fil : morpheus.config.ConfigFil
+        FIL category models pipeline configuration.
+
+    """
     # Flag to indicate we are creating a static instance. Prevents raising an error on creation
     __is_creating: typing.ClassVar[bool] = False
 

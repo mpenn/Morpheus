@@ -3,12 +3,19 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to morpheus documentation!
+.. role:: py(code)
+   :language: python
+   :class: highlight
+
+Welcome to Morpheus documentation!
 ==================================
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 20
    :caption: Contents:
+
+   intro
+   api
 
 
 Indices and tables

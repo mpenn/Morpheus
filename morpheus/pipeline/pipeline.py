@@ -22,6 +22,7 @@ config = Config.get()
 
 logger = logging.getLogger(__name__)
 
+
 def get_time_ms():
     return round(time.time() * 1000)
 
@@ -34,6 +35,16 @@ StreamPair = typing.Tuple[Stream, typing.Type]
 
 
 class StreamWrapper(ABC):
+    """
+    This abstract class serves as the morpheus.pipeline's base class. This class wraps a `streamz.Stream`
+    object and aids in hooking stages up together. 
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         self._input_stream: Stream = None
         self._output_stream: Stream = None
@@ -42,14 +53,51 @@ class StreamWrapper(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
+        """
+        The name of the stage. Used in logging. Each derived class should override this property with a unique
+        name.
+
+        Returns
+        -------
+        str
+            Name of a stage
+
+        """
         pass
 
     @abstractmethod
     async def build(self, input_stream: StreamPair) -> StreamPair:
+        """
+        This function is responsible for constructing this Stage's internal `streamz.Stream` object. The input
+        of this function is the returned value from the upstream stage.
+
+        The input value is a `StreamPair` which is a tuple containing the input `streamz.Stream` object and
+        the message data type.
+        
+        Parameters
+        ----------
+        input_stream : StreamPair
+            A tuple containing the input `streamz.Stream` object and the message data type.
+
+        Returns
+        -------
+        StreamPair
+            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+
+        """
         pass
 
 
 class SourceStage(StreamWrapper):
+    """
+    The SourceStage is mandatory for the Morpheus pipeline to run. This stage represents the start of the pipeline. All `SourceStage` object take no input but generate output.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -58,14 +106,46 @@ class SourceStage(StreamWrapper):
 
     @property
     def input_count(self) -> int:
-        # Return None for no max intput count
+        """
+        Return None for no max intput count
+
+        Returns
+        -------
+        int
+            input_count
+
+        """
         return None
 
     def add_done_callback(self, cb):
+        """
+        Appends callbacks when input is completed.
+
+        Parameters
+        ----------
+        cb : function
+            func
+
+        """
         self._done_callbacks.append(cb)
 
+    @typing.final
     async def build(self, input_stream: StreamPair) -> StreamPair:
+        """
+        This build method is a specialization of the `StreamWrapper.build` method. It allows derived sources
+        to easily set up debug sink functions. Should not be overridden. Instead implement the abstract `_build` method.
 
+        Parameters
+        ----------
+        input_stream : StreamPair
+            A tuple containing the input `streamz.Stream` object and the message data type.
+
+        Returns
+        -------
+        StreamPair
+            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+
+        """
         assert input_stream is None, "Sources shouldnt have input streams"
 
         self._input_stream = None
@@ -81,11 +161,29 @@ class SourceStage(StreamWrapper):
 
     @abstractmethod
     async def _build(self) -> StreamPair:
+        """
+        Abstract method all derived Source classes should implement. Returns the same value as `build`
+
+        Returns
+        -------
+
+        StreamPair: 
+            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+        """
 
         pass
 
 
 class Stage(StreamWrapper):
+    """
+    This class serves as the base for all pipeline stage implementations that are not source objects.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -97,10 +195,34 @@ class Stage(StreamWrapper):
 
     @abstractmethod
     def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned. Derived classes should override this method. An
+        error will be generated if the input types to the stage do not match one of the available types
+        returned from this method.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types
+
+        """
         pass
 
     async def build(self, input_stream: StreamPair) -> StreamPair:
+        """
+        This build method is a specialization of the `StreamWrapper.build` method. It allows derived Stage classes to quickly access input/output streams, set up debugging, and checks for the correct input types. Should not be overridden. Instead implement the abstract `_build` method.
 
+        Parameters
+        ----------
+        input_stream : StreamPair
+            A tuple containing the input `streamz.Stream` object and the message data type.
+
+        Returns
+        -------
+        StreamPair
+            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+
+        """
         assert input_stream is not None, "Sources must have input streams"
 
         # Check the type. Convert Any to object
@@ -137,10 +259,28 @@ class Stage(StreamWrapper):
         return output
 
     async def _build(self, input_stream: StreamPair) -> StreamPair:
+        """
+        Abstract method all derived Stage classes should implement. Has the same signature as the `build`
+        method. All stage initializeation and contruction of stream objects should happen in this method.
+
+        Parameters
+        ----------
+        input_stream : StreamPair
+            A tuple containing the input `streamz.Stream` object and the message data type.
+
+        Returns
+        -------
+        StreamPair: 
+            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+        """
 
         pass
 
     def on_start(self):
+        """
+        This function can be overridden to add usecase-specific implementation at the start of any stage in
+        the pipeline.
+        """
         pass
 
     def _on_complete(self, stream: Stream):
@@ -149,8 +289,19 @@ class Stage(StreamWrapper):
 
 
 class Pipeline():
-    def __init__(self, c: Config):
+    """
+    Class for building your pipeline. A pipeline for your use case can be constructed by first adding a
+    `Source` via `set_source` then any number of downstream `Stage` classes via `add_stage`. The order stages
+    are added with `add_stage` determines the order in which stage executions are carried out. You can use
+    stages included within Morpheus or your own custom-built stages.
 
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
+    def __init__(self, c: Config):
         self._inf_queue = queue.Queue()
 
         self._source_stage: SourceStage = None
@@ -170,6 +321,15 @@ class Pipeline():
 
     @property
     def thread_pool(self):
+        """
+        Returns thread pool instance.
+
+        Returns
+        -------
+        concurrent.futures.ThreadPoolExecutor
+            thread pool instance to run on multi-thread execution.
+
+        """
         return self._thread_pool
 
     def _add_id_col(self, x: cudf.DataFrame):
@@ -181,17 +341,42 @@ class Pipeline():
         return x
 
     def set_source(self, source: SourceStage):
+        """
+        Set a pipeline's source stage to consume messages before it begins executing stages. This must be
+        called once before `build_and_start`.
 
+        Parameters
+        ----------
+        source : morpheus.pipeline.SourceStage
+            The source stage wraps the implementation in a stream that allows it to read from Kafka or a file.
+
+        """
         self._source_stage = source
         source._pipeline = self
 
     def add_stage(self, stage: Stage):
+        """
+        Add stages to the pipeline. All `Stage` classes added with this method will be executed sequentially
+        inthe order they were added
 
+        Parameters
+        ----------
+        stage : morpheus.pipeline.Stage
+            The stage object to add. It cannot be already added to another `Pipeline` object.
+
+        """
         self._stages.append(stage)
         stage._pipeline = self
 
     async def build_and_start(self):
+        """
+        This function sequentially activates all of the Morpheus pipeline stages passed by the users to
+        execute a pipeline. For the `Source` and all added `Stage` objects, `StreamWrapper.build` will be
+        called sequentially to construct the pipeline.
 
+        Once the pipeline has been constructed, this will start the pipeline by calling `Source.start` on the
+        source object.
+        """
         if (self._use_dask):
             logger.info("====Launching Dask====")
             from distributed import Client
@@ -245,7 +430,9 @@ class Pipeline():
         logger.debug("All Input Complete")
 
     def run(self):
-
+        """
+        This function makes use of asyncio features to keep the pipeline running indefinitely.
+        """
         loop = asyncio.get_event_loop()
 
         def error_handler(l, context: dict):

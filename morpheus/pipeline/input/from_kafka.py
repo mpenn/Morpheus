@@ -8,6 +8,26 @@ from morpheus.pipeline.pipeline import StreamPair
 
 
 class KafkaSourceStage(SourceStage):
+    """
+    Load messages from a Kafka cluster.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    bootstrap_servers : str
+        Kafka cluster bootstrap servers separated by a comma.
+    input_topic : str
+        Input kafka topic
+    group_id : str
+        Specifies the name of the consumer group a Kafka consumer belongs to
+    use_dask : bool
+        Determines whether or not dask should be used to consume messages. Operates independently of the
+        `Pipeline.use_dask` option
+    poll_interval : str
+        Seconds that elapse between polling Kafka for new messages. Follows the pandas interval format
+
+    """
     def __init__(self,
                  c: Config,
                  bootstrap_servers: str,

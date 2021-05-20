@@ -14,6 +14,19 @@ from morpheus.pipeline.pipeline import StreamPair
 
 
 class GenerateVizFramesStage(Stage):
+    """
+    Class to generate visualization frames.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    out_dir : str
+        Output directory to write visualization frames
+    overwrite : bool
+        Overwrite file if exists
+
+    """
     def __init__(self, c: Config, out_dir: str = "./viz_frames", overwrite: bool = False):
         super().__init__(c)
 
@@ -37,10 +50,33 @@ class GenerateVizFramesStage(Stage):
         return "gen_viz"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Returns accepted input types for this stage.
+
+        Returns
+        -------
+        typing.Tuple[morpheus.pipeline.messages.MultiResponseMessage, ]
+            Accepted input types
+
+        """
         return (MultiResponseMessage, )
 
     @staticmethod
     def round_to_sec(x):
+        """
+        Round to even seconds second
+
+        Parameters
+        ----------
+        x : int/float
+            Rounding up the value
+
+        Returns
+        -------
+        int
+            Value rounded up
+
+        """
         return int(round(x / 1000.0) * 1000)
 
     def _to_vis_df(self, x: MultiResponseMessage):

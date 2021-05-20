@@ -23,6 +23,17 @@ from morpheus.utils.cudf_subword_helper import tokenize_text_series
 
 
 class DeserializeStage(Stage):
+    """
+    This stage deserialize the output of `FileSourceStage`/`KafkaSourceStage` into a `MultiMessage`. This
+    should be one of the first stages after the `Source` object.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
+    
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -36,11 +47,28 @@ class DeserializeStage(Stage):
         return "deserialize"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Returns accepted input types for this stage.
+
+        Returns
+        -------
+        typing.Tuple[cudf.DataFrame, morpheus.pipeline.StreamFuture[cudf.DataFrame]]
+            Accepted input types
+
+        """
         return (cudf.DataFrame, StreamFuture[cudf.DataFrame])
 
     @staticmethod
     def process_dataframe(x: cudf.DataFrame):
+        """
+        The deserialization of the cudf is implemented in this function.
 
+        Parameters
+        ----------
+        x : cudf.DataFrame
+            Input rows that needs to be deserilaized.
+
+        """
         # Convert here to pandas since this will persist after the message is done
         x_pd = x.to_pandas()
 
@@ -87,6 +115,16 @@ class DeserializeStage(Stage):
 
 
 class PreprocessBaseStage(Stage):
+    """
+    This is a base pre-processing class holding general functionality for all preprocessing stages.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
+    
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -97,6 +135,15 @@ class PreprocessBaseStage(Stage):
         return "preprocess"
 
     def accepted_types(self) -> typing.Tuple:
+        """
+        Returns accepted input types for this stage.
+
+        Returns
+        -------
+        typing.Tuple[morpheus.messages.MultiMessage, morpheus.pipeline.StreamFuture[morpheus.messages.MultiMessage]]
+            Accepted input types
+
+        """
         return (MultiMessage, StreamFuture[MultiMessage])
 
     @abstractmethod
@@ -126,6 +173,15 @@ class PreprocessBaseStage(Stage):
 
 
 class PreprocessNLPStage(PreprocessBaseStage):
+    """
+    NLP usecases are preprocessed with this stage class.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -138,7 +194,26 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
     @staticmethod
     def pre_process_batch(x: MultiMessage, seq_len: int, stride: int, vocab_hash_file: str) -> MultiInferenceNLPMessage:
+        """
+        For NLP category usecases, this function performs pre-processing.
 
+        Parameters
+        ----------
+        x : morpheus.messages.MultiMessage
+            Input rows recieved from Deserialized stage.
+        seq_len : int
+            Limits the length of the sequence returned. If tokenized string is shorter than max_length, output will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False, there will be multiple returned sequences containing the overflowing token-ids.
+        stride : int
+            If do_truncate == False and the tokenized string is larger than max_length, the sequences containing the overflowing token-ids can contain duplicated token-ids from the main sequence. If max_length is equal to stride there are no duplicated-id tokens. If stride is 80% of max_length, 20% of the first sequence will be repeated on the second sequence and so on until the entire sentence is encoded.
+        vocab_hash_file : str
+            Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function.  
+
+        Returns
+        -------
+        morpheus.messages.MultiInferenceNLPMessage
+            infer_message
+
+        """
         tokenized = tokenize_text_series(cudf.Series(x.get_meta("data")), seq_len, stride, vocab_hash_file)
 
         # Create the inference memory. Keep in mind count here could be > than input count
@@ -164,6 +239,15 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
 
 class PreprocessFILStage(PreprocessBaseStage):
+    """
+    FIL usecases are preprocessed with this stage class.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+
+    """
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -205,7 +289,24 @@ class PreprocessFILStage(PreprocessBaseStage):
 
     @staticmethod
     def pre_process_batch(x: MultiMessage, fea_len: int, fea_cols: typing.List[str]) -> MultiInferenceFILMessage:
+        """
+        For FIL category usecases, this function performs pre-processing.
 
+        Parameters
+        ----------
+        x : morpheus.messages.MultiMessage
+            Input rows recieved from Deserialized stage.
+        fea_len : int
+            Number features are being used in the inference.
+        fea_cols : typing.Tuple[str]
+            List of columns that are used as features.
+
+        Returns
+        -------
+        morpheus.messages.MultiInferenceFILMessage
+            infer_message
+
+        """
         # Drop some extra columns we dont need
         x.meta.df.drop(x.meta.df.columns.difference(fea_cols + ["ts_start", "ts_deserialize"]), 1, inplace=True)
 
