@@ -2,6 +2,7 @@ import asyncio
 from functools import partial
 import logging
 from time import time
+import typing
 
 from distributed.client import default_client
 from streamz import Stream
@@ -135,3 +136,43 @@ class scatter_batch(DaskStream):
         self._release_refs(metadata)
 
         return f
+
+@Stream.register_api()
+class switch(Stream):
+    def __init__(self, upstream, predicate: typing.Callable[[typing.Any], bool], *args, **kwargs):
+        self.predicate = predicate
+        stream_name = kwargs.pop("stream_name", None)
+
+        Stream.__init__(self, upstream, stream_name=stream_name)
+
+    async def update(self, x, who=None, metadata=None):
+        downstream_idx = self.predicate(x)
+        
+        return await self._emit_idx(x, downstream_idx, metadata=metadata)
+
+    async def _emit_idx(self, x, idx: int, metadata=None):
+
+        self.current_value = x
+        self.current_metadata = metadata
+        if metadata:
+            self._retain_refs(metadata, 1)
+        else:
+            metadata = []
+
+        result = []
+        
+        downstream = list(self.downstreams)[idx]
+
+        r = await downstream.update(x, who=self, metadata=metadata)
+
+        if type(r) is list:
+            result.extend(r)
+        else:
+            result.append(r)
+
+        self._release_refs(metadata)
+
+        return [element for element in result if element is not None]
+
+    async def _emit(self, x, metadata=None):
+        raise NotImplementedError("Do not use switch _emit directly! Must use _emit_idx()")

@@ -1,26 +1,29 @@
-from abc import abstractmethod
 import asyncio
 import base64
-import collections
 import dataclasses
 import logging
 import queue
 import threading
 import typing
-from functools import partial
 import warnings
+from abc import abstractmethod
+from functools import partial
 
 import cupy as cp
 import numpy as np
 import tritonclient.grpc as tritonclient
-from morpheus.config import Config, PipelineModes
-from morpheus.pipeline.inference.inference_stage import InferenceStage
-from morpheus.pipeline.messages import (MultiInferenceMessage, MultiResponseMessage, ResponseMemory)
 from tornado.ioloop import IOLoop
-from tqdm import tqdm
-from tritonclient.utils import InferenceServerException, triton_to_np_dtype
+from tritonclient.utils import InferenceServerException
+from tritonclient.utils import triton_to_np_dtype
+
+from morpheus.config import Config
+from morpheus.config import PipelineModes
+from morpheus.pipeline.inference.inference_stage import InferenceStage
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import ResponseMemory
 
 logger = logging.getLogger(__name__)
+
 
 
 @dataclasses.dataclass()
@@ -288,6 +291,10 @@ class TritonInference:
         self._inputs: typing.Dict[str, TritonInOut] = {}
         self._outputs: typing.Dict[str, TritonInOut] = {}
 
+        self._loop: IOLoop = None
+        self._triton_client: tritonclient.InferenceServerClient = None
+        self._mem_pool: ResourcePool = None
+
     def init(self, loop: IOLoop):
         """
         This function instantiate triton client and memory allocation for inference input and output.
@@ -301,19 +308,19 @@ class TritonInference:
 
         self._loop = loop
 
-        self.triton_client = tritonclient.InferenceServerClient(url=self._server_url, verbose=False)
+        self._triton_client = tritonclient.InferenceServerClient(url=self._server_url, verbose=False)
 
         try:
-            assert self.triton_client.is_server_live() and self.triton_client.is_server_ready(), "Server is not in ready state"
+            assert self._triton_client.is_server_live() and self._triton_client.is_server_ready(), "Server is not in ready state"
 
-            assert self.triton_client.is_model_ready(self._model_name), f"Triton model {self._model_name} is not ready"
+            assert self._triton_client.is_model_ready(self._model_name), f"Triton model {self._model_name} is not ready"
 
             # To make sure no shared memory regions are registered with the server.
-            self.triton_client.unregister_system_shared_memory()
-            self.triton_client.unregister_cuda_shared_memory()
+            self._triton_client.unregister_system_shared_memory()
+            self._triton_client.unregister_cuda_shared_memory()
 
-            model_meta = self.triton_client.get_model_metadata(self._model_name, as_json=True)
-            model_config = self.triton_client.get_model_config(self._model_name, as_json=True)["config"]
+            model_meta = self._triton_client.get_model_metadata(self._model_name, as_json=True)
+            model_config = self._triton_client.get_model_config(self._model_name, as_json=True)["config"]
 
             # Make sure the inputs/outputs match our config
             if (int(model_meta["inputs"][0]["shape"][-1]) != self._fea_length):
@@ -370,7 +377,7 @@ class TritonInference:
             shm_config = {**self._inputs, **self._outputs}
 
             def create_wrapper():
-                return ShmWrapper(self.triton_client, self._model_name, shm_config)
+                return ShmWrapper(self._triton_client, self._model_name, shm_config)
 
             self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
 
@@ -428,10 +435,10 @@ class TritonInference:
         outputs = [tritonclient.InferRequestedOutput(output.name) for output in self._outputs.values()]
 
         # Inference call
-        self.triton_client.async_infer(model_name=self._model_name,
-                                       inputs=inputs,
-                                       callback=partial(self._infer_callback, fut, mem),
-                                       outputs=outputs)
+        self._triton_client.async_infer(model_name=self._model_name,
+                                        inputs=inputs,
+                                        callback=partial(self._infer_callback, fut, mem),
+                                        outputs=outputs)
 
     def main_loop(self, loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
         """
@@ -482,13 +489,13 @@ class TritonInferenceNLP(TritonInference):
         Morpheus names do not match the model
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
         # Some models use different names for the same thing. Set that here but allow user customization
         default_mapping = {
             "attention_mask": "input_mask",
         }
 
-        default_mapping.update(inout_mapping)
+        default_mapping.update(inout_mapping if inout_mapping is not None else {})
 
         super().__init__(c, model_name, server_url, default_mapping)
 
@@ -526,7 +533,7 @@ class TritonInferenceFIL(TritonInference):
         Morpheus names do not match the model
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = {}):
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
         super().__init__(c, model_name, server_url, inout_mapping)
 
     def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:

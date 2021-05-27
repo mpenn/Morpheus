@@ -5,6 +5,20 @@
    "version": "0.2.0",
    "configurations": [
       {
+         "name": "Python: Current File",
+         "type": "python",
+         "request": "launch",
+         "program": "${file}",
+         "console": "integratedTerminal"
+      },
+      {
+         "name": "Python: Test Memory",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/.tmp/test_memory.py",
+         "console": "integratedTerminal"
+      },
+      {
          "name": "Python: Run Network Generator",
          "type": "python",
          "request": "launch",
@@ -70,6 +84,7 @@
          // "argsExpansion": "none",
          "args": [
             "--log_level=DEBUG",
+            "--debug",
             "run",
             "--num_threads=8",
             "--pipeline_batch_size=1024",
@@ -205,6 +220,15 @@
             // "--overwrite",
             // "--help",
          ]
+      },
+      {
+         "name": "Python: MIMO Example",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/examples/multi_in_multi_out/run.py",
+         "console": "integratedTerminal",
+         "justMyCode": false,
+         "cwd": "${workspaceFolder}",
       },
       {
          "name": "Python: Sphinx",

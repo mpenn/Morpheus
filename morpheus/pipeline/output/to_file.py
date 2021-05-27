@@ -4,12 +4,11 @@ import typing
 import typing_utils
 
 from morpheus.config import Config
-from morpheus.pipeline import Stage
-from morpheus.pipeline.pipeline import StreamFuture
+from morpheus.pipeline.pipeline import SinglePortStage, StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
 
 
-class WriteToFileStage(Stage):
+class WriteToFileStage(SinglePortStage):
     """
     This class writes messages to a file. This class does not buffer or keep the file open between messages.
     It should not be used in production code.
@@ -67,7 +66,7 @@ class WriteToFileStage(Stage):
             f.writelines("\n".join(x))
             f.write("\n")
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 

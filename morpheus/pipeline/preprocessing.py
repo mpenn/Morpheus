@@ -2,27 +2,31 @@ import inspect
 import json
 import time
 import typing
-from abc import abstractclassmethod, abstractmethod
+from abc import abstractmethod
 from functools import partial
 
 import cudf
 import cupy as cp
+import streamz
 import typing_utils
+
 from morpheus.config import Config
-from morpheus.pipeline import Stage
-from morpheus.pipeline.messages import (InferenceMemory,
-                                        InferenceMemoryFIL,
-                                        InferenceMemoryNLP,
-                                        MessageMeta,
-                                        MultiInferenceFILMessage,
-                                        MultiInferenceMessage,
-                                        MultiInferenceNLPMessage,
-                                        MultiMessage)
-from morpheus.pipeline.pipeline import StreamFuture, StreamPair, get_time_ms
+from morpheus.pipeline.messages import InferenceMemoryFIL
+from morpheus.pipeline.messages import InferenceMemoryNLP
+from morpheus.pipeline.messages import MessageMeta
+from morpheus.pipeline.messages import MultiInferenceFILMessage
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import MultiInferenceNLPMessage
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.pipeline import MultiMessageStage
+from morpheus.pipeline.pipeline import SinglePortStage
+from morpheus.pipeline.pipeline import StreamFuture
+from morpheus.pipeline.pipeline import StreamPair
+from morpheus.pipeline.pipeline import get_time_ms
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 
 
-class DeserializeStage(Stage):
+class DeserializeStage(MultiMessageStage):
     """
     This stage deserialize the output of `FileSourceStage`/`KafkaSourceStage` into a `MultiMessage`. This
     should be one of the first stages after the `Source` object.
@@ -93,7 +97,7 @@ class DeserializeStage(Stage):
 
         return MultiMessage(meta=meta, mess_offset=0, mess_count=len(x_pd))
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiMessage
@@ -107,14 +111,8 @@ class DeserializeStage(Stage):
 
         return stream, out_type
 
-    async def post_timestamps(self, x: MultiMessage):
 
-        curr_time = get_time_ms()
-
-        x.set_meta("ts_" + self.name, curr_time)
-
-
-class PreprocessBaseStage(Stage):
+class PreprocessBaseStage(MultiMessageStage):
     """
     This is a base pre-processing class holding general functionality for all preprocessing stages.
 
@@ -150,7 +148,7 @@ class PreprocessBaseStage(Stage):
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         pass
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiInferenceMessage
@@ -164,7 +162,8 @@ class PreprocessBaseStage(Stage):
             out_type = preproc_sig.return_annotation
 
         if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-            stream = stream.map(preprocess_fn)
+            stream = streamz.map(upstream=None, func=preprocess_fn)
+            # stream = stream.map(preprocess_fn)
             out_type = StreamFuture[out_type]
         else:
             stream = stream.async_map(preprocess_fn, executor=self._pipeline.thread_pool)

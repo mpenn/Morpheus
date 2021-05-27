@@ -1,22 +1,27 @@
 import asyncio
+import collections
 import concurrent.futures
 import logging
+from morpheus.pipeline.messages import MultiMessage
+import os
 import queue
-import sys
 import time
 import typing
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import cudf
 import distributed
+import networkx
+import streamz
 import typing_utils
-from distributed.client import wait
-from morpheus.config import Config
-from morpheus.pipeline.messages import MultiMessage
 from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
-from tqdm import tqdm
+
+from morpheus.config import Config
+from morpheus.utils.atomic_integer import AtomicInteger
+from morpheus.utils.type_utils import greatest_ancestor
 
 config = Config.get()
 
@@ -34,7 +39,138 @@ StreamFuture = typing._GenericAlias(distributed.client.Future, T, special=True, 
 StreamPair = typing.Tuple[Stream, typing.Type]
 
 
-class StreamWrapper(ABC):
+class Sender():
+    def __init__(self, parent: "StreamWrapper", port_number: int):
+
+        self._parent = parent
+        self.port_number = port_number
+
+        self._output_receivers: typing.List[Receiver] = []
+
+        self._out_stream_pair: StreamPair = (None, None)
+
+    @property
+    def parent(self):
+        return self._parent
+
+    @property
+    def is_complete(self):
+        # Sender is complete when the type or stream has been set
+        return self._out_stream_pair != (None, None)
+
+    @property
+    def out_pair(self):
+        return self._out_stream_pair
+
+    @property
+    def out_stream(self):
+        return self._out_stream_pair[0]
+
+    @property
+    def out_type(self):
+        return self._out_stream_pair[1]
+
+
+class Receiver():
+    def __init__(self, parent: "StreamWrapper", port_number: int):
+
+        self._parent = parent
+        self.port_number = port_number
+
+        self._is_linked = False
+
+        self._input_type = None
+        self._input_stream = None
+
+        self._input_senders: typing.List[Sender] = []
+
+    @property
+    def parent(self):
+        return self._parent
+
+    @property
+    def is_complete(self):
+        # A receiver is complete if all input senders are complete
+        return all([x.is_complete for x in self._input_senders])
+
+    @property
+    def is_partial(self):
+        # Its partially complete if any input sender is complete
+        return any([x.is_complete for x in self._input_senders])
+
+    @property
+    def in_pair(self):
+        return (self.in_stream, self.in_pair)
+
+    @property
+    def in_stream(self):
+        return self._input_stream
+
+    @property
+    def in_type(self):
+        return self._input_type
+
+    def get_input_pair(self) -> StreamPair:
+
+        assert self.is_partial, "Must be partially complete to get the input pair!"
+
+        # Build the input from the senders
+        if (self._input_stream is None and self._input_type is None):
+            # First check if we only have 1 input sender
+            if (len(self._input_senders) == 1):
+                # In this case, our input stream/type is determined from the sole Sender
+                sender = self._input_senders[0]
+
+                self._input_stream = sender.out_stream
+                self._input_type = sender.out_type
+                self._is_linked = True
+            else:
+                # We have multiple senders. Create a dummy stream to connect all senders
+                if (self.is_complete):
+                    # Connect all streams now
+                    self._input_stream = streamz.Stream(upstreams=[x.out_stream for x in self._input_senders],
+                                                        asynchronous=True,
+                                                        loop=IOLoop.current())
+                    self._is_linked = True
+                else:
+                    # Create a dummy stream that needs to be linked later
+                    self._input_stream = streamz.Stream(asynchronous=True, loop=IOLoop.current())
+
+                # Now determine the output type from what we have
+                great_ancestor = greatest_ancestor(*[x.out_type for x in self._input_senders if x.is_complete])
+
+                if (great_ancestor is None):
+                    # TODO: Add stage, port, and type info to message
+                    raise RuntimeError(
+                        "Cannot determine single type for senders of input port. Use a merge stage to handle different types of inputs. "
+                    )
+
+                self._input_type = great_ancestor
+
+        return (self._input_stream, self._input_type)
+
+    def link(self):
+
+        assert self.is_complete, "Must be complete before linking!"
+
+        if (self._is_linked):
+            return
+
+        # Check that the types still work
+        great_ancestor = greatest_ancestor(*[x.out_type for x in self._input_senders if x.is_complete])
+
+        if (not typing_utils.issubtype(great_ancestor, self._input_type)):
+            # TODO: Add stage, port, and type info to message
+            raise RuntimeError(
+                "Invalid linking phase. Input port type does not match predicted type determined during build phase")
+
+        for out_stream in [x.out_stream for x in self._input_senders]:
+            out_stream.connect(self._input_stream)
+
+        self._is_linked = True
+
+
+class StreamWrapper(ABC, collections.abc.Hashable):
     """
     This abstract class serves as the morpheus.pipeline's base class. This class wraps a `streamz.Stream`
     object and aids in hooking stages up together. 
@@ -45,10 +181,22 @@ class StreamWrapper(ABC):
         Pipeline configuration instance
 
     """
+
+    __ID_COUNTER = AtomicInteger(0)
+
     def __init__(self, c: Config):
-        self._input_stream: Stream = None
-        self._output_stream: Stream = None
+        self._id = StreamWrapper.__ID_COUNTER.get_and_inc()
         self._pipeline: Pipeline = None
+
+        # Indicates whether or not this wrapper has been built. Can only be built once
+        self._is_built = False
+
+        # Input/Output ports used for connecting stages
+        self._input_ports: typing.List[Receiver] = []
+        self._output_ports: typing.List[Sender] = []
+
+    def __hash__(self) -> int:
+        return self._id
 
     @property
     @abstractmethod
@@ -65,8 +213,117 @@ class StreamWrapper(ABC):
         """
         pass
 
+    @property
+    def unique_name(self) -> str:
+        return f"{self.name}-{self._id}"
+
+    @property
+    def is_built(self) -> bool:
+        return self._is_built
+
+    @property
+    def input_ports(self) -> typing.List[Receiver]:
+        return self._input_ports
+
+    @property
+    def output_ports(self) -> typing.List[Sender]:
+        return self._output_ports
+
+    @property
+    def has_multi_input_ports(self) -> bool:
+        return len(self._input_ports) > 1
+
+    @property
+    def has_multi_output_ports(self) -> bool:
+        return len(self._output_ports) > 1
+
+    def get_all_inputs(self) -> typing.List[Sender]:
+
+        senders = []
+
+        for in_port in self._input_ports:
+            senders.extend(in_port._input_senders)
+
+        return senders
+
+    def get_all_input_stages(self) -> typing.List["StreamWrapper"]:
+        return [x.parent for x in self.get_all_inputs()]
+
+    def get_all_outputs(self) -> typing.List[Receiver]:
+        receivers = []
+
+        for out_port in self._output_ports:
+            receivers.extend(out_port._output_receivers)
+
+        return receivers
+
+    def get_all_output_stages(self) -> typing.List["StreamWrapper"]:
+        return [x.parent for x in self.get_all_outputs()]
+
+    def can_build(self, check_ports=False) -> bool:
+        """
+        Determines if all inputs have been built allowing this node to be built
+
+        Returns:
+            bool: [description]
+        """
+
+        # Can only build once
+        if (self.is_built):
+            return False
+
+        if (not check_ports):
+            # We can build if all input stages have been built. Easy and quick check. Works for non-circular pipelines
+            for in_stage in self.get_all_input_stages():
+                if (not in_stage.is_built):
+                    return False
+
+            return True
+        else:
+            # Check if we can build based on the input ports. We can build
+            for r in self.input_ports:
+                if (not r.is_partial):
+                    return False
+
+            return True
+
+    def build(self, do_propagate=True):
+        assert not self.is_built, "Can only build stages once!"
+        assert self._pipeline is not None, "Must be attached to a pipeline before building!"
+
+        # Pre-Build returns the input pairs for each port
+        in_ports_pairs = self._pre_build()
+
+        out_ports_pair = self._build(in_ports_pairs)
+
+        # Allow stages to do any post build steps (i.e. for sinks, or timing functions)
+        out_ports_pair = self._post_build(out_ports_pair)
+
+        assert len(out_ports_pair) == len(self.output_ports), "Build must return same number of output pairs as output ports"
+
+        # Assign the output ports
+        for port_idx, out_pair in enumerate(out_ports_pair):
+            self.output_ports[port_idx]._out_stream_pair = out_pair
+
+        self._is_built = True
+
+        if (not do_propagate):
+            return
+
+        # Now build for any dependents
+        for dep in self.get_all_output_stages():
+            if (not dep.can_build()):
+                continue
+
+            dep.build(do_propagate=do_propagate)
+
+    def _pre_build(self) -> typing.List[StreamPair]:
+        in_pairs: typing.List[StreamPair] = [x.get_input_pair() for x in self.input_ports]
+
+        return in_pairs
+
     @abstractmethod
-    async def build(self, input_stream: StreamPair) -> StreamPair:
+    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
         """
         This function is responsible for constructing this Stage's internal `streamz.Stream` object. The input
         of this function is the returned value from the upstream stage.
@@ -87,6 +344,24 @@ class StreamWrapper(ABC):
         """
         pass
 
+    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+        return out_ports_pair
+
+    async def start(self):
+
+        assert self.is_built, "Must build before starting!"
+
+        await self._start()
+
+    async def _start(self):
+        pass
+
+    def _create_ports(self, input_count: int, output_count: int):
+        assert len(self._input_ports) == 0 and len(self._output_ports) == 0, "Can only create ports once!"
+
+        self._input_ports = [Receiver(parent=self, port_number=i) for i in range(input_count)]
+        self._output_ports = [Sender(parent=self, port_number=i) for i in range(output_count)]
+
 
 class SourceStage(StreamWrapper):
     """
@@ -101,8 +376,10 @@ class SourceStage(StreamWrapper):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        self._post_sink_fn: typing.Callable[[typing.Any], None] = None
-        self._done_callbacks: typing.List[typing.Callable] = []
+        self._start_callbacks: typing.List[typing.Callable] = []
+        self._stop_callbacks: typing.List[typing.Callable] = []
+
+        self._source_stream: Source = None
 
     @property
     def input_count(self) -> int:
@@ -117,6 +394,21 @@ class SourceStage(StreamWrapper):
         """
         return None
 
+    def add_start_callback(self, cb):
+        """
+        Appends callbacks when input starts.
+
+        Parameters
+        ----------
+        cb : function
+            func
+        """
+        
+        if (self._source_stream is not None):
+            self._source_stream.add_on_start_callback(cb)
+
+        self._start_callbacks.append(cb)
+
     def add_done_callback(self, cb):
         """
         Appends callbacks when input is completed.
@@ -125,42 +417,15 @@ class SourceStage(StreamWrapper):
         ----------
         cb : function
             func
-
         """
-        self._done_callbacks.append(cb)
 
-    @typing.final
-    async def build(self, input_stream: StreamPair) -> StreamPair:
-        """
-        This build method is a specialization of the `StreamWrapper.build` method. It allows derived sources
-        to easily set up debug sink functions. Should not be overridden. Instead implement the abstract `_build` method.
+        if (self._source_stream is not None):
+            self._source_stream.add_on_stop_callback(cb)
 
-        Parameters
-        ----------
-        input_stream : StreamPair
-            A tuple containing the input `streamz.Stream` object and the message data type.
-
-        Returns
-        -------
-        StreamPair
-            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
-
-        """
-        assert input_stream is None, "Sources shouldnt have input streams"
-
-        self._input_stream = None
-
-        output = await self._build()
-
-        self._output_stream = output[0]
-
-        if (self._post_sink_fn is not None):
-            self._output_stream.gather().sink(self._post_sink_fn)
-
-        return output
+        self._stop_callbacks.append(cb)
 
     @abstractmethod
-    async def _build(self) -> StreamPair:
+    def _build_source(self) -> StreamPair:
         """
         Abstract method all derived Source classes should implement. Returns the same value as `build`
 
@@ -172,6 +437,53 @@ class SourceStage(StreamWrapper):
         """
 
         pass
+
+    @typing.final
+    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+        # Derived source stages should override `_build_source` instead of this method. This allows for tracking the True source
+        # object separate from the output stream. If any other operators need to be added after the source, use `_post_build`
+        assert len(self.input_ports) == 0, "Sources shouldnt have input ports"
+
+        source_pair = self._build_source()
+
+        assert isinstance(source_pair[0], Source), "Output of `_build_source` must be a `Source` object. Perform additional operators in the `_post_build` function"
+
+        self._source_stream = source_pair[0]
+
+        # Now setup the output ports
+        self._output_ports[0]._out_stream_pair = source_pair
+
+        # Add any existing start/done callbacks
+        for cb in self._start_callbacks:
+            self._source_stream.add_on_start_callback(cb)
+
+        for cb in self._stop_callbacks:
+            self._source_stream.add_on_stop_callback(cb)
+
+        return [source_pair]
+
+    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        # logger.info("Added source: {} -> {}".format(self.unique_name, str(out_pair[1])))
+
+        return out_ports_pair
+
+    async def _start(self):
+        self._source_stream.start()
+
+
+class SingleOutputSource(SourceStage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._create_ports(0, 1)
+
+    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+        return out_pair
+
+    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        return [self._post_build_single(out_ports_pair[0])]
 
 
 class Stage(StreamWrapper):
@@ -187,11 +499,32 @@ class Stage(StreamWrapper):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        self._pre_sink_fn: typing.Callable[[typing.Any], None] = None
-        self._post_sink_fn: typing.Callable[[typing.Any], None] = None
+    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        # Derived classes should set this to true to log timestamps in debug builds
-        self._should_log_timestamps = False
+        # logger.info("Added stage: {} -> {}".format(self.unique_name, str(out_pair[1])))
+
+        return out_ports_pair
+
+    async def _start(self):
+        pass
+
+    def on_start(self):
+        """
+        This function can be overridden to add usecase-specific implementation at the start of any stage in
+        the pipeline.
+        """
+        pass
+
+    def _on_complete(self, stream: Stream):
+
+        logger.info("Stage Complete: {}".format(self.name))
+
+
+class SinglePortStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._create_ports(1, 1)
 
     @abstractmethod
     def accepted_types(self) -> typing.Tuple:
@@ -208,84 +541,58 @@ class Stage(StreamWrapper):
         """
         pass
 
-    async def build(self, input_stream: StreamPair) -> StreamPair:
-        """
-        This build method is a specialization of the `StreamWrapper.build` method. It allows derived Stage classes to quickly access input/output streams, set up debugging, and checks for the correct input types. Should not be overridden. Instead implement the abstract `_build` method.
+    def _pre_build(self) -> typing.List[StreamPair]:
+        in_ports_pairs = super()._pre_build()
 
-        Parameters
-        ----------
-        input_stream : StreamPair
-            A tuple containing the input `streamz.Stream` object and the message data type.
+        # Check the types of all inputs
+        for x in in_ports_pairs:
+            if (not typing_utils.issubtype(x[1], typing.Union[self.accepted_types()])):
+                raise RuntimeError("The {} stage cannot handle input of {}. Accepted input types: {}".format(
+                    self.name, x[1], self.accepted_types()))
 
-        Returns
-        -------
-        StreamPair
-            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+        return in_ports_pairs
 
-        """
-        assert input_stream is not None, "Sources must have input streams"
+    @abstractmethod
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+        pass
 
-        # Check the type. Convert Any to object
-        if (not typing_utils.issubtype(input_stream[1], typing.Union[self.accepted_types()])):
-            raise RuntimeError("The {} stage cannot handle input of {}. Accepted input types: {}".format(
-                self.name, input_stream[1], self.accepted_types()))
+    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+        # Derived source stages should override `_build_source` instead of this method. This allows for tracking the True source
+        # object separate from the output stream. If any other operators need to be added after the source, use `_post_build`
+        assert len(self.input_ports) == 1 and len(self.output_ports) == 1, "SinglePortStage must have 1 input port and 1 output port"
 
-        self._input_stream = input_stream[0]
+        assert len(in_ports_streams) == 1, "Should only have 1 port on input"
 
-        if (self._pre_sink_fn is not None):
-            self._input_stream.sink(self._pre_sink_fn)
+        return [self._build_single(in_ports_streams[0])]
 
-        output = await self._build(input_stream)
 
-        self._output_stream = output[0]
+class MultiMessageStage(SinglePortStage):
+    def __init__(self, c: Config):
 
-        if (self._post_sink_fn is not None):
-            self._output_stream.gather().sink(self._post_sink_fn)
+        # Derived classes should set this to true to log timestamps in debug builds
+        self._should_log_timestamps = False
 
+        super().__init__(c)
+
+    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        # Check if we are debug and should log timestamps
         if (Config.get().debug and self._should_log_timestamps):
             # Cache the name property. Removes dependency on self in callback
             cached_name = self.name
 
-            def post_timestamps(self, x: MultiMessage):
+            logger.info("Adding timestamp info for stage: '%s'", cached_name)
+
+            def post_timestamps(x: MultiMessage):
 
                 curr_time = get_time_ms()
 
                 x.set_meta("ts_" + cached_name, curr_time)
 
-            self._output_stream.gather().sink(post_timestamps)
+            # Only have one port
+            out_ports_pair[0][0].gather().sink(post_timestamps)
 
-        # self._output_stream.add_done_callback(self._on_complete)
-
-        return output
-
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
-        """
-        Abstract method all derived Stage classes should implement. Has the same signature as the `build`
-        method. All stage initializeation and contruction of stream objects should happen in this method.
-
-        Parameters
-        ----------
-        input_stream : StreamPair
-            A tuple containing the input `streamz.Stream` object and the message data type.
-
-        Returns
-        -------
-        StreamPair: 
-            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
-        """
-
-        pass
-
-    def on_start(self):
-        """
-        This function can be overridden to add usecase-specific implementation at the start of any stage in
-        the pipeline.
-        """
-        pass
-
-    def _on_complete(self, stream: Stream):
-
-        logger.debug("Stage Complete: {}".format(self.name))
+        return super()._post_build(out_ports_pair)
 
 
 class Pipeline():
@@ -304,20 +611,22 @@ class Pipeline():
     def __init__(self, c: Config):
         self._inf_queue = queue.Queue()
 
-        self._source_stage: SourceStage = None
         self._source_count: int = None  # Maximum number of iterations for progress reporting. None = Unknown/Unlimited
 
         self._id_counter = 0
 
-        self._stages: typing.List[Stage] = []
-
-        self._source_stream: Source = None
+        self._sources: typing.Set[SourceStage] = set()
+        self._stages: typing.Set[Stage] = set()
 
         self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=c.num_threads)
 
         self.batch_size = c.pipeline_batch_size
 
         self._use_dask = c.use_dask
+
+        self._graph = networkx.DiGraph()
+
+        self._is_started = False
 
     @property
     def thread_pool(self):
@@ -340,35 +649,52 @@ class Pipeline():
 
         return x
 
-    def set_source(self, source: SourceStage):
-        """
-        Set a pipeline's source stage to consume messages before it begins executing stages. This must be
-        called once before `build_and_start`.
+    def add_node(self, node: StreamWrapper):
 
-        Parameters
-        ----------
-        source : morpheus.pipeline.SourceStage
-            The source stage wraps the implementation in a stream that allows it to read from Kafka or a file.
+        assert node._pipeline is None or node._pipeline is self, "A stage can only be added to one pipeline at a time"
 
-        """
-        self._source_stage = source
-        source._pipeline = self
+        # Add to list of stages if its a stage, not a source
+        if (isinstance(node, Stage)):
+            self._stages.add(node)
+        elif (isinstance(node, SourceStage)):
+            self._sources.add(node)
+        else:
+            raise NotImplementedError("add_node() failed. Unknown node type: {}".format(type(node)))
 
-    def add_stage(self, stage: Stage):
-        """
-        Add stages to the pipeline. All `Stage` classes added with this method will be executed sequentially
-        inthe order they were added
+        node._pipeline = self
 
-        Parameters
-        ----------
-        stage : morpheus.pipeline.Stage
-            The stage object to add. It cannot be already added to another `Pipeline` object.
+        self._graph.add_node(node)
 
-        """
-        self._stages.append(stage)
-        stage._pipeline = self
+    def add_edge(self, start: typing.Union[StreamWrapper, Sender], end: typing.Union[Stage, Receiver]):
 
-    async def build_and_start(self):
+        # assert stage_end not in stage_start._output_streams, f"End Stage already in list of output streams for stage: '{stage_start.unique_name}'"
+        # assert stage_start not in stage_end._output_streams, f"End Stage already in list of output streams for stage: '{stage_start.unique_name}'"
+
+        # assert not isinstance(stage_end, SourceStage), "Target stage cannot be a source"
+
+        if (isinstance(start, StreamWrapper)):
+            start_port = start.output_ports[0]
+        elif (isinstance(start, Sender)):
+            start_port = start
+
+        if (isinstance(end, Stage)):
+            end_port = end.input_ports[0]
+        elif (isinstance(end, Receiver)):
+            end_port = end
+
+        # Ensure both are added to this pipeline
+        self.add_node(start_port.parent)
+        self.add_node(end_port.parent)
+
+        start_port._output_receivers.append(end_port)
+        end_port._input_senders.append(start_port)
+
+        self._graph.add_edge(start_port.parent,
+                             end_port.parent,
+                             start_port_idx=start_port.port_number,
+                             end_port_idx=end_port.port_number)
+
+    def build(self):
         """
         This function sequentially activates all of the Morpheus pipeline stages passed by the users to
         execute a pipeline. For the `Source` and all added `Stage` objects, `StreamWrapper.build` will be
@@ -377,48 +703,74 @@ class Pipeline():
         Once the pipeline has been constructed, this will start the pipeline by calling `Source.start` on the
         source object.
         """
+        assert len(self._sources) > 0, "Pipeline must have a source stage"
+
+        logger.info("====Building Pipeline====")
+
+        # Get the list of stages and source
+        source_and_stages: typing.List[StreamWrapper] = list(self._sources) + list(self._stages)
+
+        # Now loop over stages
+        for s in source_and_stages:
+
+            if (s.can_build()):
+                s.build()
+
+        if (not all([x.is_built for x in source_and_stages])):
+            # raise NotImplementedError("Circular pipelines are not yet supported!")
+            logger.warning("Circular pipeline detected! Building with reduced constraints")
+
+            for s in source_and_stages:
+
+                if (s.can_build(check_ports=True)):
+                    s.build()
+
+        if (not all([x.is_built for x in source_and_stages])):
+            raise RuntimeError("Could not build pipeline. Ensure all types can be determined")
+
+        # Finally, execute the link phase (only necessary for circular pipelines)
+        for s in source_and_stages:
+
+            for p in s.input_ports:
+                p.link()
+
+        logger.info("====Building Pipeline Complete!====")
+
+    async def start(self):
         if (self._use_dask):
             logger.info("====Launching Dask====")
             from distributed import Client
             self._client: Client = await Client(loop=IOLoop.current(), processes=True, asynchronous=True)
 
-        logger.info("====Building Pipeline====")
+        # Add start callback
+        for s in self._sources:
+            s.add_start_callback(self._on_start)
+            s.add_done_callback(self._on_input_complete)
 
-        source_stream_pair = await self._source_stage.build(None)
-        self._source_stream = source_stream_pair[0]
+        logger.info("====Starting Pipeline====")
+        source_and_stages = list(self._sources) + list(self._stages)
 
-        self._source_stage.add_done_callback(self._on_input_complete)
+        # Now loop over stages to start
+        for s in source_and_stages:
 
-        source_stream_pair[0].sink(self._on_start)
+            await s.start()
 
-        # Add the ID single threaded
-        current_stream_and_type = source_stream_pair
-        # current_stream_and_type = current_stream_and_type[0].map(self._add_id_col), current_stream_and_type[1]
+        logger.info("====Pipeline Started====")
 
-        logger.info("Added source: {} -> {}".format(self._source_stage.name, str(current_stream_and_type[1])))
+    async def build_and_start(self):
 
-        # If using dask, scatter here
-        if (self._use_dask):
-            if (typing_utils.issubtype(current_stream_and_type[1], typing.List)):
-                current_stream_and_type = (current_stream_and_type[0].scatter_batch().flatten(),
-                                           StreamFuture[typing.get_args(current_stream_and_type[1])[0]])
-            else:
-                current_stream_and_type = (current_stream_and_type[0].scatter(), StreamFuture[current_stream_and_type[1]])
-        else:
-            if (typing_utils.issubtype(current_stream_and_type[1], typing.List)):
-                current_stream_and_type = current_stream_and_type[0].flatten(), typing.get_args(current_stream_and_type[1])[0]
+        self.build()
 
-        # Now loop over stages
-        for s in self._stages:
-            current_stream_and_type = await s.build(current_stream_and_type)
+        await self.start()
 
-            logger.info("Added stage: {} -> {}".format(s.name, str(current_stream_and_type[1])))
+    def _on_start(self):
 
-        logger.info("====Starting Inference====")
+        # Only execute this once
+        if (self._is_started):
+            return
 
-        self._source_stream.start()
-
-    def _on_start(self, _):
+        # Stop from running this twice
+        self._is_started = True
 
         logger.debug("Starting! Time: {}".format(time.time()))
 
@@ -428,6 +780,133 @@ class Pipeline():
 
     def _on_input_complete(self):
         logger.debug("All Input Complete")
+
+    def visualize(self, filename: str = None, **graph_kwargs):
+
+        # Mimic the streamz visualization
+        # 1. Create graph (already done since we use networkx under the hood)
+        # 2. Readable graph
+        # 3. To graphviz
+        # 4. Draw
+        import graphviz
+
+        # Default graph attributes
+        graph_attr = {
+            "nodesep": "1",
+            "ranksep": "1",
+            "pad": "0.5",
+        }
+
+        # Allow user to overwrite defaults
+        graph_attr.update(graph_kwargs)
+
+        gv_graph = graphviz.Digraph(graph_attr=graph_attr)
+
+        # Need a little different functionality for left/right vs vertical
+        is_lr = graph_kwargs.get("rankdir", None) == "LR"
+
+        start_def_port = ":e" if is_lr else ":s"
+        end_def_port = ":w" if is_lr else ":n"
+
+        def has_ports(n: StreamWrapper, is_input):
+            if (is_input):
+                return len(n.input_ports) > 0
+            else:
+                return len(n.output_ports) > 0
+
+        # Now build up the nodes
+        for n, attrs in typing.cast(typing.Mapping[StreamWrapper, dict], self._graph.nodes).items():
+            node_attrs = attrs.copy()
+
+            label = ""
+
+            show_in_ports = has_ports(n, is_input=True)
+            show_out_ports = has_ports(n, is_input=False)
+
+            # Build the ports for the node. Only show ports if there are any (Would like to have this not show for one port, but
+            # the lines get all messed up)
+            if (show_in_ports):
+                in_port_label = " {{ {} }} | ".format(" | ".join([f"<u{x.port_number}> {x.port_number}" for x in n.input_ports]))
+                label += in_port_label
+
+            label += n.unique_name
+
+            if (show_out_ports):
+                out_port_label = " | {{ {} }}".format(" | ".join([f"<d{x.port_number}> {x.port_number}" for x in n.output_ports]))
+                label += out_port_label
+
+            if (show_in_ports or show_out_ports):
+                label = f"{{ {label} }}"
+
+            node_attrs.update({
+                "label": label,
+                "shape": "record",
+                "fillcolor": "white",
+            })
+            # TODO: Eventually allow nodes to have different attributes based on type
+            # node_attrs.update(n.get_graphviz_attrs())
+            gv_graph.node(n.unique_name, **node_attrs)
+
+        # Determines the label to use for the type. keeps the strings shorter
+        def edge_label_type_name(t: typing.Type) -> str:
+
+            if (t.__module__ == "typing"):
+                return str(t).replace("typing.", "")
+
+            return t.__module__.split(".")[0] + "." + t.__name__
+
+        # Build up edges
+        for e, attrs in typing.cast(typing.Mapping[typing.Tuple[StreamWrapper, StreamWrapper], dict], self._graph.edges()).items():
+
+            edge_attrs = {}
+
+            start_name = e[0].unique_name
+
+            # Append the port if necessary
+            if (has_ports(e[0], is_input=False)):
+                start_name += f":d{attrs['start_port_idx']}"
+            else:
+                start_name += start_def_port
+
+            end_name = e[1].unique_name
+
+            if (has_ports(e[1], is_input=True)):
+                end_name += f":u{attrs['end_port_idx']}"
+            else:
+                end_name += end_def_port
+
+            # Now we only want to show the type label in some scenarios:
+            # 1. If there is only one edge between two nodes, draw type in middle "label"
+            # 2. For port with an edge, only draw that port's type once (using index 0 of the senders/receivers)
+            start_port_idx = int(attrs['start_port_idx'])
+            end_port_idx = int(attrs['end_port_idx'])
+
+            out_port = e[0].output_ports[start_port_idx]
+            in_port = e[1].input_ports[end_port_idx]
+
+            # Check for situation #1
+            if (len(in_port._input_senders) == 1 and len(out_port._output_receivers) == 1
+                    and (in_port.in_type == out_port.out_type)):
+                edge_attrs["label"] = edge_label_type_name(in_port.in_type)
+            else:
+                rec_idx = out_port._output_receivers.index(in_port)
+                sen_idx = in_port._input_senders.index(out_port)
+
+                # Add type labels if available
+                if (rec_idx == 0 and out_port.out_type is not None):
+                    edge_attrs["taillabel"] = edge_label_type_name(out_port.out_type)
+
+                if (sen_idx == 0 and in_port.in_type is not None):
+                    edge_attrs["headlabel"] = edge_label_type_name(in_port.in_type)
+
+            gv_graph.edge(start_name, end_name, **edge_attrs)
+
+        file_format = os.path.splitext(filename)[-1].replace(".", "")
+
+        viz_binary = gv_graph.pipe(format=file_format)
+
+        with open(filename, "wb") as f:
+            f.write(viz_binary)
 
     def run(self):
         """
@@ -440,7 +919,7 @@ class Pipeline():
             msg = "Unhandled exception in async loop! Exception: \n{}".format(context["message"])
             exception = context.get("exception", Exception())
 
-            logger.critical(msg)
+            logger.critical(msg, exc_info=exception)
 
         loop.set_exception_handler(error_handler)
 
@@ -453,3 +932,60 @@ class Pipeline():
         finally:
             loop.close()
             logger.debug("Exited")
+
+
+class LinearPipeline(Pipeline):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+        self._linear_stages: typing.List[StreamWrapper] = []
+
+    def set_source(self, source: SourceStage):
+        """
+        Set a pipeline's source stage to consume messages before it begins executing stages. This must be
+        called once before `build_and_start`.
+
+        Parameters
+        ----------
+        source : morpheus.pipeline.SourceStage
+            The source stage wraps the implementation in a stream that allows it to read from Kafka or a file.
+
+        """
+
+        if (len(self._sources) > 0 and source not in self._sources):
+            logger.warning("LinearPipeline already has a source. Setting a new source will clear out all existing stages")
+
+            self._sources.clear()
+
+        # Store the source in sources
+        self._sources.add(source)
+
+        if (len(self._linear_stages) > 0):
+            logger.warning("Clearing %d stages from pipeline", len(self._linear_stages))
+            self._linear_stages.clear()
+
+        # Need to store the source in the pipeline
+        super().add_node(source)
+
+        # Store this as the first one in the linear stages. Must be index 0
+        self._linear_stages.append(source)
+
+    def add_stage(self, stage: SinglePortStage):
+        """
+        Add stages to the pipeline. All `Stage` classes added with this method will be executed sequentially
+        inthe order they were added
+
+        Parameters
+        ----------
+        stage : morpheus.pipeline.Stage
+            The stage object to add. It cannot be already added to another `Pipeline` object.
+
+        """
+
+        assert len(self._linear_stages) > 0, "A source must be set on a LinearPipeline before adding any stages"
+        assert typing_utils.issubtype(stage, SinglePortStage), "Only `SinglePortStage` stages are accepted in `add_stage()`"
+
+        # Make an edge between the last node and this one
+        self.add_edge(self._linear_stages[-1], stage)
+
+        self._linear_stages.append(stage)

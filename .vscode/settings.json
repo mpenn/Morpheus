@@ -11,7 +11,12 @@
     "--style={based_on_style: pep8, column_limit: 130, split_all_top_level_comma_separated_values: true, join_multiple_lines: true, indent_dictionary_value: true}"
   ],
   "python.linting.pylintArgs": [
-    "--rcfile=${env:HOME}/Repos/rapids/.pylintrc"
+    "--rcfile=${env:HOME}/Repos/morpheus/.pylintrc"
   ],
   "python.linting.pylintEnabled": true,
+  "python.sortImports.args": [
+    "--sl",
+    "--project=morpheus",
+    "--conda-env=${env:CONDA_DEFAULT_ENV}",
+  ],
 }

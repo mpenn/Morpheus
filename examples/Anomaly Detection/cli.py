@@ -1,4 +1,7 @@
 from functools import update_wrapper
+from morpheus.pipeline.inference.inference_triton import TritonInferenceNLP
+from morpheus.pipeline.preprocessing import DeserializeStage, PreprocessNLPStage
+from morpheus.pipeline.input.from_file import FileSourceStage
 from click import decorators
 import psutil
 import warnings
@@ -618,3 +621,4 @@ pipeline_fil.add_command(to_kafka)
 
 if __name__ == '__main__':
     cli(obj={}, auto_envvar_prefix='CLX', show_default=True)
+
