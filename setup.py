@@ -21,7 +21,7 @@ import versioneer
 
 setup(
     name="morpheus",
-    version="0.10",
+    version=versioneer.get_version(),
     description="Morpheus",
     classifiers=[
         "Development Status :: 3 - Alpha",
