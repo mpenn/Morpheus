@@ -8,12 +8,11 @@ import numpy as np
 import pandas as pd
 
 from morpheus.config import Config
-from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MultiResponseMessage
-from morpheus.pipeline.pipeline import StreamPair
+from morpheus.pipeline.pipeline import SinglePortStage, StreamPair
 
 
-class GenerateVizFramesStage(Stage):
+class GenerateVizFramesStage(SinglePortStage):
     """
     Class to generate visualization frames.
 
@@ -98,7 +97,7 @@ class GenerateVizFramesStage(Stage):
 
         def indent_data(y: str):
             try:
-                return json.dumps(json.loads(), indent=3)
+                return json.dumps(json.loads(y), indent=3)
             except:
                 return y
 
@@ -139,7 +138,7 @@ class GenerateVizFramesStage(Stage):
 
         in_df.to_csv(fn, columns=["timestamp", "src_ip", "dest_ip", "src_port", "dest_port", "si", "data"])
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 

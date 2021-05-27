@@ -1,10 +1,13 @@
+import typing
+
 import cudf
+from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
 from morpheus.pipeline import SourceStage
-from morpheus.pipeline.pipeline import StreamPair
+from morpheus.pipeline.pipeline import StreamFuture
 
 
 class KafkaSourceStage(SourceStage):
@@ -48,7 +51,7 @@ class KafkaSourceStage(SourceStage):
     def name(self) -> str:
         return "from-kafka"
 
-    async def _build(self) -> StreamPair:
+    def _build_source(self) -> typing.Tuple[Source, typing.Type]:
 
         if (self._use_dask):
             from dask.distributed import Client
@@ -64,6 +67,8 @@ class KafkaSourceStage(SourceStage):
                                                        poll_interval=self._poll_interval,
                                                        loop=IOLoop.current(),
                                                        max_batch_size=self._max_batch_size)
+            
+            return source, StreamFuture[cudf.DataFrame]
         else:
             source: Stream = Stream.from_kafka_batched(self._input_topic,
                                                        self._consumer_conf,
@@ -76,5 +81,4 @@ class KafkaSourceStage(SourceStage):
                                                        loop=IOLoop.current(),
                                                        max_batch_size=self._max_batch_size)
 
-        # Always gather here (no-op if not using dask)
-        return source.gather(), cudf.DataFrame
+            return source, cudf.DataFrame

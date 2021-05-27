@@ -3,11 +3,11 @@ import typing
 import typing_utils
 
 from morpheus.config import Config
-from morpheus.pipeline.pipeline import Stage
+from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
 
 
-class WriteToKafkaStage(Stage):
+class WriteToKafkaStage(SinglePortStage):
     """
     Write messages to a Kafka cluster.
 
@@ -44,7 +44,7 @@ class WriteToKafkaStage(Stage):
         """
         return (typing.List[str], )
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
         stream = input_stream[0]

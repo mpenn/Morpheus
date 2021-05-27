@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import typing
 from functools import reduce
@@ -6,15 +5,16 @@ from functools import reduce
 import cudf
 import numpy as np
 import pandas as pd
+import typing_utils
 from streamz import Source
 from streamz.core import RefCounter
 from streamz.core import Stream
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tqdm import tqdm
 
 from morpheus.config import Config
-from morpheus.pipeline.pipeline import SourceStage
+from morpheus.pipeline.pipeline import SingleOutputSource
+from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
     return x
 
 
-class FileSourceStage(SourceStage):
+class FileSourceStage(SingleOutputSource):
     """
     This class Load messages from a file and dumps the contents into the pipeline immediately. Useful for
     testing throughput.
@@ -94,12 +94,17 @@ class FileSourceStage(SourceStage):
         Name of the file from which the messages will be read. Must be JSON lines.
 
     """
-    def __init__(self, c: Config, filename: str):
+    def __init__(self, c: Config, filename: str, iterative: bool = None):
         super().__init__(c)
 
         self._filename = filename
         self._batch_size = c.pipeline_batch_size
         self._input_count = None
+        self._use_dask = c.use_dask
+
+        # Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode is good for
+        # interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
+        self._iterative = iterative if iterative is not None else not c.use_dask
 
     @property
     def name(self) -> str:
@@ -110,15 +115,36 @@ class FileSourceStage(SourceStage):
         """Return None for no max intput count"""
         return self._input_count
 
-    async def _build(self) -> StreamPair:
+    def _build_source(self) -> typing.Tuple[Source, typing.Type]:
 
         df = cudf.read_json(self._filename, engine="cudf", lines=True)
 
         df = df_onread_cleanup(df)
 
-        source: Source = Stream.from_iterable_done(self._generate_frames(df), asynchronous=True, loop=IOLoop.current())
+        out_stream: Source = Stream.from_iterable_done(self._generate_frames(df), asynchronous=True, loop=IOLoop.current())
+        out_type = cudf.DataFrame if self._iterative else typing.List[cudf.DataFrame]
 
-        return source, typing.List[cudf.DataFrame]
+        return out_stream, out_type
+
+    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+
+        out_stream = out_pair[0]
+        out_type = out_pair[1]
+
+        # Convert our list of dataframes into the desired type. Either scatter than flatten or just flatten if not using dask
+        if (self._use_dask):
+            if (typing_utils.issubtype(out_type, typing.List)):
+                out_stream = out_stream.scatter_batch().flatten()
+                out_type = StreamFuture[typing.get_args(out_type)[0]]
+            else:
+                out_stream = out_stream.scatter()
+                out_type = StreamFuture[out_type]
+        else:
+            if (typing_utils.issubtype(out_type, typing.List)):
+                out_stream = out_stream.flatten()
+                out_type = typing.get_args(out_type)[0]
+
+        return super()._post_build_single((out_stream, out_type))
 
     async def _generate_frames(self, df):
         count = 0
@@ -127,11 +153,15 @@ class FileSourceStage(SourceStage):
         for x in df.groupby(np.arange(len(df)) // self._batch_size):
             y = x[1].reset_index(drop=True)
 
-            out.append(y)
             count += 1
 
-        yield out
+            if (self._iterative):
+                yield y
+            else:
+                out.append(y)
 
-        # Perform the callbacks
-        for cb in self._done_callbacks:
-            cb()
+        if (not self._iterative):
+            yield out
+
+        # Indicate that we are stopping (not the best way of doing this)
+        self._source_stream.stop()

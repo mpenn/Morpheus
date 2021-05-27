@@ -272,9 +272,9 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     config.mode = PipelineModes.NLP
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    ctx.obj = Pipeline(config)
+    ctx.obj = LinearPipeline(config)
 
     return ctx.obj
 
@@ -306,9 +306,9 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     config.mode = PipelineModes.FIL
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    ctx.obj = Pipeline(config)
+    ctx.obj = LinearPipeline(config)
 
     return ctx.obj
 
@@ -320,7 +320,9 @@ def post_pipeline(ctx: click.Context, stages, **kwargs):
 
     click.secho("Starting pipeline via CLI... Ctrl+C to Quit", fg="red")
 
-    pipeline: Pipeline = ctx.ensure_object(Pipeline)
+    from morpheus.pipeline import LinearPipeline
+
+    pipeline: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     # Run the pipeline
     pipeline.run()
@@ -335,9 +337,9 @@ pipeline_fil.result_callback = post_pipeline
 @prepare_command(False)
 def from_file(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.input.from_file import FileSourceStage
 
@@ -368,9 +370,9 @@ def from_file(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def from_kafka(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
@@ -394,9 +396,9 @@ def from_kafka(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def monitor(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import MonitorStage
 
@@ -412,9 +414,9 @@ def monitor(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def buffer(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import BufferStage
 
@@ -430,9 +432,9 @@ def buffer(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def delay(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import DelayStage
 
@@ -450,9 +452,9 @@ def delay(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def trigger(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import TriggerStage
 
@@ -467,9 +469,9 @@ def trigger(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def deserialize(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.preprocessing import DeserializeStage
 
@@ -484,9 +486,9 @@ def deserialize(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def preprocess_nlp(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.preprocessing import PreprocessNLPStage
 
@@ -501,9 +503,9 @@ def preprocess_nlp(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def preprocess_fil(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.preprocessing import PreprocessFILStage
 
@@ -520,9 +522,9 @@ def preprocess_fil(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def inf_triton(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.inference.inference_triton import \
         TritonInferenceStage
@@ -538,9 +540,9 @@ def inf_triton(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def inf_identity(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.inference.inference_identity import \
         IdentityInferenceStage
@@ -557,9 +559,9 @@ def inf_identity(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def add_class(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import AddClassificationsStage
 
@@ -575,9 +577,9 @@ def add_class(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def filter(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import FilterDetectionsStage
 
@@ -610,9 +612,9 @@ def filter(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def serialize(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     kwargs["include"] = list(kwargs["include"])
     kwargs["exclude"] = list(kwargs["exclude"])
@@ -632,9 +634,9 @@ def serialize(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def to_file(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.output.to_file import WriteToFileStage
 
@@ -658,9 +660,9 @@ def to_file(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def to_kafka(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
@@ -680,9 +682,9 @@ def to_kafka(ctx: click.Context, **kwargs):
 @prepare_command(False)
 def gen_viz(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import Pipeline
+    from morpheus.pipeline import LinearPipeline
 
-    p: Pipeline = ctx.ensure_object(Pipeline)
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.output.gen_viz_frames import GenerateVizFramesStage
 

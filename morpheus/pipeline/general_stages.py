@@ -1,18 +1,24 @@
-import time
 import typing
 from functools import reduce
 
 import cudf
 import cupy as cp
-from morpheus.config import Config
-from morpheus.pipeline import Stage
-from morpheus.pipeline.messages import MultiMessage, MultiResponseMessage
-from morpheus.pipeline.pipeline import StreamPair
+import streamz
 from streamz.core import Stream
 from tqdm import tqdm
 
+from morpheus.config import Config
+from morpheus.pipeline import Stage
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.pipeline import SinglePortStage
+from morpheus.pipeline.pipeline import StreamPair
+from morpheus.utils.type_utils import greatest_ancestor
+from morpheus.utils.type_utils import unpack_tuple
+from morpheus.utils.type_utils import unpack_union
 
-class BufferStage(Stage):
+
+class BufferStage(SinglePortStage):
     """
     The input messages are buffered by this stage class for faster access to downstream stages. Allows
     upstream stages to run faster than downstream stages.
@@ -44,11 +50,12 @@ class BufferStage(Stage):
         """
         return (typing.Any, )
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+
         return input_stream[0].buffer(self._buffer_count), input_stream[1]
 
 
-class DelayStage(Stage):
+class DelayStage(SinglePortStage):
     """
     Delay stage class. Used to buffer all inputs until the timeout duration is hit. At that point all messages
     will be dumped into downstream stages. Useful for testing performance of one stage at a time.
@@ -80,11 +87,12 @@ class DelayStage(Stage):
         """
         return (typing.Any, )
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+
         return input_stream[0].time_delay(self._duration), input_stream[1]
 
 
-class TriggerStage(Stage):
+class TriggerStage(SinglePortStage):
     """
     This stage will buffer all inputs until the source stage is complete. At that point all messages
     will be dumped into downstream stages. Useful for testing performance of one stage at a time.
@@ -114,7 +122,7 @@ class TriggerStage(Stage):
         """
         return (typing.Any, )
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 
@@ -130,7 +138,7 @@ class TriggerStage(Stage):
         return stream, input_stream[1]
 
 
-class MonitorStage(Stage):
+class MonitorStage(SinglePortStage):
     """
     Monitor stage used to monitor stage performance metrics using Tqdm. Each Monitor Stage will represent one
     line in the console window showing throughput statistics. Can be set up to show an instantaneous
@@ -166,9 +174,6 @@ class MonitorStage(Stage):
         self._smoothing = smoothing
         self._unit = unit
 
-        # self._pre_sink_fn = self.pre_timestamps
-        self._post_sink_fn = self._progress_sink
-
         self._determine_count_fn = determine_count_fn
 
     @property
@@ -198,9 +203,10 @@ class MonitorStage(Stage):
 
         self._progress.reset()
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
-        # input_stream[0].add_done_callback(self._refresh_progress)
+        # Add the progress sink to the current stream. Use a gather here just in case its a Dask stream
+        input_stream[0].gather().sink(self._progress_sink)
 
         return input_stream
 
@@ -215,10 +221,6 @@ class MonitorStage(Stage):
         # Skip incase we have empty objects
         if (self._determine_count_fn is None):
             return
-
-        # # This starts the timer on the first message. Otherwise it sits from creation with no updates
-        # if (self._progress.n == 0):
-        #     self._progress.unpause()
 
         # Do our best to determine the count
         n = self._determine_count_fn(x)
@@ -244,12 +246,12 @@ class MonitorStage(Stage):
         elif (isinstance(x, str)):
             return lambda y: 1
         elif (hasattr(x, "__len__")):
-            return lambda y: len(y)
+            return len # Return len directly (same as `lambda y: len(y)`)
         else:
             raise NotImplementedError("Unsupported type: {}".format(type(x)))
 
 
-class AddClassificationsStage(Stage):
+class AddClassificationsStage(SinglePortStage):
     """
     Add classification labels based on probabilities calculated in inference stage. Uses default threshold of
     0.5 for predictions.
@@ -306,7 +308,7 @@ class AddClassificationsStage(Stage):
         # Return list of strs to write out
         return x
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 
@@ -317,7 +319,7 @@ class AddClassificationsStage(Stage):
         return stream, MultiResponseMessage
 
 
-class FilterDetectionsStage(Stage):
+class FilterDetectionsStage(SinglePortStage):
     """
     This Stage class is used to filter results based on a given criteria.
 
@@ -392,7 +394,7 @@ class FilterDetectionsStage(Stage):
 
         return output_list
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 
@@ -406,3 +408,95 @@ class FilterDetectionsStage(Stage):
         stream = stream.filter(lambda x: x.count > 0)
 
         return stream, MultiResponseMessage
+
+class ZipStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+    @property
+    def name(self) -> str:
+        return "zip"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        # Check for compatible types
+        stream_types = [s_type for s, s_type in in_ports_streams[1:]]
+
+        # Find greatest_ancestor
+        out_type = greatest_ancestor(*stream_types)
+
+        if (out_type is None):
+            out_type = unpack_union(*stream_types)
+
+        # Build off first stream
+        first_pair = in_ports_streams[0]
+
+        first_stream = first_pair[0]
+
+        stream = first_stream.zip([s for s, _ in in_ports_streams[1:]])
+
+        return [(stream, out_type)]
+
+class MergeStage(Stage):
+    def __init__(self, c: Config):
+        super().__init__(c)
+
+    @property
+    def name(self) -> str:
+        return "merge"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        # Check for compatible types
+        stream_types = [s_type for s, s_type in in_ports_streams]
+
+        # Find greatest_ancestor
+        out_type = greatest_ancestor(*stream_types)
+
+        if (out_type is None):
+            out_type = unpack_tuple(*stream_types)
+
+        stream = streamz.union(*[s for s, _ in in_ports_streams])
+
+        return [(stream, out_type)]
+
+
+class SwitchStage(Stage):
+    def __init__(self, c: Config, num_outputs: int, predicate: typing.Callable[[typing.Any], int]):
+        super().__init__(c)
+
+        self._num_outputs = num_outputs
+        self._predicate = predicate
+
+        self._create_ports(1, num_outputs)
+
+    @property
+    def name(self) -> str:
+        return "sample"
+
+    def accepted_types(self) -> typing.Tuple:
+        return (typing.Any, )
+
+    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        # Since we are a SiSo stage, there will only be 1 input
+        input_stream = in_ports_streams[0]
+
+        stream = input_stream[0]
+
+        # Filter out empty message groups
+        switch_stream = stream.switch(self._predicate)
+
+        out_pairs = []
+
+        for _ in range(self._num_outputs):
+            out_pairs.append((Stream(upstream=switch_stream), input_stream[1]))
+
+        return out_pairs
+

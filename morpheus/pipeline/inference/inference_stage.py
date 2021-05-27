@@ -7,20 +7,18 @@ from functools import reduce
 
 import cupy as cp
 import typing_utils
-from streamz.core import Stream
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
-from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import MultiResponseMessage
 from morpheus.pipeline.messages import ResponseMemory
+from morpheus.pipeline.pipeline import MultiMessageStage
 from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
-from morpheus.pipeline.pipeline import get_time_ms
 
 
-class InferenceStage(Stage):
+class InferenceStage(MultiMessageStage):
     """
     This class serves as the base for any inference stage. Inference stages operate differently than other
     stages due to the fact that they operate in a separate thread and have their own batch size which is
@@ -93,7 +91,6 @@ class InferenceStage(Stage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        # self._post_sink_fn = self.post_timestamps
         self._fea_length = c.feature_length
 
         self._thread = None
@@ -134,26 +131,7 @@ class InferenceStage(Stage):
         """
         pass
 
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
-
-        wait_events = []
-
-        for _ in range(1):
-            ready_event = asyncio.Event()
-
-            threading.Thread(target=self._get_inference_fn(),
-                             daemon=True,
-                             name="Inference Thread",
-                             args=(
-                                 IOLoop.current(),
-                                 self._inf_queue,
-                                 ready_event,
-                             )).start()
-
-            # Wait for the inference thread to be ready
-            wait_events.append(ready_event.wait())
-
-        await asyncio.gather(*wait_events, return_exceptions=True)
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiResponseMessage
@@ -179,6 +157,29 @@ class InferenceStage(Stage):
             stream = stream.async_map(self._convert_response, executor=self._pipeline.thread_pool)
 
         return stream, out_type
+
+    async def _start(self):
+
+        wait_events = []
+
+        for _ in range(1):
+            ready_event = asyncio.Event()
+
+            threading.Thread(target=self._get_inference_fn(),
+                             daemon=True,
+                             name="Inference Thread",
+                             args=(
+                                 IOLoop.current(),
+                                 self._inf_queue,
+                                 ready_event,
+                             )).start()
+
+            # Wait for the inference thread to be ready
+            wait_events.append(ready_event.wait())
+
+        await asyncio.gather(*wait_events, return_exceptions=True)
+
+        return await super()._start()
 
     @staticmethod
     def _split_batches(x: MultiInferenceMessage, max_batch_size: int) -> typing.List[MultiInferenceMessage]:

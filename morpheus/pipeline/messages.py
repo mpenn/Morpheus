@@ -6,6 +6,15 @@ import pandas as pd
 
 
 @dataclasses.dataclass
+class MessageData:
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+
+
+@dataclasses.dataclass
 class MessageMeta:
     """
     This is a container class to hold batch deserialized messages metadata.
@@ -35,24 +44,6 @@ class MessageMeta:
         """
 
         return len(self.df)
-
-
-@dataclasses.dataclass
-class Message:
-    """
-    This is a MessageMeta wrapper class.
-
-    Parameters
-    ----------
-    meta : morpheus.messages.MessageMeta
-        Deserialized messages metadata
-    meta_idx : int
-        MessageMeta index
-
-    """
-
-    meta: MessageMeta = dataclasses.field(repr=False)
-    meta_idx: int
 
 
 @dataclasses.dataclass
@@ -185,7 +176,7 @@ class MultiMessage:
 
 
 @dataclasses.dataclass
-class InferenceMemory:
+class InferenceMemory(MessageData):
     """
     This is a base container class for data that will be used for inference stages. This class is designed to
     hold generic tensor data in cupy arrays. 
@@ -203,23 +194,90 @@ class InferenceMemory:
 
     inputs: typing.Dict[str, cp.ndarray] = dataclasses.field(default_factory=dict, init=False)
 
-    def __getattr__(self, name: str) -> typing.Any:
 
-        input_val = self.inputs.get(name, default=None)
+class InitProp:
+    def __set_name__(self, owner, name):
+        self.name = name
 
-        if (input_val is not None):
-            return input_val
+    def __get__(self, instance, owner):
+        if (instance is None):
+            return None
 
-        return super().__getattr__(name)
+        if (self.name not in instance.inputs):
+            raise AttributeError
 
-    def __setattr__(self, name: str, value: typing.Any) -> None:
+        return instance.inputs[self.name]
 
-        # If its a cupy array, set it to the inputs field
-        if (isinstance(value, cp.ndarray)):
-            self.inputs[name] = value
+    def __set__(self, instance, value):
+
+        if (instance is None):
             return
 
-        return super().__setattr__(name, value)
+        instance.inputs[self.name] = value
+
+    def __delete__(self, instance):
+        if (instance is None):
+            return
+
+        del instance.inputs[self.name]
+
+
+class DataClassProp:
+    def __init__(self,
+                 fget: typing.Callable[[typing.Any, str], typing.Any] = None,
+                 fset: typing.Callable[[typing.Any, str, typing.Any], None] = None,
+                 fdel=None,
+                 doc=None,
+                 field=None):
+        self.fget = fget
+        self.fset = fset
+        self.fdel = fdel
+        if doc is None and fget is not None:
+            doc = fget.__doc__
+        self.__doc__ = doc
+        self._field = field
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+    def __get__(self, instance, owner):
+        if (instance is None):
+            # Most likely, this is getting the default field value for the dataclass.
+            return self._field
+
+        if self.fget is None:
+            raise AttributeError("unreadable attribute")
+
+        return self.fget(instance, self.name)
+
+    def __set__(self, instance, value):
+
+        if (instance is None):
+            return
+
+        if self.fset is None:
+            raise AttributeError("can't set attribute")
+
+        self.fset(instance, self.name, value)
+
+    def __delete__(self, instance):
+        if (instance is None):
+            return
+
+        del instance.inputs[self.name]
+
+
+# @staticmethod
+def get_input(instance, name: str):
+    if (name not in instance.inputs):
+        raise AttributeError
+
+    return instance.inputs[name]
+
+
+# @staticmethod
+def set_input(instance, name: str, value):
+    instance.inputs[name] = value
 
 
 @dataclasses.dataclass
@@ -240,9 +298,9 @@ class InferenceMemoryNLP(InferenceMemory):
 
     """
 
-    input_ids: dataclasses.InitVar[cp.ndarray]
-    input_mask: dataclasses.InitVar[cp.ndarray]
-    seq_ids: dataclasses.InitVar[cp.ndarray]
+    input_ids: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
+    input_mask: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
+    seq_ids: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
 
     def __post_init__(self, input_ids, input_mask, seq_ids):
         self.input_ids = input_ids
@@ -266,8 +324,8 @@ class InferenceMemoryFIL(InferenceMemory):
 
     """
 
-    input__0: dataclasses.InitVar[cp.ndarray]
-    seq_ids: dataclasses.InitVar[cp.ndarray]
+    input__0: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
+    seq_ids: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
 
     def __post_init__(self, input__0, seq_ids):
         self.input__0 = input__0
@@ -316,6 +374,12 @@ class MultiInferenceMessage(MultiMessage):
 
         return {key: self.get_input(key) for key in self.memory.inputs.keys()}
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+
     def __getattr__(self, name: str) -> typing.Any:
 
         input_val = self.memory.inputs.get(name, None)
@@ -323,7 +387,7 @@ class MultiInferenceMessage(MultiMessage):
         if (input_val is not None):
             return input_val[self.offset:self.offset + self.count, :]
 
-        return super().__getattr__(name)
+        raise AttributeError
 
     def get_input(self, name: str):
         """
