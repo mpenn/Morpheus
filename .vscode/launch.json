@@ -231,6 +231,23 @@
          "cwd": "${workspaceFolder}",
       },
       {
+         "name": "Python: Anomaly Detection Example",
+         "type": "python",
+         "request": "launch",
+         "program": "${workspaceFolder}/examples/anomaly_detection/run.py",
+         "console": "integratedTerminal",
+         "cwd": "${workspaceFolder}/examples/anomaly_detection",
+         "justMyCode": false,
+         "args": [
+            "--input_file",
+            "./pcap.jsonlines",
+            "--output_file",
+            "./pcap_output.jsonlines",
+            "--server_url",
+            "localhost:8001",
+         ]
+      },
+      {
          "name": "Python: Sphinx",
          "type": "python",
          "request": "launch",

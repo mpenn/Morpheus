@@ -5,7 +5,7 @@
     ],
     "editor.tabSize": 4
   },
-  "python.pythonPath": "/home/mdemoret/anaconda3/envs/cyber_dev/bin/python",
+  "python.pythonPath": "/home/mdemoret/anaconda3/envs/cyber_dev2/bin/python",
   "python.formatting.provider": "yapf",
   "python.formatting.yapfArgs": [
     "--style={based_on_style: pep8, column_limit: 130, split_all_top_level_comma_separated_values: true, join_multiple_lines: true, indent_dictionary_value: true}"
@@ -18,5 +18,11 @@
     "--sl",
     "--project=morpheus",
     "--conda-env=${env:CONDA_DEFAULT_ENV}",
+  ],
+  "python.analysis.extraPaths": [
+    "./examples/anomaly_detection",
+  ],
+  "python.autoComplete.extraPaths": [
+    "./examples/anomaly_detection",
   ],
 }

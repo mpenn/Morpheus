@@ -39,10 +39,6 @@ class TritonPythonModel:
         
         self.preds_config = pb_utils.triton_string_to_numpy(preds_config['data_type'])
         
-        
-        # Get outputconfiguration
-        #output_config = pb_utils.get_output_config_by_name(model_config, "output")
-        
         model_filepath = '/models/anomaly_detection_fil_model/1/xgboost.model'
         
         self.column_names_dct = {0:'ack',1:'psh',2:'rst',

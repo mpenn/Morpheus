@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from morpheus.config import Config
-from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.messages import MultiResponseProbsMessage
 from morpheus.pipeline.pipeline import SinglePortStage, StreamPair
 
 
@@ -54,11 +54,11 @@ class GenerateVizFramesStage(SinglePortStage):
 
         Returns
         -------
-        typing.Tuple[morpheus.pipeline.messages.MultiResponseMessage, ]
+        typing.Tuple[morpheus.pipeline.messages.MultiResponseProbsMessage, ]
             Accepted input types
 
         """
-        return (MultiResponseMessage, )
+        return (MultiResponseProbsMessage, )
 
     @staticmethod
     def round_to_sec(x):
@@ -78,7 +78,7 @@ class GenerateVizFramesStage(SinglePortStage):
         """
         return int(round(x / 1000.0) * 1000)
 
-    def _to_vis_df(self, x: MultiResponseMessage):
+    def _to_vis_df(self, x: MultiResponseProbsMessage):
 
         idx2label = {
             0: 'address',

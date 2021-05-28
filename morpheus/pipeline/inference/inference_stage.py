@@ -10,9 +10,9 @@ import typing_utils
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
-from morpheus.pipeline.messages import MultiInferenceMessage
-from morpheus.pipeline.messages import MultiResponseMessage
-from morpheus.pipeline.messages import ResponseMemory
+from morpheus.pipeline.messages import MultiInferenceMessage, ResponseMemoryProbs
+from morpheus.pipeline.messages import MultiResponseProbsMessage
+from morpheus.pipeline.messages import ResponseMemoryProbs
 from morpheus.pipeline.pipeline import MultiMessageStage
 from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
@@ -134,7 +134,7 @@ class InferenceStage(MultiMessageStage):
     def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
-        out_type = MultiResponseMessage
+        out_type = MultiResponseProbsMessage
 
         if (typing_utils.issubtype(input_stream[1], StreamFuture)):
             # First convert to manageable batches. If the batches are too large, we cant process them
@@ -144,7 +144,7 @@ class InferenceStage(MultiMessageStage):
             stream = stream.async_map(self._queue_inf_work)
 
             stream = stream.scatter().map(self._convert_response)
-            out_type = StreamFuture[MultiResponseMessage]
+            out_type = StreamFuture[MultiResponseProbsMessage]
         else:
             # First convert to manageable batches. If the batches are too large, we cant process them
             stream = stream.async_map(self._split_batches,
@@ -236,9 +236,9 @@ class InferenceStage(MultiMessageStage):
         return x, res
 
     @staticmethod
-    def _convert_response(x: typing.Tuple[typing.List[MultiInferenceMessage], typing.List[ResponseMemory]]):
+    def _convert_response(x: typing.Tuple[typing.List[MultiInferenceMessage], typing.List[ResponseMemoryProbs]]):
 
-        # Convert a MultiResponse into a MultiResponseMessage
+        # Convert a MultiResponse into a MultiResponseProbsMessage
         in_message = x[0]
         out_message = x[1]
 
@@ -248,7 +248,7 @@ class InferenceStage(MultiMessageStage):
         total_mess_count = reduce(lambda y, z: y + z.mess_count, in_message, 0)
 
         # Create a message data to store the entire list
-        memory = ResponseMemory(count=total_mess_count, probs=cp.zeros((total_mess_count, out_message[0].probs.shape[1])))
+        memory = ResponseMemoryProbs(count=total_mess_count, probs=cp.zeros((total_mess_count, out_message[0].probs.shape[1])))
 
         saved_meta = in_message[0].meta
         saved_offset = in_message[0].mess_offset
@@ -280,7 +280,7 @@ class InferenceStage(MultiMessageStage):
         # For now, we assume that this is the whole group of messages so it must start at 0
         assert saved_offset == 0
 
-        return MultiResponseMessage(meta=saved_meta,
+        return MultiResponseProbsMessage(meta=saved_meta,
                                     mess_offset=saved_offset,
                                     mess_count=saved_count,
                                     memory=memory,

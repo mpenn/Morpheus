@@ -38,10 +38,12 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
             self.features
         ), f"Number of features in preprocessing {len(self.features)}, does not match configuration {self._fea_length}"
 
+    @property
+    def name(self) -> str:
+        return "preprocess-anomaly"
+
     @staticmethod
-    def pre_process_batch(
-        x: MultiMessage, fea_len: int, fea_cols: typing.List[str]
-    ) -> MultiInferenceFILMessage:
+    def pre_process_batch(x: MultiMessage, fea_len: int, fea_cols: typing.List[str]) -> MultiInferenceFILMessage:
         raw_mess_count = x.meta.df.count
         x.meta.df["flags_bin"] = x.meta.df["flags"].apply(
             lambda x: format(int(x), "05b")
@@ -114,9 +116,14 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
             + x.meta.df["syn"]
             + x.meta.df["fin"]
         )
+        # ackpush/all - Number of flows with ACK+PUSH flags to all flows
         x.meta.df["ackpush/all"] = (x.meta.df["ack"] + x.meta.df["psh"]) / x.meta.df[
             "all"
         ]
+        
+        # rst/all - Number of flows with RST flag to all flows
+        # syn/all - Number of flows with SYN flag to all flows
+        # fin/all - Number of flows with FIN flag to all flows
         for col in ["rst", "syn", "fin"]:
             dst_col = "{}/all".format(col)
             x.meta.df[dst_col] = x.meta.df[col] / x.meta.df["all"]
@@ -145,9 +152,7 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
 
         return infer_message
 
-    def _get_preprocess_fn(
-        self
-    ) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
+    def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         return partial(
             UserProfPreprocessingStage.pre_process_batch,
             fea_len=self._fea_length,

@@ -128,10 +128,6 @@ class PreprocessBaseStage(MultiMessageStage):
 
         self._should_log_timestamps = True
 
-    @property
-    def name(self) -> str:
-        return "preprocess"
-
     def accepted_types(self) -> typing.Tuple:
         """
         Returns accepted input types for this stage.
@@ -190,6 +186,10 @@ class PreprocessNLPStage(PreprocessBaseStage):
         # Set the stride to 75%. Works well with powers of 2
         self._stride = self._seq_length // 2
         self._stride = self._stride + self._stride // 2
+
+    @property
+    def name(self) -> str:
+        return "preprocess-nlp"
 
     @staticmethod
     def pre_process_batch(x: MultiMessage, seq_len: int, stride: int, vocab_hash_file: str) -> MultiInferenceNLPMessage:
@@ -285,6 +285,10 @@ class PreprocessFILStage(PreprocessBaseStage):
         ]
 
         assert self._fea_length == len(self.features), f"Number of features in preprocessing {len(self.features)}, does not match configuration {self._fea_length}"
+
+    @property
+    def name(self) -> str:
+        return "preprocess-fil"
 
     @staticmethod
     def pre_process_batch(x: MultiMessage, fea_len: int, fea_cols: typing.List[str]) -> MultiInferenceFILMessage:

@@ -48,6 +48,7 @@ setup(
     packages=find_packages(include=["morpheus", "morpheus.*"]),
     include_package_data=True,
     install_requires=[
+        "appdirs",
         "click-completion",
         "click",
         "configargparse",
