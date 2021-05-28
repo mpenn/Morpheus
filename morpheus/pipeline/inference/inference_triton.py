@@ -19,7 +19,7 @@ from tritonclient.utils import triton_to_np_dtype
 from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.pipeline.inference.inference_stage import InferenceStage
-from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import MultiInferenceMessage, ResponseMemoryProbs
 from morpheus.pipeline.messages import ResponseMemory
 
 logger = logging.getLogger(__name__)
@@ -274,11 +274,11 @@ class TritonInference:
         Morpheus names do not match the model
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str]):
+    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
 
         self._model_name = model_name
         self._server_url = server_url
-        self._inout_mapping = inout_mapping
+        self._inout_mapping = inout_mapping if inout_mapping is not None else {}
 
         self._requires_seg_ids = False
 
@@ -404,7 +404,7 @@ class TritonInference:
         # Build response
         response_mem = self._build_response(result)
 
-        def tmp(mem: ResponseMemory):
+        def tmp(mem: ResponseMemoryProbs):
             # Set result on future
             f.set_result(mem)
 
@@ -499,14 +499,14 @@ class TritonInferenceNLP(TritonInference):
 
         super().__init__(c, model_name, server_url, default_mapping)
 
-    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:
+    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
         if (self._needs_logits):
             output = {key: 1.0 / (1.0 + np.exp(-val)) for key, val in output.items()}
 
-        mem = ResponseMemory(
+        mem = ResponseMemoryProbs(
             count=output[list(output.keys())[0]].shape[0],
             probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
         )
@@ -536,11 +536,11 @@ class TritonInferenceFIL(TritonInference):
     def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
         super().__init__(c, model_name, server_url, inout_mapping)
 
-    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:
+    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
-        mem = ResponseMemory(
+        mem = ResponseMemoryProbs(
             count=output[list(output.keys())[0]].shape[0],
             probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
         )

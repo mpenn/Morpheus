@@ -129,7 +129,7 @@ class MultiMessage:
         Parameters
         ----------
         col_name : str
-            Column name in the dataframe.            
+            Column name in the dataframe.
 
         Returns
         -------
@@ -168,7 +168,6 @@ class MultiMessage:
             Column name in the dataframe.
         value : List
             Column values.
-            
 
         """
 
@@ -179,7 +178,7 @@ class MultiMessage:
 class InferenceMemory(MessageData):
     """
     This is a base container class for data that will be used for inference stages. This class is designed to
-    hold generic tensor data in cupy arrays. 
+    hold generic tensor data in cupy arrays.
 
     Parameters
     ----------
@@ -193,34 +192,6 @@ class InferenceMemory(MessageData):
     count: int
 
     inputs: typing.Dict[str, cp.ndarray] = dataclasses.field(default_factory=dict, init=False)
-
-
-class InitProp:
-    def __set_name__(self, owner, name):
-        self.name = name
-
-    def __get__(self, instance, owner):
-        if (instance is None):
-            return None
-
-        if (self.name not in instance.inputs):
-            raise AttributeError
-
-        return instance.inputs[self.name]
-
-    def __set__(self, instance, value):
-
-        if (instance is None):
-            return
-
-        instance.inputs[self.name] = value
-
-    def __delete__(self, instance):
-        if (instance is None):
-            return
-
-        del instance.inputs[self.name]
-
 
 class DataClassProp:
     def __init__(self,
@@ -267,7 +238,6 @@ class DataClassProp:
         del instance.inputs[self.name]
 
 
-# @staticmethod
 def get_input(instance, name: str):
     if (name not in instance.inputs):
         raise AttributeError
@@ -275,10 +245,9 @@ def get_input(instance, name: str):
     return instance.inputs[name]
 
 
-# @staticmethod
 def set_input(instance, name: str, value):
-    instance.inputs[name] = value
-
+    # Ensure that we have 2D array here (`ensure_2d` inserts the wrong axis)
+    instance.inputs[name] = value if value.ndim == 2 else cp.reshape(value, (value.shape[0], -1))
 
 @dataclasses.dataclass
 class InferenceMemoryNLP(InferenceMemory):
@@ -520,13 +489,35 @@ class MultiInferenceFILMessage(MultiInferenceMessage):
         return self.get_input("seq_ids")
 
 
+def get_output(instance: "ResponseMemory", name: str):
+    if (name not in instance.outputs):
+        raise AttributeError
+
+    return instance.outputs[name]
+
+
+def set_output(instance: "ResponseMemory", name: str, value):
+    # Ensure that we have 2D array here (`ensure_2d` inserts the wrong axis)
+    instance.outputs[name] = value if value.ndim == 2 else cp.reshape(value, (value.shape[0], -1))
+
+
 @dataclasses.dataclass
-class ResponseMemory:
+class ResponseMemory(MessageData):
     """
     Output memory block holding the results of inference.
     """
     count: int
-    probs: cp.ndarray
+
+    outputs: typing.Dict[str, cp.ndarray] = dataclasses.field(default_factory=dict, init=False)
+
+
+@dataclasses.dataclass
+class ResponseMemoryProbs(ResponseMemory):
+
+    probs: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+
+    def __post_init__(self, probs):
+        self.probs = probs
 
 
 @dataclasses.dataclass
@@ -550,7 +541,82 @@ class MultiResponseMessage(MultiMessage):
     count: int
 
     @property
-    def probs(self) -> cp.ndarray:
+    def outputs(self):
+        """
+        Get outputs stored in the ResponseMemory container.
+
+        Returns
+        -------
+        cp.ndarray
+            Inference outputs
+
+        """
+
+        return {key: self.get_output(key) for key in self.memory.outputs.keys()}
+
+    def __getattr__(self, name: str) -> typing.Any:
+
+        output_val = self.memory.outputs.get(name, None)
+
+        if (output_val is not None):
+            return output_val[self.offset:self.offset + self.count, :]
+
+        raise AttributeError
+
+    def get_output(self, name: str):
+        """
+        Get output stored in the ResponseMemory container.
+
+        Parameters
+        ----------
+        name : str
+            Output key name.
+
+        Returns
+        -------
+        cp.ndarray
+            Inference output
+
+        """
+
+        return self.memory.outputs[name][self.offset:self.offset + self.count, :]
+
+    # def get_slice(self, start, stop):
+    #     """
+    #     Returns sliced batches based on offsets supplied. Automatically calculates the correct `mess_offset`
+    #     and `mess_count`.
+
+    #     Parameters
+    #     ----------
+    #     start : int
+    #         Start offset address.
+    #     stop : int
+    #         Stop offset address.
+
+    #     Returns
+    #     -------
+    #     morpheus.messages.MultiResponseMessage
+    #         A new `MultiResponseMessage` with sliced offset and count.
+
+    #     """
+    #     mess_start = self.seq_ids[start, 0].item()
+    #     mess_stop = self.seq_ids[stop - 1, 0].item() + 1
+    #     return MultiResponseMessage(meta=self.meta,
+    #                                  mess_offset=mess_start,
+    #                                  mess_count=mess_stop - mess_start,
+    #                                  memory=self.memory,
+    #                                  offset=start,
+    #                                  count=stop - start)
+
+
+@dataclasses.dataclass
+class MultiResponseProbsMessage(MultiResponseMessage):
+    """
+    A stronger typed version of `MultiResponseMessage` that is used for inference workloads that return a probability array. Helps
+    ensure the proper outputs are set and eases debugging.
+    """
+    @property
+    def probs(self):
         """
         Probabilities of prediction
 
@@ -561,4 +627,4 @@ class MultiResponseMessage(MultiMessage):
 
         """
 
-        return self.memory.probs[self.offset:self.offset + self.count, :]
+        return self.get_output("probs")

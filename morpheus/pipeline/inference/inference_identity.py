@@ -8,7 +8,7 @@ from tornado.ioloop import IOLoop
 from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
 from morpheus.pipeline.messages import MultiInferenceMessage
-from morpheus.pipeline.messages import ResponseMemory
+from morpheus.pipeline.messages import ResponseMemoryProbs
 
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
@@ -26,7 +26,7 @@ class IdentityInference:
 
         def tmp(b: MultiInferenceMessage, f):
             
-            f.set_result(ResponseMemory(
+            f.set_result(ResponseMemoryProbs(
                 count=b.count,
                 probs=cp.zeros((b.count, 10), dtype=cp.float32),
             ))

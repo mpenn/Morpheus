@@ -626,7 +626,12 @@ class Pipeline():
 
         self._graph = networkx.DiGraph()
 
+        self._is_built = False
         self._is_started = False
+
+    @property
+    def is_built(self) -> bool:
+        return self._is_built
 
     @property
     def thread_pool(self):
@@ -703,6 +708,7 @@ class Pipeline():
         Once the pipeline has been constructed, this will start the pipeline by calling `Source.start` on the
         source object.
         """
+        assert not self._is_built, "Pipeline can only be built once!"
         assert len(self._sources) > 0, "Pipeline must have a source stage"
 
         logger.info("====Building Pipeline====")
@@ -734,6 +740,8 @@ class Pipeline():
             for p in s.input_ports:
                 p.link()
 
+        self._is_built = True
+
         logger.info("====Building Pipeline Complete!====")
 
     async def start(self):
@@ -759,7 +767,8 @@ class Pipeline():
 
     async def build_and_start(self):
 
-        self.build()
+        if (not self.is_built):
+            self.build()
 
         await self.start()
 
@@ -983,7 +992,7 @@ class LinearPipeline(Pipeline):
         """
 
         assert len(self._linear_stages) > 0, "A source must be set on a LinearPipeline before adding any stages"
-        assert typing_utils.issubtype(stage, SinglePortStage), "Only `SinglePortStage` stages are accepted in `add_stage()`"
+        assert isinstance(stage, SinglePortStage), "Only `SinglePortStage` stages are accepted in `add_stage()`"
 
         # Make an edge between the last node and this one
         self.add_edge(self._linear_stages[-1], stage)

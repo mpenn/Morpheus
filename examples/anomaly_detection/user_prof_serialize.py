@@ -7,10 +7,7 @@ from morpheus.pipeline.pipeline import StreamPair
 from morpheus.pipeline.output.serialize import SerializeStage
 
 class UserProfSerializeStage(SerializeStage):
-    
-    def __init__(self, c: Config, include: str = None, exclude: typing.List[str] = [r'^ID$', r'^ts_']):
-        super().__init__(c, include, exclude)
-    
+
     @staticmethod
     def add_predictions(x: MultiMessage):
         # Add predictions to final output
@@ -23,8 +20,8 @@ class UserProfSerializeStage(SerializeStage):
             df['probs'] = x.memory.probs.get()[:,0]
             
         return x
-        
-    async def _build(self, input_stream: StreamPair) -> StreamPair:
+
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         include_columns = None
 

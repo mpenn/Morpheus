@@ -16,7 +16,7 @@ from request import MultiInferenceMessage
 from request import MultiRequest
 from request import MultiResponse
 from request import ResponseData
-from request import ResponseMemory
+from request import ResponseMemoryProbs
 from torch.utils.dlpack import from_dlpack
 
 TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
@@ -336,7 +336,7 @@ def inference_worker(loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.
 
             stream.synchronize()
 
-            fut.set_result(ResponseMemory(
+            fut.set_result(ResponseMemoryProbs(
                 count=probs.shape[0],
                 probs=probs,
             ))

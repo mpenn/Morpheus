@@ -5,7 +5,7 @@ import os
 import json
 import multiprocessing
 from tqdm import tqdm
-
+import appdirs
 
 class TqdmLoggingHandler(logging.Handler):
     def __init__(self, level=logging.NOTSET):
@@ -70,8 +70,13 @@ def _configure_from_log_level(log_level: int):
     # At this point, any morpheus logger will propagate upstream to the morpheus root and then be handled by the queue handler
     morpheus_logger.addHandler(morpheus_queue_handler)
 
+    log_file = os.path.join(appdirs.user_log_dir(appauthor="NVIDIA", appname="morpheus"), "morpheus.log")
+
+    # Ensure the log directory exists
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
     # Now we build all of the handlers for the queue listener
-    file_handler = logging.handlers.RotatingFileHandler(filename=".tmp/morpheus.log", backupCount=5, maxBytes=1000000)
+    file_handler = logging.handlers.RotatingFileHandler(filename=log_file, backupCount=5, maxBytes=1000000)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - [%(levelname)s]: %(message)s {%(name)s, %(threadName)s}'))
 

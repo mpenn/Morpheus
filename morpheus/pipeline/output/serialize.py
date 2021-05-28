@@ -9,7 +9,7 @@ from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
-
+import copy
 
 class SerializeStage(SinglePortStage):
     """
@@ -28,8 +28,9 @@ class SerializeStage(SinglePortStage):
     def __init__(self, c: Config, include: typing.List[str] = None, exclude: typing.List[str] = [r'^ID$', r'^ts_'], as_cudf_df=False):
         super().__init__(c)
 
-        self._include_columns = include
-        self._exclude_columns = exclude
+        # Make copies of the arrays to prevent changes after the Regex is compiled
+        self._include_columns = copy.copy(include)
+        self._exclude_columns = copy.copy(exclude)
         self._as_cudf_df = as_cudf_df
 
     @property

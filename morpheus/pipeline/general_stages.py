@@ -10,7 +10,7 @@ from tqdm import tqdm
 from morpheus.config import Config
 from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MultiMessage
-from morpheus.pipeline.messages import MultiResponseMessage
+from morpheus.pipeline.messages import MultiResponseProbsMessage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
 from morpheus.utils.type_utils import greatest_ancestor
@@ -279,13 +279,13 @@ class AddClassificationsStage(SinglePortStage):
 
         Returns
         -------
-        typing.Tuple[MultiResponseMessage, ]
+        typing.Tuple[MultiResponseProbsMessage, ]
             Accepted input types
 
         """
-        return (MultiResponseMessage, )
+        return (MultiResponseProbsMessage, )
 
-    def _add_labels(self, x: MultiResponseMessage):
+    def _add_labels(self, x: MultiResponseProbsMessage):
         # Keys
         idx2label = {
             0: 'address',
@@ -316,7 +316,7 @@ class AddClassificationsStage(SinglePortStage):
         stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool)
 
         # Return input unchanged
-        return stream, MultiResponseMessage
+        return stream, MultiResponseProbsMessage
 
 
 class FilterDetectionsStage(SinglePortStage):
@@ -347,24 +347,24 @@ class FilterDetectionsStage(SinglePortStage):
 
         Returns
         -------
-        typing.Tuple[MultiResponseMessage, ]
+        typing.Tuple[MultiResponseProbsMessage, ]
             Accepted input types
 
         """
-        return (MultiResponseMessage, )
+        return (MultiResponseProbsMessage, )
 
-    def filter(self, x: MultiResponseMessage) -> typing.List[MultiResponseMessage]:
+    def filter(self, x: MultiResponseProbsMessage) -> typing.List[MultiResponseProbsMessage]:
         """
         This function uses a threshold value to filter the messages.
 
         Parameters
         ----------
-        x : morpheus.messages.MultiResponseMessage
-            MultiResponseMessage
+        x : morpheus.messages.MultiResponseProbsMessage
+            MultiResponseProbsMessage
 
         Returns
         -------
-        typing.List[MultiResponseMessage]
+        typing.List[MultiResponseProbsMessage]
             list of filtered messages
 
         """
@@ -385,7 +385,7 @@ class FilterDetectionsStage(SinglePortStage):
             mess_count = pair[1] - pair[0]
 
             output_list.append(
-                MultiResponseMessage(x.meta,
+                MultiResponseProbsMessage(x.meta,
                                      mess_offset=mess_offset,
                                      mess_count=mess_count,
                                      memory=x.memory,
@@ -401,13 +401,13 @@ class FilterDetectionsStage(SinglePortStage):
         # Reduce messages to only have detections
         stream = stream.async_map(self.filter, executor=self._pipeline.thread_pool)
 
-        # Convert list back to single MultiResponseMessage
+        # Convert list back to single MultiResponseProbsMessage
         stream = stream.flatten()
 
         # Filter out empty message groups
         stream = stream.filter(lambda x: x.count > 0)
 
-        return stream, MultiResponseMessage
+        return stream, MultiResponseProbsMessage
 
 class ZipStage(Stage):
     def __init__(self, c: Config):
