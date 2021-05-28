@@ -20,7 +20,7 @@ class SerializeStage(SinglePortStage):
     c : morpheus.config.Config
         Pipeline configuration instance
     include : list[str]
-        Attributes that are required send to downstream stage. 
+        Attributes that are required send to downstream stage.
     exclude : typing.List[str]
         Attributes that are not required send to downstream stage.
 
@@ -53,13 +53,14 @@ class SerializeStage(SinglePortStage):
     def convert_to_df(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
         """
         Converts dataframe to entries to JSON lines.
+
         Parameters
         ----------
         x : morpheus.pipeline.messages.MultiMessage
             MultiMessage instance that contains data.
         include_columns : typing.Pattern
             Columns that are required send to downstream stage.
-        exclude_columns : typing.List[typing.Pattern])
+        exclude_columns : typing.List[typing.Pattern]
             Columns that are not required send to downstream stage.
 
         """

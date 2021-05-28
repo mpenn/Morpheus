@@ -28,83 +28,30 @@
 
 # Multi-Input Multi-Output Morpheus Pipeline Example
 
-### Workflow Architecture
+## Pipeline Architecture
 
-For each input log, this workflow uses multiple Morpheus stages.
+This example shows how to create a Morpheus pipeline with multiple inputs/outputs and even circular dataflow between stages. The pipeline visualization is:
 
-![Test Image 1](img/workflow_architecture.jpg)
+![MIMO Pipeline](mimo_pipeline.png)
 
-### Generate Sample Data
-```
-$ python pcap_data_producer.py --help
-Usage: pcap_data_producer.py [OPTIONS]
+We can see that the `sample-3` stage forks its input into two paths. This is a custom stage that forks message based off whether they have the `data_len` field or not. If the field is missing, the message is routed to `add-data_len-6` which will calculate the `data_len` from the `data` field, reserialize the message, and feed it back into the `deserialize-2` stage.
 
-Options:
-  --count INTEGER  The number of logs that must be produced
-  --file TEXT      The path to the file where the created logs will be saved.
-  --help           Show this message and exit.
+This has the effect of ensuring the `data_len` field is available. To create messages where some have `data_len` missing, two datasets have been created: `with_data_len.json` and `without_data_len.json`. These datasets both contain 1000 lines and are very similar except for the missing field. Both datasets are loaded and piped into the `deserialze-2` stage where they will be interleaved.
 
-```
+Finally, we illustrate how to use multiple outputs by forking the `monitor-7` stage into two serialization stages. One serialization stage will exclude timestamp information (any field starting with `ts_*`) and the other will not exclude any fields. This results in two output files that only differ by the fields that were serialized.
 
-### FIL Backend Triton Inference Server
+## Setup
 
-##### Download source code
+This example does not require Triton Inference Server. No additional setup is required.
 
-```
-git clone https://github.com/wphicks/triton_fil_backend
-```
-##### Build Docker Image
+
+
+
+## MIMO Pipeline
+Use Morpheus to run the MIMO Pipeline with the following command:
 
 ```
-docker build -t triton_fil -f ops/Dockerfile .
+python ./examples/multi_in_multi_out/run.py
 ```
 
-##### Load PreTrained Models
-Place pre-trained anomaly detection model and its configuration settings to the directory that binds to the tritonserver model repository.
-
-```
-cp -R anomaly_detection_fil_model $PWD/models
-```
-
-##### Deploy Triton Inference Server
-
-```
-docker run --gpus=all --rm -p 8000:8000 -p 8001:8001 -p 8002:8002 -v $PWD/models:/models --name tritonserver  triton_fil tritonserver --model-repository=/models --exit-on-error=false --model-control-mode=poll --repository-poll-secs=30
-```
-
-##### Verify Model Deployment
-```
-docker logs -f --tail 20 tritonserver
-```
-```
-I0503 15:02:00.712347 1 model_repository_manager.cc:787] loading: anomaly_detection_fil_model:1
-I0503 15:02:00.813845 1 api.cu:86] TRITONBACKEND_ModelInitialize: anomaly_detection_fil_model (version 1)
-I0503 15:02:00.815445 1 api.cu:129] TRITONBACKEND_ModelInstanceInitialize: anomaly_detection_fil_model_0 (GPU device 0)
-I0503 15:02:00.877995 1 api.cu:129] TRITONBACKEND_ModelInstanceInitialize: anomaly_detection_fil_model_0 (GPU device 1)
-I0503 15:02:00.883463 1 api.cu:129] TRITONBACKEND_ModelInstanceInitialize: anomaly_detection_fil_model_0 (GPU device 0)
-I0503 15:02:00.890421 1 api.cu:129] TRITONBACKEND_ModelInstanceInitialize: anomaly_detection_fil_model_0 (GPU device 1)
-I0503 15:02:00.903511 1 model_repository_manager.cc:960] successfully loaded 'anomaly_detection_fil_model' version 1
-```
-
-
-### Anomaly Detection Pipeline
-Use Morpheus to run the Anomaly Detection Pipeline with the previously created input dataset.
-
-```
-python cli.py run \
-	--num_threads=8 \
-	--pipeline_batch_size=<Streamz uses the pipeline batch size to poll messages at regular intervals> \
-	--model_max_batch_size=<maximum number of logs send to triton-server in a single request> \
-	pipeline-fil \
-	--model_fea_length=<number of features used in the model> \
-	from-file \
-	--filename=<input file path> \
-	deserialize \
-	preprocess \
-	inf-triton \
-	--model_name=<model name in the triton-server model repository> \
-	--server_url=<triton-server grpc service url> \
-	serialize \
-	to-file \
-	--filename=<output file path>
-```
+This example does not have any configuration options.

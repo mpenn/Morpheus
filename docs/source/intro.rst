@@ -1,4 +1,6 @@
 Introduction
 ===============
 
-This page contains some info material link to `morpheus.pipeline.input.from_file.FileSourceStage`
+*TBD*
+
+Please see the repo's ``README.md`` for info on getting started.
