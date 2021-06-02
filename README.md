@@ -55,7 +55,7 @@ Pre-built Morpheus containers will be available from NGC in the future. In the m
 To manually build the container, run the following from the repo root:
 
 ```bash
-docker build -t morpheus -f ops/Dockerfile .
+docker build -t morpheus -f docker/Dockerfile .
 ```
 
 This will create the `morpheus:latest` docker image. The commands to run Morpheus in the container or locally are the same. See the [Running Morpheus](#running-morpheus) section for more info.
