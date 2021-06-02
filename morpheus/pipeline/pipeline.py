@@ -403,7 +403,7 @@ class SourceStage(StreamWrapper):
         cb : function
             func
         """
-        
+
         if (self._source_stream is not None):
             self._source_stream.add_on_start_callback(cb)
 
@@ -446,9 +446,23 @@ class SourceStage(StreamWrapper):
 
         source_pair = self._build_source()
 
-        assert isinstance(source_pair[0], Source), "Output of `_build_source` must be a `Source` object. Perform additional operators in the `_post_build` function"
+        curr_source = source_pair[0]
 
-        self._source_stream = source_pair[0]
+        while (curr_source is not None and not isinstance(curr_source, Source)):
+
+            try:
+                curr_source = curr_source.upstream
+            except ValueError:
+                logging.warning("Detected multiple upstream objects for source {}".format(curr_source))
+                curr_source = None
+
+        assert curr_source is not None, ("Output of `_build_source` must be downstream of a `streamz.Source` object. "
+                                         "Ensure the returned streams only have a single `upstream` object and can find a "
+                                         "`Source` object from by traversing the upstream object. If necessary, return a source "
+                                         "object in `_build_source` and perform additional operators in the `_post_build` "
+                                         "function")
+
+        self._source_stream = curr_source
 
         # Now setup the output ports
         self._output_ports[0]._out_stream_pair = source_pair
