@@ -6,11 +6,11 @@ from streamz.core import Stream
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
-from morpheus.pipeline import SourceStage
+from morpheus.pipeline.pipeline import SingleOutputSource
 from morpheus.pipeline.pipeline import StreamFuture
 
 
-class KafkaSourceStage(SourceStage):
+class KafkaSourceStage(SingleOutputSource):
     """
     Load messages from a Kafka cluster.
 
