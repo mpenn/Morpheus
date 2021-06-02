@@ -30,7 +30,6 @@ RUN /opt/conda/bin/conda create -n morpheus \
   cudatoolkit=${CUDA_VER} \
   cuml=${RAPIDS_VER} \
   cudf_kafka=${RAPIDS_VER} \
-  custreamz=${RAPIDS_VER} \
   python=${PYTHON_VER} \
   tqdm \
   && sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
@@ -50,7 +49,7 @@ COPY . ./
 RUN pip install .
 
 # Set the entrypoint to use the entrypoint.sh script which sets the conda env
-ENTRYPOINT [ "/usr/bin/tini", "--", "ops/entrypoint.sh" ]
+ENTRYPOINT [ "/usr/bin/tini", "--", "docker/entrypoint.sh" ]
 
 # Reset the shell back to normal
 SHELL ["/bin/bash", "-c"]

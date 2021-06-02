@@ -1,6 +1,5 @@
 ./.git*
-triton_models
-kafka-docker
+models
 .vscode
 __pycache__
 .ipynb_checkpoints
@@ -8,4 +7,4 @@ __pycache__
 .tmp
 
 # Ignore specific files
-ops/commands.sh
+docker/commands.sh
