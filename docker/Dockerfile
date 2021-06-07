@@ -21,6 +21,7 @@ RUN apt-get update \
 # Enables "source activate conda"
 SHELL ["/bin/bash", "-c"]
 
+# Conda dependencies
 RUN /opt/conda/bin/conda create -n morpheus \
   -c rapidsai \
   -c nvidia \
@@ -30,6 +31,7 @@ RUN /opt/conda/bin/conda create -n morpheus \
   cudatoolkit=${CUDA_VER} \
   cuml=${RAPIDS_VER} \
   cudf_kafka=${RAPIDS_VER} \
+  custreamz=${RAPIDS_VER} \
   python=${PYTHON_VER} \
   tqdm \
   && sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
@@ -38,14 +40,20 @@ RUN /opt/conda/bin/conda create -n morpheus \
 SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
 
 # Install nvidia-pyindex which is needed for tritonclient[all] but must be
-# installed before setup is run
-RUN pip install nvidia-pyindex
+# installed before setup is run. Also force reinstall of just streamz since it
+# gets installed as a dependency of custreamz. The arguments `--upgrade
+# --no-deps --force-reinstall` are required to force reinstalling just streamz
+# without all its dependencies
+RUN pip install nvidia-pyindex && \
+  pip install --upgrade --no-deps --force-reinstall git+https://github.com/mdemoret-nv/streamz.git@async#egg=streamz
 
+# All code will be under /workspace
 WORKDIR /workspace
 
+# Copy the source
 COPY . ./
 
-# Installs morpheus and put CLI on PATH
+# Build/Install morpheus and put CLI on PATH
 RUN pip install .
 
 # Set the entrypoint to use the entrypoint.sh script which sets the conda env
