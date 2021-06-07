@@ -388,7 +388,7 @@ def from_kafka(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
-    if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
+    if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"] == "auto"):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
 
     from morpheus.pipeline.input.from_kafka import KafkaSourceStage
@@ -678,7 +678,7 @@ def to_kafka(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
-    if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"]):
+    if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"] == "auto"):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
 
     from morpheus.pipeline.output.to_kafka import WriteToKafkaStage
