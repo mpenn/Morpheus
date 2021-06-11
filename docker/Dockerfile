@@ -9,6 +9,9 @@ ARG RAPIDS_CHANNEL=rapidsai-nightly
 ARG RAPIDS_VER=21.06
 ARG PYTHON_VER=3.8
 
+# The TensorRT Version must be the full version (i.e. 7.2.2.3) and match Triton EXACTLY
+ARG TENSORRT_VERSION=7.2.2.3
+
 # Capture argument used for FROM
 ARG CUDA_VER
 
@@ -27,8 +30,9 @@ WORKDIR /workspace
 COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environments/
 
 RUN /opt/conda/bin/conda env create -n morpheus \
-  --file docker/conda/environments/dev_cuda${CUDA_VER}.yml \
-  && sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
+  --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
+  conda clean -afy && \
+  sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
 
 # Enables all RUN commands to use the conda env
 SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
@@ -39,7 +43,7 @@ SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
 # --no-deps --force-reinstall` are required to force reinstalling just streamz
 # without all its dependencies
 RUN pip install nvidia-pyindex && \
-  pip install nvidia-tensorrt && \
+  pip install nvidia-tensorrt==${TENSORRT_VERSION} && \
   pip install --upgrade --no-deps --force-reinstall git+https://github.com/mdemoret-nv/streamz.git@async#egg=streamz
 
 
