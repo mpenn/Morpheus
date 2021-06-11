@@ -21,7 +21,6 @@ Feature = collections.namedtuple(  # pylint: disable=invalid-name
     "Feature", ["input_ids", "input_mask", "segment_ids"])
 
 
-### Model loading utils
 def create_vocab_table(vocabpath):
     """
     Create Vocabulary tables from the vocab.txt file

@@ -30,11 +30,13 @@ sys.path.append(os.path.normpath(os.path.join(SCRIPT_DIR,
 import gitutils  # noqa: E402
 
 FilesToCheck = [
-    re.compile(r"[.](sh|py)$"),
+    re.compile(r"[.](cmake|cpp|cu|cuh|h|hpp|sh|pxd|py|pyx)$"),
     re.compile(r"setup[.]cfg$"),
     re.compile(r"meta[.]yaml$")
 ]
-ExemptFiles = []
+ExemptFiles = [
+    re.compile(r"_version\.py"),
+]
 
 # this will break starting at year 10000, which is probably OK :)
 CheckSimple = re.compile(
@@ -188,7 +190,7 @@ def checkCopyright_main():
                            dest='exclude',
                            action="append",
                            required=False,
-                           default=["python/cuml/_thirdparty/"],
+                           default=["_version\\.py"],
                            help=("Exclude the paths specified (regexp). "
                                  "Can be specified multiple times."))
 

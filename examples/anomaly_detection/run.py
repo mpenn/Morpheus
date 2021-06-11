@@ -41,7 +41,8 @@ from user_prof_serialize import UserProfSerializeStage
     "--pipeline_batch_size",
     default=50000,
     type=click.IntRange(min=1),
-    help="Internal batch size for the pipeline. Can be much larger than the model batch size. Also used for Kafka consumers",
+    help=("Internal batch size for the pipeline. Can be much larger than the model batch size. "
+          "Also used for Kafka consumers"),
 )
 @click.option(
     "--model_max_batch_size",

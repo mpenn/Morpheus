@@ -26,8 +26,8 @@ T4 = typing.TypeVar('T4')
 
 # Use _DecoratorType as a type variable for decorators. See:
 # https://github.com/python/mypy/pull/8336/files#diff-eb668b35b7c0c4f88822160f3ca4c111f444c88a38a3b9df9bb8427131538f9cR260
-_DecoratorType = typing.TypeVar("_DecoratorType",
-                                bound=typing.Callable[..., typing.Any])
+_DecoratorType = typing.TypeVar("_DecoratorType", bound=typing.Callable[..., typing.Any])
+
 
 def greatest_ancestor(*cls_list):
     mros = [list(inspect.getmro(cls)) for cls in cls_list]
@@ -42,17 +42,22 @@ def greatest_ancestor(*cls_list):
                 mros.remove(mro)
     return None  # or raise, if that's more appropriate
 
+
 @typing.overload
 def unpack_union(cls_1: typing.Type[T]) -> typing.Union[typing.Type[T]]:
     ...
+
 
 @typing.overload
 def unpack_union(cls_1: typing.Type[T1], cls_2: typing.Type[T2]) -> typing.Union[typing.Type[T1], typing.Type[T2]]:
     ...
 
+
 @typing.overload
-def unpack_union(cls_1: typing.Type[T1], cls_2: typing.Type[T2], cls_3: typing.Type[T3]) -> typing.Union[typing.Type[T1], typing.Type[T2], typing.Type[T3]]:
+def unpack_union(cls_1: typing.Type[T1], cls_2: typing.Type[T2],
+                 cls_3: typing.Type[T3]) -> typing.Union[typing.Type[T1], typing.Type[T2], typing.Type[T3]]:
     ...
+
 
 def unpack_union(*cls_list: typing.Type) -> typing.Union:
 
@@ -76,13 +81,17 @@ def unpack_union(*cls_list: typing.Type) -> typing.Union:
 def unpack_tuple(cls_1: typing.Type[T]) -> typing.Tuple[typing.Type[T]]:
     ...
 
+
 @typing.overload
 def unpack_tuple(cls_1: typing.Type[T1], cls_2: typing.Type[T2]) -> typing.Tuple[typing.Type[T1], typing.Type[T2]]:
     ...
 
+
 @typing.overload
-def unpack_tuple(cls_1: typing.Type[T1], cls_2: typing.Type[T2], cls_3: typing.Type[T3]) -> typing.Tuple[typing.Type[T1], typing.Type[T2], typing.Type[T3]]:
+def unpack_tuple(cls_1: typing.Type[T1], cls_2: typing.Type[T2],
+                 cls_3: typing.Type[T3]) -> typing.Tuple[typing.Type[T1], typing.Type[T2], typing.Type[T3]]:
     ...
+
 
 def unpack_tuple(*cls_list: typing.Type) -> typing.Tuple:
 
@@ -113,9 +122,7 @@ def pretty_print_type_name(t: typing.Type) -> str:
     return t.__module__.split(".")[0] + "." + t.__name__
 
 
-def mirror_args(
-    wrapped: _DecoratorType,
-    assigned=('__doc__', '__annotations__'),
-    updated=functools.WRAPPER_UPDATES
-) -> typing.Callable[[_DecoratorType], _DecoratorType]:
+def mirror_args(wrapped: _DecoratorType,
+                assigned=('__doc__', '__annotations__'),
+                updated=functools.WRAPPER_UPDATES) -> typing.Callable[[_DecoratorType], _DecoratorType]:
     return functools.wraps(wrapped=wrapped, assigned=assigned, updated=updated)

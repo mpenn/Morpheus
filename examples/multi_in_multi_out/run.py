@@ -36,6 +36,7 @@ from morpheus.utils.logging import configure_logging
 
 logger = logging.getLogger(__name__)
 
+
 class AddDataLenStage(SinglePortStage):
     def __init__(self, c: Config):
         super().__init__(c)
@@ -70,6 +71,7 @@ class AddDataLenStage(SinglePortStage):
 
         return stream, out_type
 
+
 def run():
 
     # Find our current example folder
@@ -79,7 +81,7 @@ def run():
     c = Config.get()
 
     c.log_level = logging.DEBUG
-    c.debug = True # Allows timestamps to be added for certain stages
+    c.debug = True  # Allows timestamps to be added for certain stages
 
     configure_logging(c.log_level, c.log_config_file)
 
@@ -89,13 +91,11 @@ def run():
     file_source1 = FileSourceStage(c, os.path.join(ex_root_dir, "data", "with_data_len.json"), iterative=True)
     file_source2 = FileSourceStage(c, os.path.join(ex_root_dir, "data", "without_data_len.json"), iterative=True)
 
-
     deser_stage = DeserializeStage(c)
 
     # pipeline.add_edge(merge_stage, deser_stage)
     pipeline.add_edge(file_source1, deser_stage)
     pipeline.add_edge(file_source2, deser_stage)
-
 
     def has_data_len(x: MultiMessage) -> int:
         return 0 if "data_len" in x.meta.df else 1

@@ -58,10 +58,7 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
 
     @staticmethod
     def pre_process_batch(x: MultiMessage, fea_len: int, fea_cols: typing.List[str]) -> MultiInferenceFILMessage:
-        raw_mess_count = x.meta.df.count
-        x.meta.df["flags_bin"] = x.meta.df["flags"].apply(
-            lambda x: format(int(x), "05b")
-        )
+        x.meta.df["flags_bin"] = x.meta.df["flags"].apply(lambda x: format(int(x), "05b"))
         x.meta.df = cudf.from_pandas(x.meta.df)
         flag_split_df = x.meta.df["flags_bin"].str.findall("[0-1]")
         rename_cols_dct = {0: "ack", 1: "psh", 2: "rst", 3: "syn", 4: "fin"}
@@ -90,15 +87,8 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
         x.meta.df["rollup"] = x.meta.df["rollup"].dt.strftime("%Y-%m-%d %H:%M")
 
         # creating flow_id "src_ip:src_port=dst_ip:dst_port"
-        x.meta.df["flow_id"] = (
-            x.meta.df["src_ip"]
-            + ":"
-            + x.meta.df["src_port"].astype("str")
-            + "="
-            + x.meta.df["dest_ip"]
-            + ":"
-            + x.meta.df["dest_port"].astype("str")
-        )
+        x.meta.df["flow_id"] = (x.meta.df["src_ip"] + ":" + x.meta.df["src_port"].astype("str") + "="
+                                + x.meta.df["dest_ip"] + ":" + x.meta.df["dest_port"].astype("str"))
 
         agg_dict = {
             "ack": "sum",
@@ -123,18 +113,11 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
         # bpp - Bytes per packet per flow. In the absence of data on number-of-packets
         # and the assumption that the flow and packet are the same, bpp=bytes/packets
         x.meta.df["bpp"] = x.meta.df["data_len"] / x.meta.df["ppm"]
-        x.meta.df["all"] = (
-            x.meta.df["ack"]
-            + x.meta.df["psh"]
-            + x.meta.df["rst"]
-            + x.meta.df["syn"]
-            + x.meta.df["fin"]
-        )
+        x.meta.df["all"] = (x.meta.df["ack"] + x.meta.df["psh"] + x.meta.df["rst"] + x.meta.df["syn"]
+                            + x.meta.df["fin"])
         # ackpush/all - Number of flows with ACK+PUSH flags to all flows
-        x.meta.df["ackpush/all"] = (x.meta.df["ack"] + x.meta.df["psh"]) / x.meta.df[
-            "all"
-        ]
-        
+        x.meta.df["ackpush/all"] = (x.meta.df["ack"] + x.meta.df["psh"]) / x.meta.df["all"]
+
         # rst/all - Number of flows with RST flag to all flows
         # syn/all - Number of flows with SYN flag to all flows
         # fin/all - Number of flows with FIN flag to all flows

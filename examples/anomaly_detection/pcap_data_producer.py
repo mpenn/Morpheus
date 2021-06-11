@@ -26,8 +26,8 @@ faker = Faker()
 
 
 def generate_random_digits(n):
-    range_start = 10 ** (n - 1)
-    range_end = (10 ** n) - 1
+    range_start = 10**(n - 1)
+    range_end = (10**n) - 1
     return randint(range_start, range_end)
 
 
@@ -36,9 +36,10 @@ def generate_json():
     row_dict["timestamp"] = str(faker.unix_time() * 1000000)
     row_dict["host_ip"] = faker.ipv4()
     row_dict["data_len"] = str(generate_random_digits(2))
-    data = "GET /latest/meta-data/network/interfaces/macs/ HTTP/1.1\r\nHost: {}\r\nUser-Agent: aws-sdk-go/1.16.26 (go1.13.15; linux; amd64)\r\nAccept-Encoding: gzip\r\n\r\n".format(
-        row_dict["host_ip"]
-    )
+    data = ("GET /latest/meta-data/network/interfaces/macs/ HTTP/1.1\r\n"
+            "Host: {}\r\n"
+            "User-Agent: aws-sdk-go/1.16.26 (go1.13.15; linux; amd64)\r\n"
+            "Accept-Encoding: gzip\r\n\r\n").format(row_dict["host_ip"])
     row_dict["data"] = data
     row_dict["src_mac"] = faker.mac_address()
     row_dict["dest_mac"] = faker.mac_address()

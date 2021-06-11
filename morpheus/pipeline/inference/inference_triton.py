@@ -169,10 +169,10 @@ class ResourcePool:
 
 class ShmWrapper:
     """
-    This class is a wrapper around a CUDA shared memory object shared between this process and a Triton server
-    instance. Since the Triton server only accepts numpy arrays as inputs, we can use this special class to
-    pass memory references of inputs on the device to the server without having to go to the host eliminating
-    serialization and network overhead.
+    This class is a wrapper around a CUDA shared memory object shared between this process and a Triton server instance.
+    Since the Triton server only accepts numpy arrays as inputs, we can use this special class to pass memory references
+    of inputs on the device to the server without having to go to the host eliminating serialization and network
+    overhead.
 
     Parameters
     ----------
@@ -253,7 +253,8 @@ class ShmWrapper:
 
     def build_input(self, name: str, data: cp.ndarray, force_convert_inputs: bool) -> tritonclient.InferInput:
         """
-        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`. Utilizes the config option passed in the constructor to determine the shape/size/type.
+        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`.
+        Utilizes the config option passed in the constructor to determine the shape/size/type.
 
         Parameters
         ----------
@@ -319,7 +320,7 @@ class TritonInference:
         Name of the model specifies which model can handle the inference requests that are sent to Triton
         inference server.
     server_url : str
-        Triton server gRPC URL including the port. 
+        Triton server gRPC URL including the port.
     inout_mapping : typing.Dict[str, str]
         Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
         Morpheus names do not match the model
@@ -368,9 +369,11 @@ class TritonInference:
         self._triton_client = tritonclient.InferenceServerClient(url=self._server_url, verbose=False)
 
         try:
-            assert self._triton_client.is_server_live() and self._triton_client.is_server_ready(), "Server is not in ready state"
+            assert self._triton_client.is_server_live() and self._triton_client.is_server_ready(), \
+                "Server is not in ready state"
 
-            assert self._triton_client.is_model_ready(self._model_name), f"Triton model {self._model_name} is not ready"
+            assert self._triton_client.is_model_ready(self._model_name), \
+                f"Triton model {self._model_name} is not ready"
 
             # To make sure no shared memory regions are registered with the server.
             self._triton_client.unregister_system_shared_memory()
@@ -389,15 +392,16 @@ class TritonInference:
 
                 # If the model is more, thats fine. Gen warning
                 if (model_config["max_batch_size"] > self._max_batch_size):
-                    warnings.warn(
-                        "Model max batch size ({}) is more than configured max batch size ({}). May result in sub optimal performance"
-                        .format(model_config["max_batch_size"], self._max_batch_size))
+                    warnings.warn(("Model max batch size ({}) is more than configured max batch size ({}). "
+                                   "May result in sub optimal performance").format(model_config["max_batch_size"],
+                                                                                   self._max_batch_size))
 
                 # If the model is less, raise error. Cant send more to Triton than the max batch size
                 if (model_config["max_batch_size"] < self._max_batch_size):
                     raise RuntimeError(
-                        "Model max batch size ({}) is less than configured max batch size ({}). Reduce max batch size to be less than or equal to model max batch size."
-                        .format(model_config["max_batch_size"], self._max_batch_size))
+                        ("Model max batch size ({}) is less than configured max batch size ({}). "
+                         "Reduce max batch size to be less than or equal to model max batch size.").format(
+                             model_config["max_batch_size"], self._max_batch_size))
 
             shm_config = {}
 
@@ -536,7 +540,8 @@ class TritonInference:
 
 class TritonInferenceNLP(TritonInference):
     """
-    This class extends TritonInference to deal with scenario-specific NLP models inference requests like building response.
+    This class extends TritonInference to deal with scenario-specific NLP models inference requests like building
+    response.
 
     Parameters
     ----------
@@ -546,7 +551,7 @@ class TritonInferenceNLP(TritonInference):
         Name of the model specifies which model can handle the inference requests that are sent to Triton
         inference server.
     server_url : str
-        Triton server gRPC URL including the port. 
+        Triton server gRPC URL including the port.
     inout_mapping : typing.Dict[str, str]
         Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
         Morpheus names do not match the model
@@ -599,7 +604,7 @@ class TritonInferenceFIL(TritonInference):
         Name of the model specifies which model can handle the inference requests that are sent to Triton
         inference server.
     server_url : str
-        Triton server gRPC URL including the port. 
+        Triton server gRPC URL including the port.
     inout_mapping : typing.Dict[str, str]
         Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
         Morpheus names do not match the model
@@ -638,7 +643,8 @@ class TritonInferenceStage(InferenceStage):
     c : morpheus.config.Config
         Pipeline configuration instance
     model_name : str
-        Name of the model specifies which model can handle the inference requests that are sent to Triton inference server.
+        Name of the model specifies which model can handle the inference requests that are sent to Triton inference
+        server.
     server_url : str
         Triton server URL
 

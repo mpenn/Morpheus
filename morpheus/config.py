@@ -11,19 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """
 Contains configuration objects used to run pipeline and utilities.
 """
 
 import dataclasses
 import json
-import typing
 import logging
-
+import typing
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
 
 def auto_determine_bootstrap():
     """Auto determine bootstrap servers for kafka cluster."""
@@ -50,10 +49,12 @@ def auto_determine_bootstrap():
 
     return bootstrap_servers
 
+
 @dataclasses.dataclass
 class ConfigBase():
     """This is the base class for pipeline configuration."""
     pass
+
 
 @dataclasses.dataclass
 class ConfigOnnxToTRT(ConfigBase):
@@ -80,6 +81,7 @@ class ConfigOnnxToTRT(ConfigBase):
     seq_length: int = None
     max_workspace_size: int = 16000  # In MB
 
+
 @dataclasses.dataclass
 class ConfigDask(ConfigBase):
     """
@@ -93,11 +95,13 @@ class ConfigDask(ConfigBase):
     """
     use_processes: bool = False
 
+
 class PipelineModes(str, Enum):
     """The type of usecases that can be executed by the pipeline is determined by the enum."""
     Other = "Other"
     NLP = "NLP"
     FIL = "FIL"
+
 
 @dataclasses.dataclass
 class Config(ConfigBase):
@@ -140,7 +144,7 @@ class Config(ConfigBase):
     pipeline_batch_size: int = 256
     num_threads: int = 1
     model_max_batch_size: int = 8
-    
+
     use_dask: bool = False
 
     dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
@@ -188,5 +192,3 @@ class Config(ConfigBase):
 
         # Using JSON serializer for now since its easier to read. pprint is more compact
         return json.dumps(dataclasses.asdict(self), indent=2, sort_keys=True)
-
-

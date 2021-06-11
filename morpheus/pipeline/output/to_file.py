@@ -18,7 +18,8 @@ import typing
 import typing_utils
 
 from morpheus.config import Config
-from morpheus.pipeline.pipeline import SinglePortStage, StreamFuture
+from morpheus.pipeline.pipeline import SinglePortStage
+from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
 
 

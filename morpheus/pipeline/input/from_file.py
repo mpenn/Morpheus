@@ -16,7 +16,6 @@ import logging
 import typing
 from functools import reduce
 
-import cudf
 import numpy as np
 import pandas as pd
 import typing_utils
@@ -25,6 +24,8 @@ from streamz.core import RefCounter
 from streamz.core import Stream
 from tornado import gen
 from tornado.ioloop import IOLoop
+
+import cudf
 
 from morpheus.config import Config
 from morpheus.pipeline.pipeline import SingleOutputSource
@@ -116,8 +117,8 @@ class FileSourceStage(SingleOutputSource):
         self._input_count = None
         self._use_dask = c.use_dask
 
-        # Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode is good for
-        # interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
+        # Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode
+        # is good for interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
         self._iterative = iterative if iterative is not None else not c.use_dask
 
     @property
@@ -135,7 +136,9 @@ class FileSourceStage(SingleOutputSource):
 
         df = df_onread_cleanup(df)
 
-        out_stream: Source = Stream.from_iterable_done(self._generate_frames(df), asynchronous=True, loop=IOLoop.current())
+        out_stream: Source = Stream.from_iterable_done(self._generate_frames(df),
+                                                       asynchronous=True,
+                                                       loop=IOLoop.current())
         out_type = cudf.DataFrame if self._iterative else typing.List[cudf.DataFrame]
 
         return out_stream, out_type
@@ -145,7 +148,8 @@ class FileSourceStage(SingleOutputSource):
         out_stream = out_pair[0]
         out_type = out_pair[1]
 
-        # Convert our list of dataframes into the desired type. Either scatter than flatten or just flatten if not using dask
+        # Convert our list of dataframes into the desired type. Either scatter than flatten or just flatten if not using
+        # dask
         if (self._use_dask):
             if (typing_utils.issubtype(out_type, typing.List)):
                 out_stream = out_stream.scatter_batch().flatten()

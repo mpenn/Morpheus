@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import json
-import time
 import cudf
 import numba as nb
 from cuml import ForestInference
@@ -29,7 +28,6 @@ class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
     """
-
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
         Implementing `initialize` function is optional. This function allows
@@ -48,21 +46,30 @@ class TritonPythonModel:
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args['model_config'])
-        
+
         preds_config = pb_utils.get_output_config_by_name(model_config, "preds")
-        
+
         self.preds_config = pb_utils.triton_string_to_numpy(preds_config['data_type'])
-        
+
         model_filepath = '/models/anomaly_detection_fil_model/1/xgboost.model'
-        
-        self.column_names_dct = {0:'ack',1:'psh',2:'rst',
-                             3:'syn',4:'fin',5:'ppm',
-                             6:'data_len',7:'bpp',
-                             8:'all',9:'ackpush/all',
-                             10:'rst/all',11:'syn/all',12:'fin/all'}
-        
+
+        self.column_names_dct = {
+            0: 'ack',
+            1: 'psh',
+            2: 'rst',
+            3: 'syn',
+            4: 'fin',
+            5: 'ppm',
+            6: 'data_len',
+            7: 'bpp',
+            8: 'all',
+            9: 'ackpush/all',
+            10: 'rst/all',
+            11: 'syn/all',
+            12: 'fin/all'
+        }
+
         self.model = ForestInference.load(model_filepath, output_class=True)
-        
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -83,23 +90,23 @@ class TritonPythonModel:
           A list of pb_utils.InferenceResponse. The length of this list must
           be the same as `requests`
         """
-        
+
         responses = []
 
         # Every Python backend must iterate over everyone of the requests
         # and create a pb_utils.InferenceResponse for each of them.
-        for request in requests: 
+        for request in requests:
             # Get input data
             input_tensor = pb_utils.get_input_tensor_by_name(request, "input__0")
             input_np = input_tensor.as_numpy()
             src = nb.cuda.to_device(input_np)
             df = cudf.DataFrame(src)
-            df = df.rename(columns=self.column_names_dct)                    
+            df = df.rename(columns=self.column_names_dct)
             # predict model
             pred_series = self.model.predict(df)
             preds_np = pred_series.to_array()
             preds_tensor = pb_utils.Tensor("preds", preds_np.astype(self.preds_config))
-            
+
             inference_response = pb_utils.InferenceResponse(output_tensors=[preds_tensor])
             responses.append(inference_response)
         return responses

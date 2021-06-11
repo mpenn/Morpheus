@@ -207,6 +207,7 @@ class InferenceMemory(MessageData):
 
     inputs: typing.Dict[str, cp.ndarray] = dataclasses.field(default_factory=dict, init=False)
 
+
 class DataClassProp:
     def __init__(self,
                  fget: typing.Callable[[typing.Any, str], typing.Any] = None,
@@ -262,6 +263,7 @@ def get_input(instance, name: str):
 def set_input(instance, name: str, value):
     # Ensure that we have 2D array here (`ensure_2d` inserts the wrong axis)
     instance.inputs[name] = value if value.ndim == 2 else cp.reshape(value, (value.shape[0], -1))
+
 
 @dataclasses.dataclass
 class InferenceMemoryNLP(InferenceMemory):
@@ -626,8 +628,8 @@ class MultiResponseMessage(MultiMessage):
 @dataclasses.dataclass
 class MultiResponseProbsMessage(MultiResponseMessage):
     """
-    A stronger typed version of `MultiResponseMessage` that is used for inference workloads that return a probability array. Helps
-    ensure the proper outputs are set and eases debugging.
+    A stronger typed version of `MultiResponseMessage` that is used for inference workloads that return a probability
+    array. Helps ensure the proper outputs are set and eases debugging.
     """
     @property
     def probs(self):

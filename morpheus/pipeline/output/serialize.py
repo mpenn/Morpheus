@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import json
 import re
 import typing
@@ -19,11 +20,10 @@ import typing
 import cudf
 
 from morpheus.config import Config
-from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
-import copy
+
 
 class SerializeStage(SinglePortStage):
     """
@@ -39,7 +39,11 @@ class SerializeStage(SinglePortStage):
         Attributes that are not required send to downstream stage.
 
     """
-    def __init__(self, c: Config, include: typing.List[str] = None, exclude: typing.List[str] = [r'^ID$', r'^ts_'], as_cudf_df=False):
+    def __init__(self,
+                 c: Config,
+                 include: typing.List[str] = None,
+                 exclude: typing.List[str] = [r'^ID$', r'^ts_'],
+                 as_cudf_df=False):
         super().__init__(c)
 
         # Make copies of the arrays to prevent changes after the Regex is compiled
@@ -96,7 +100,7 @@ class SerializeStage(SinglePortStage):
         def double_serialize(y: str):
             try:
                 return json.dumps(json.dumps(json.loads(y)))
-            except:
+            except:  # noqa: E722
                 return y
 
         # Special processing for the data column (need to double serialize to match input)
@@ -133,10 +137,11 @@ class SerializeStage(SinglePortStage):
         exclude_columns = [re.compile(x) for x in self._exclude_columns]
 
         # Convert the messages to rows of strings
-        stream = input_stream[0].async_map(SerializeStage.convert_to_cudf if self._as_cudf_df else SerializeStage.convert_to_json,
-                                           executor=self._pipeline.thread_pool,
-                                           include_columns=include_columns,
-                                           exclude_columns=exclude_columns)
+        stream = input_stream[0].async_map(
+            SerializeStage.convert_to_cudf if self._as_cudf_df else SerializeStage.convert_to_json,
+            executor=self._pipeline.thread_pool,
+            include_columns=include_columns,
+            exclude_columns=exclude_columns)
 
         # Return input unchanged
         return stream, cudf.DataFrame if self._as_cudf_df else typing.List[str]

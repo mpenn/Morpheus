@@ -19,10 +19,11 @@ import typing
 from abc import abstractmethod
 from functools import partial
 
-import cudf
 import cupy as cp
 import streamz
 import typing_utils
+
+import cudf
 from cudf.core.subword_tokenizer import SubwordTokenizer
 
 from morpheus.config import Config
@@ -99,7 +100,7 @@ class DeserializeStage(MultiMessageStage):
         def deserialize_data(y: str):
             try:
                 return str(json.loads(y))
-            except:
+            except:  # noqa: E722
                 return y
 
         if ("data" in x_pd):
@@ -234,11 +235,17 @@ class PreprocessNLPStage(PreprocessBaseStage):
         x : morpheus.messages.MultiMessage
             Input rows recieved from Deserialized stage.
         seq_len : int
-            Limits the length of the sequence returned. If tokenized string is shorter than max_length, output will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False, there will be multiple returned sequences containing the overflowing token-ids.
+            Limits the length of the sequence returned. If tokenized string is shorter than max_length, output will be
+            padded with 0s. If the tokenized string is longer than max_length and do_truncate == False, there will be
+            multiple returned sequences containing the overflowing token-ids.
         stride : int
-            If do_truncate == False and the tokenized string is larger than max_length, the sequences containing the overflowing token-ids can contain duplicated token-ids from the main sequence. If max_length is equal to stride there are no duplicated-id tokens. If stride is 80% of max_length, 20% of the first sequence will be repeated on the second sequence and so on until the entire sentence is encoded.
+            If do_truncate == False and the tokenized string is larger than max_length, the sequences containing the
+            overflowing token-ids can contain duplicated token-ids from the main sequence. If max_length is equal to
+            stride there are no duplicated-id tokens. If stride is 80% of max_length, 20% of the first sequence will be
+            repeated on the second sequence and so on until the entire sentence is encoded.
         vocab_hash_file : str
-            Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function.  
+            Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary
+            using the cudf.utils.hash_vocab_utils.hash_vocab function.
 
         Returns
         -------
@@ -330,7 +337,8 @@ class PreprocessFILStage(PreprocessBaseStage):
             "nvidia_smi_log.gpu.max_customer_boost_clocks.graphics_clock",
         ]
 
-        assert self._fea_length == len(self.features), f"Number of features in preprocessing {len(self.features)}, does not match configuration {self._fea_length}"
+        assert self._fea_length == len(self.features), \
+            f"Number of features in preprocessing {len(self.features)}, does not match configuration {self._fea_length}"
 
     @property
     def name(self) -> str:
