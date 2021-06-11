@@ -1,12 +1,12 @@
 ARG FROM_IMAGE=gpuci/miniconda-cuda
-ARG CUDA_VER=11.0
+ARG CUDA_VER=11.2
 ARG LINUX_VER=ubuntu18.04
 FROM ${FROM_IMAGE}:${CUDA_VER}-runtime-${LINUX_VER} AS base
 
 # Required arguments
 ARG IMAGE_TYPE=base
 ARG RAPIDS_CHANNEL=rapidsai-nightly
-ARG RAPIDS_VER=0.19
+ARG RAPIDS_VER=21.06
 ARG PYTHON_VER=3.8
 
 # Capture argument used for FROM
@@ -21,19 +21,13 @@ RUN apt-get update \
 # Enables "source activate conda"
 SHELL ["/bin/bash", "-c"]
 
-# Conda dependencies
-RUN /opt/conda/bin/conda create -n morpheus \
-  -c rapidsai \
-  -c nvidia \
-  -c conda-forge \
-  -c defaults \
-  pip \
-  cudatoolkit=${CUDA_VER} \
-  cuml=${RAPIDS_VER} \
-  cudf_kafka=${RAPIDS_VER} \
-  custreamz=${RAPIDS_VER} \
-  python=${PYTHON_VER} \
-  tqdm \
+# All code will be under /workspace
+WORKDIR /workspace
+
+COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environments/
+
+RUN /opt/conda/bin/conda env create -n morpheus \
+  --file docker/conda/environments/dev_cuda${CUDA_VER}.yml \
   && sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
 
 # Enables all RUN commands to use the conda env
@@ -45,10 +39,9 @@ SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
 # --no-deps --force-reinstall` are required to force reinstalling just streamz
 # without all its dependencies
 RUN pip install nvidia-pyindex && \
+  pip install nvidia-tensorrt && \
   pip install --upgrade --no-deps --force-reinstall git+https://github.com/mdemoret-nv/streamz.git@async#egg=streamz
 
-# All code will be under /workspace
-WORKDIR /workspace
 
 # Copy the source
 COPY . ./

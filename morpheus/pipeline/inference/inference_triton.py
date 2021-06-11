@@ -21,6 +21,7 @@ import threading
 import typing
 import warnings
 from abc import abstractmethod
+from functools import lru_cache
 from functools import partial
 
 import cupy as cp
@@ -33,11 +34,32 @@ from tritonclient.utils import triton_to_np_dtype
 from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.pipeline.inference.inference_stage import InferenceStage
-from morpheus.pipeline.messages import MultiInferenceMessage, ResponseMemoryProbs
+from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import ResponseMemory
+from morpheus.pipeline.messages import ResponseMemoryProbs
 
 logger = logging.getLogger(__name__)
 
+
+@lru_cache(None)
+def _notify_dtype_once(model_name: str, input_name: str, triton_dtype: cp.dtype, data_dtype: cp.dtype):
+
+    can_convert = cp.can_cast(data_dtype, triton_dtype, casting="safe")
+
+    msg = "Unexpected dtype for Triton input. "
+
+    if (can_convert):
+        msg += "Automatically converting dtype since no data loss will occur. "
+    else:
+        msg += "Cannot automatically convert dtype due to loss of data. "
+
+    msg += "Model: '%s', Input Name: '%s', Expected dtype: %s, Actual dtype: %s"
+    msg_args = (model_name, input_name, str(triton_dtype), str(data_dtype))
+
+    if (can_convert):
+        logger.warning(msg, *msg_args)
+    else:
+        raise RuntimeError(msg % msg_args)
 
 
 @dataclasses.dataclass()
@@ -166,7 +188,10 @@ class ShmWrapper:
     """
     total_count = 0
 
-    def __init__(self, client: tritonclient.InferenceServerClient, model_name: str, config: typing.Dict[str, TritonInOut]):
+    def __init__(self,
+                 client: tritonclient.InferenceServerClient,
+                 model_name: str,
+                 config: typing.Dict[str, TritonInOut]):
         self._config = config.copy()
 
         self._total_bytes = 0
@@ -175,6 +200,7 @@ class ShmWrapper:
             self._config[key].offset = self._total_bytes
             self._total_bytes += self._config[key].bytes
 
+        self.model_name = model_name
         self.region_name = model_name + "_{}".format(ShmWrapper.total_count)
         ShmWrapper.total_count += 1
 
@@ -225,7 +251,7 @@ class ShmWrapper:
         """
         return self._config[name].offset
 
-    def build_input(self, name: str, data: cp.ndarray) -> tritonclient.InferInput:
+    def build_input(self, name: str, data: cp.ndarray, force_convert_inputs: bool) -> tritonclient.InferInput:
         """
         This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`. Utilizes the config option passed in the constructor to determine the shape/size/type.
 
@@ -237,6 +263,17 @@ class ShmWrapper:
             Inference input data.
 
         """
+
+        expected_dtype = cp.dtype(triton_to_np_dtype(self._config[name].datatype))
+
+        if (expected_dtype != data.dtype):
+
+            # See if we can auto convert without loss if force_convert_inputs is False
+            if (not force_convert_inputs):
+                _notify_dtype_once(self.model_name, name, expected_dtype, data.dtype)
+
+            data = data.astype(expected_dtype)
+
         # Create the input
         triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
 
@@ -288,7 +325,12 @@ class TritonInference:
         Morpheus names do not match the model
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
+    def __init__(self,
+                 c: Config,
+                 model_name: str,
+                 server_url: str,
+                 force_convert_inputs: bool,
+                 inout_mapping: typing.Dict[str, str] = None):
 
         self._model_name = model_name
         self._server_url = server_url
@@ -298,6 +340,7 @@ class TritonInference:
 
         self._max_batch_size = c.model_max_batch_size
         self._fea_length = c.feature_length
+        self._force_convert_inputs = force_convert_inputs
 
         # Whether or not the returned value needs a logits calc for the response
         self._needs_logits = c.mode == PipelineModes.NLP
@@ -375,7 +418,11 @@ class TritonInference:
 
                 mapped_name = x["name"] if x["name"] not in self._inout_mapping else self._inout_mapping[x["name"]]
 
-                return TritonInOut(name=x["name"], bytes=b, datatype=x["datatype"], shape=shape, mapped_name=mapped_name)
+                return TritonInOut(name=x["name"],
+                                   bytes=b,
+                                   datatype=x["datatype"],
+                                   shape=shape,
+                                   mapped_name=mapped_name)
 
             for x in model_meta["inputs"]:
 
@@ -397,7 +444,7 @@ class TritonInference:
 
         except InferenceServerException as ex:
             logger.exception("Exception occurred while coordinating with Triton. Exception message: \n{}\n".format(ex),
-                             exc_info=True)
+                             exc_info=ex)
             raise ex
 
     @abstractmethod
@@ -443,7 +490,9 @@ class TritonInference:
         mem: ShmWrapper = self._mem_pool.borrow()
 
         inputs: typing.List[tritonclient.InferInput] = [
-            mem.build_input(input.name, batch.get_input(input.mapped_name)) for input in self._inputs.values()
+            mem.build_input(input.name,
+                            batch.get_input(input.mapped_name),
+                            force_convert_inputs=self._force_convert_inputs) for input in self._inputs.values()
         ]
 
         outputs = [tritonclient.InferRequestedOutput(output.name) for output in self._outputs.values()]
@@ -503,7 +552,12 @@ class TritonInferenceNLP(TritonInference):
         Morpheus names do not match the model
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
+    def __init__(self,
+                 c: Config,
+                 model_name: str,
+                 server_url: str,
+                 force_convert_inputs: bool,
+                 inout_mapping: typing.Dict[str, str] = None):
         # Some models use different names for the same thing. Set that here but allow user customization
         default_mapping = {
             "attention_mask": "input_mask",
@@ -511,7 +565,11 @@ class TritonInferenceNLP(TritonInference):
 
         default_mapping.update(inout_mapping if inout_mapping is not None else {})
 
-        super().__init__(c, model_name, server_url, default_mapping)
+        super().__init__(c,
+                         model_name=model_name,
+                         server_url=server_url,
+                         force_convert_inputs=force_convert_inputs,
+                         inout_mapping=default_mapping)
 
     def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
@@ -547,8 +605,17 @@ class TritonInferenceFIL(TritonInference):
         Morpheus names do not match the model
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, inout_mapping: typing.Dict[str, str] = None):
-        super().__init__(c, model_name, server_url, inout_mapping)
+    def __init__(self,
+                 c: Config,
+                 model_name: str,
+                 server_url: str,
+                 force_convert_inputs: bool,
+                 inout_mapping: typing.Dict[str, str] = None):
+        super().__init__(c,
+                         model_name=model_name,
+                         server_url=server_url,
+                         force_convert_inputs=force_convert_inputs,
+                         inout_mapping=inout_mapping)
 
     def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
@@ -576,20 +643,27 @@ class TritonInferenceStage(InferenceStage):
         Triton server URL
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str):
+    def __init__(self, c: Config, model_name: str, server_url: str, force_convert_inputs: bool):
         super().__init__(c)
 
         self._model_name = model_name
         self._server_url = server_url
+        self._force_convert_inputs = force_convert_inputs
 
         self._requires_seg_ids = False
 
     def _get_inference_fn(self) -> typing.Callable:
 
         if (Config.get().mode == PipelineModes.NLP):
-            worker = TritonInferenceNLP(Config.get(), model_name=self._model_name, server_url=self._server_url)
+            worker = TritonInferenceNLP(Config.get(),
+                                        model_name=self._model_name,
+                                        server_url=self._server_url,
+                                        force_convert_inputs=self._force_convert_inputs)
         elif (Config.get().mode == PipelineModes.FIL):
-            worker = TritonInferenceFIL(Config.get(), model_name=self._model_name, server_url=self._server_url)
+            worker = TritonInferenceFIL(Config.get(),
+                                        model_name=self._model_name,
+                                        server_url=self._server_url,
+                                        force_convert_inputs=self._force_convert_inputs)
         else:
             raise NotImplementedError("Unknown config mode")
 

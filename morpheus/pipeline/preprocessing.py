@@ -23,6 +23,7 @@ import cudf
 import cupy as cp
 import streamz
 import typing_utils
+from cudf.core.subword_tokenizer import SubwordTokenizer
 
 from morpheus.config import Config
 from morpheus.pipeline.messages import InferenceMemoryFIL
@@ -33,10 +34,9 @@ from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import MultiInferenceNLPMessage
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.pipeline import MultiMessageStage
-from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
-from morpheus.pipeline.pipeline import get_time_ms
+from morpheus.utils.cudf_subword_helper import create_tokenizer
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 
 
@@ -51,7 +51,6 @@ class DeserializeStage(MultiMessageStage):
         Pipeline configuration instance
 
     """
-    
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -136,7 +135,6 @@ class PreprocessBaseStage(MultiMessageStage):
         Pipeline configuration instance
 
     """
-    
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -191,22 +189,43 @@ class PreprocessNLPStage(PreprocessBaseStage):
         Pipeline configuration instance
 
     """
-    def __init__(self, c: Config):
+    def __init__(self,
+                 c: Config,
+                 vocab_hash_file: str,
+                 truncation: bool,
+                 do_lower_case: bool,
+                 add_special_tokens: bool,
+                 stride: int = -1):
         super().__init__(c)
 
         self._seq_length = c.feature_length
-        self._vocab_hash_file = c.nlp.model_vocab_hash_file
+        self._vocab_hash_file = vocab_hash_file
 
-        # Set the stride to 75%. Works well with powers of 2
-        self._stride = self._seq_length // 2
-        self._stride = self._stride + self._stride // 2
+        if (stride <= 0):
+            # Set the stride to 75%. Works well with powers of 2
+            self._stride = self._seq_length // 2
+            self._stride = self._stride + self._stride // 2
+        else:
+            # Use the given value
+            self._stride = stride
+
+        self._truncation = truncation
+        self._do_lower_case = do_lower_case
+        self._add_special_tokens = add_special_tokens
+
+        self._tokenizer: SubwordTokenizer = None
 
     @property
     def name(self) -> str:
         return "preprocess-nlp"
 
     @staticmethod
-    def pre_process_batch(x: MultiMessage, seq_len: int, stride: int, vocab_hash_file: str) -> MultiInferenceNLPMessage:
+    def pre_process_batch(x: MultiMessage,
+                          tokenizer: SubwordTokenizer,
+                          seq_len: int,
+                          stride: int,
+                          truncation: bool,
+                          add_special_tokens: bool) -> MultiInferenceNLPMessage:
         """
         For NLP category usecases, this function performs pre-processing.
 
@@ -227,7 +246,14 @@ class PreprocessNLPStage(PreprocessBaseStage):
             infer_message
 
         """
-        tokenized = tokenize_text_series(cudf.Series(x.get_meta("data")), seq_len, stride, vocab_hash_file)
+        text_ser = cudf.Series(x.get_meta("data"))
+        tokenized = tokenize_text_series(tokenizer=tokenizer,
+                                         text_ser=text_ser,
+                                         seq_len=seq_len,
+                                         stride=stride,
+                                         truncation=truncation,
+                                         add_special_tokens=add_special_tokens)
+        del text_ser
 
         # Create the inference memory. Keep in mind count here could be > than input count
         memory = InferenceMemoryNLP(count=tokenized.input_ids.shape[0],
@@ -245,10 +271,16 @@ class PreprocessNLPStage(PreprocessBaseStage):
         return infer_message
 
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
+
+        # Build the tokenizer first
+        self._tokenizer = create_tokenizer(self._vocab_hash_file, self._do_lower_case)
+
         return partial(PreprocessNLPStage.pre_process_batch,
+                       tokenizer=self._tokenizer,
                        stride=self._stride,
                        seq_len=self._seq_length,
-                       vocab_hash_file=self._vocab_hash_file)
+                       truncation=self._truncation,
+                       add_special_tokens=self._add_special_tokens)
 
 
 class PreprocessFILStage(PreprocessBaseStage):

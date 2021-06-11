@@ -50,58 +50,6 @@ def auto_determine_bootstrap():
 
     return bootstrap_servers
 
-
-class ConfigWrapper(object):
-    """
-    Config wrapper class
-
-    Parameters
-    ----------
-    internal_dict : dict
-        internal dictionary
-
-    """
-    def __init__(self, internal_dict: dict):
-
-        self._state = internal_dict
-
-    def __getattr__(self, name):
-
-        if name in self._state:
-
-            if isinstance(self._state[name], dict):
-                return ConfigWrapper(self._state[name])
-            else:
-                return self._state[name]
-        elif hasattr(self._state, name):
-            return self._state.__getattribute__(name)
-
-        # Otherwise return error
-        raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, name))
-
-    def __getitem__(self, key):
-
-        if key in self._state:
-            return self._state[key]
-
-        # Otherwise return error
-        raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, key))
-
-    def __setitem__(self, key, value):
-
-        # Cant add new keys
-        if key in self._state:
-            self._state[key] = value
-            return
-
-        # Otherwise return error
-        raise AttributeError("'{}' object has no attribute '{}'".format(type(self).__name__, key))
-
-    def __contains__(self, key):
-
-        return self._state.__contains__(key)
-
-
 @dataclasses.dataclass
 class ConfigBase():
     """This is the base class for pipeline configuration."""
@@ -132,68 +80,6 @@ class ConfigOnnxToTRT(ConfigBase):
     seq_length: int = None
     max_workspace_size: int = 16000  # In MB
 
-
-@dataclasses.dataclass
-class ConfigGeneral(ConfigBase):
-    """
-    General pipeline configuration class.
-
-    Parameters
-    ----------
-    debug : bool
-        Debug flag to run pipeline in debug mode, default is set False.
-    pipeline : str
-        Pipeline name.
-
-    """
-    debug = False
-    pipeline: str = "pytorch"
-
-
-@dataclasses.dataclass
-class ConfigModel(ConfigBase):
-    """
-    Pipeline model configuration class.
-
-    Parameters
-    ----------
-    vocab_hash_file : str
-        Path to hash file containing vocabulary of words with token-ids. This can be created from the raw
-        vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function. Default value is
-        'bert-base-cased-hash.txt'
-    seq_length : int
-        Limits the length of the sequence returned. If tokenized string is shorter than max_length, output
-        will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False,
-        there will be multiple returned sequences containing the overflowing token-ids. Default value is 128
-    max_batch_size : int
-        Model max batch size. Default value is 8
-
-    """
-    vocab_hash_file: str = "bert-base-cased-hash.txt"
-    seq_length: int = 128
-    max_batch_size: int = 8
-
-
-@dataclasses.dataclass
-class ConfigKafka(ConfigBase):
-    """
-    Pipeline Kafka configuration class.
-
-    Parameters
-    ----------
-    bootstrap_servers : str
-        Bootstrap server hostname and port number to connect Kafka cluster.
-    input_topic : str
-        Input Kafka topic to consume messages
-    output_topic : str
-        Output Kafka topic to publish messages
-
-    """
-    bootstrap_servers: str = "auto"
-    input_topic: str = "test_pcap"
-    output_topic: str = "output_topic"
-
-
 @dataclasses.dataclass
 class ConfigDask(ConfigBase):
     """
@@ -202,47 +88,14 @@ class ConfigDask(ConfigBase):
     Parameters
     ----------
     use_processes : bool
-        This parameter determines whether pipeline should be run in dask mode.
+        Not currently used.
 
     """
     use_processes: bool = False
 
-@dataclasses.dataclass
-class ConfigNlp(ConfigBase):
-    """
-    NLP category pipeline configuration class.
-
-    Parameters
-    ----------
-    model_vocab_hash_file : str
-        Path to hash file containing vocabulary of words with token-ids. This can be created from the raw
-        vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function. Default value is
-        'data/bert-base-cased-hash.txt'
-    model_seq_length : int
-        Limits the length of the sequence returned. If tokenized string is shorter than max_length, output
-        will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False,
-        there will be multiple returned sequences containing the overflowing token-ids. Default value is 256
-
-    """
-    model_vocab_hash_file: str = "data/bert-base-cased-hash.txt"
-    model_seq_length: int = 256
-
-
-@dataclasses.dataclass
-class ConfigFil(ConfigBase):
-    """
-    FIL category pipeline configuration class.
-
-    Parameters
-    ----------
-    model_fea_length : int
-        The number of features used to infer a model. Default value is 29
-
-    """
-    model_fea_length: int = 29
-
 class PipelineModes(str, Enum):
     """The type of usecases that can be executed by the pipeline is determined by the enum."""
+    Other = "Other"
     NLP = "NLP"
     FIL = "FIL"
 
@@ -256,7 +109,7 @@ class Config(ConfigBase):
     debug : bool
         Flag to run pipeline in debug mode. Default value is False
     mode : PipelineModes
-        Determines type of pipeline Ex: FIL or NLP
+        Determines type of pipeline Ex: FIL or NLP. Use `Other` for custom pipelines.
     pipeline_batch_size : int
         Determines number of messages per batch. Default value is 256
     num_threads : int
@@ -264,26 +117,26 @@ class Config(ConfigBase):
     model_max_batch_size : 8
         In a single batch, the maximum number of messages to send to the model for inference. Default value is
         8
-    use_dask :
+    use_dask : bool
         Determines if the pipeline should be executed using the Dask scheduler. Default value is False
-    nlp : morpheus.config.ConfigNlp
-        NLP category models pipeline configuration.
-    fil : morpheus.config.ConfigFil
-        FIL category models pipeline configuration.
 
     """
     # Flag to indicate we are creating a static instance. Prevents raising an error on creation
     __is_creating: typing.ClassVar[bool] = False
 
+    # Default should never be changed and is used to initialize the CLI
     __default: typing.ClassVar["Config"] = None
+    # Singleton instance of the Config
     __instance: typing.ClassVar["Config"] = None
 
+    # Whether in Debug mode.
     debug: bool = False
     log_level: int = logging.WARN
     log_config_file: str = None
 
-    mode: PipelineModes = None
+    mode: PipelineModes = PipelineModes.Other
 
+    feature_length: int = 256
     pipeline_batch_size: int = 256
     num_threads: int = 1
     model_max_batch_size: int = 8
@@ -291,13 +144,6 @@ class Config(ConfigBase):
     use_dask: bool = False
 
     dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
-
-    nlp: ConfigNlp = dataclasses.field(default_factory=ConfigNlp)
-    fil: ConfigFil = dataclasses.field(default_factory=ConfigFil)
-
-    @property
-    def feature_length(self):
-        return self.nlp.model_seq_length if self.mode == PipelineModes.NLP else self.fil.model_fea_length
 
     @staticmethod
     def default() -> "Config":

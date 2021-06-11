@@ -51,7 +51,7 @@ setup(
         "streamz @ git+https://github.com/mdemoret-nv/streamz.git@async#egg=streamz",
         "appdirs",
         "click-completion",
-        "click",
+        "click<8",
         "configargparse",
         "docker",
         "grpcio-channelz",

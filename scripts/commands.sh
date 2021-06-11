@@ -92,3 +92,6 @@ docker build -t triton_fil -f ops/Dockerfile .
 
 # Run Triton with FIL
 docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models triton_fil:latest tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1
+
+# Run from models repo
+docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 -v $PWD/models:/models nvcr.io/nvidia/tritonserver:21.02-py3 tritonserver --model-repository=/models/triton-model-repo --exit-on-error=false --model-control-mode=explicit --load-model sid-minibert-onnx --load-model sid-minibert-trt

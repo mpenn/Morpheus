@@ -30,20 +30,20 @@ class IdentityInference:
     def __init__(self, c: Config):
 
         self._max_batch_size = c.model_max_batch_size
-        self._seq_length = c.model_seq_length
+        self._seq_length = c.feature_length
 
     def init(self, loop: IOLoop):
 
         self._loop = loop
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
-
         def tmp(b: MultiInferenceMessage, f):
-            
-            f.set_result(ResponseMemoryProbs(
-                count=b.count,
-                probs=cp.zeros((b.count, 10), dtype=cp.float32),
-            ))
+
+            f.set_result(
+                ResponseMemoryProbs(
+                    count=b.count,
+                    probs=cp.zeros((b.count, self._seq_length), dtype=cp.float32),
+                ))
 
         self._loop.add_callback(tmp, batch, fut)
 

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import typing
 from functools import reduce
 
@@ -217,6 +218,10 @@ class MonitorStage(SinglePortStage):
 
         self._progress.reset()
 
+    async def stop(self):
+        if (self._progress is not None):
+            self._progress.close()
+
     def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
         # Add the progress sink to the current stream. Use a gather here just in case its a Dask stream
@@ -278,10 +283,14 @@ class AddClassificationsStage(SinglePortStage):
         Threshold to classify, default is 0.5
 
     """
-    def __init__(self, c: Config, threshold: float = 0.5):
+    def __init__(self, c: Config, threshold: float = 0.5, labels_file: str = None, labels: typing.List[str] = None, prefix: str = ""):
         super().__init__(c)
 
+        self._feature_length = c.feature_length
         self._threshold = threshold
+        self._labels_file = labels_file
+        self._labels = labels
+        self._prefix = prefix
 
     @property
     def name(self) -> str:
@@ -299,35 +308,41 @@ class AddClassificationsStage(SinglePortStage):
         """
         return (MultiResponseProbsMessage, )
 
-    def _add_labels(self, x: MultiResponseProbsMessage):
-        # Keys
-        idx2label = {
-            0: 'address',
-            1: 'bank_acct',
-            2: 'credit_card',
-            3: 'email',
-            4: 'govt_id',
-            5: 'name',
-            6: 'password',
-            7: 'phone_num',
-            8: 'secret_keys',
-            9: 'user'
-        }
+    def _determine_labels(self) -> typing.List[str]:
+
+        if (self._labels is not None):
+            return self._labels
+        elif (self._labels_file is not None):
+            raise NotImplementedError("Labels must be specified manually or via the defaults provided in the CLI")
+        else:
+            raise RuntimeError("Labels or a labels file must be specified for AddClassificationStage")
+
+    def _add_labels(self, x: MultiResponseProbsMessage, idx2label: typing.Mapping[int, str]):
+
+        if (x.probs.shape[1] != len(idx2label)):
+            raise RuntimeError("Label count does not match output of model. Label count: {}, Model output: {}".format(len(idx2label), x.probs.shape[1]))
 
         probs_np = (x.probs > self._threshold).astype(cp.bool).get()
 
         for i, label in idx2label.items():
-            x.set_meta("si_" + label, probs_np[:, i].tolist())
+            x.set_meta(label, probs_np[:, i].tolist())
 
         # Return list of strs to write out
         return x
 
     def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
+        # First, determine the labels
+        labels = self._determine_labels()
+
+        assert len(labels) > 0, "Labels must be non-zero array"
+
+        idx2label = {i: self._prefix + l for i, l in enumerate(labels)}
+
         stream = input_stream[0]
 
         # Convert the messages to rows of strings
-        stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool)
+        stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool, idx2label=idx2label)
 
         # Return input unchanged
         return stream, MultiResponseProbsMessage

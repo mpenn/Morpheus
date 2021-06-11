@@ -15,8 +15,8 @@
 import asyncio
 import collections
 import concurrent.futures
+import inspect
 import logging
-from morpheus.pipeline.messages import MultiMessage
 import os
 import queue
 import time
@@ -32,10 +32,14 @@ import typing_utils
 from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
+from tqdm import tqdm
 
 from morpheus.config import Config
+from morpheus.pipeline.messages import MultiMessage
 from morpheus.utils.atomic_integer import AtomicInteger
+from morpheus.utils.type_utils import _DecoratorType
 from morpheus.utils.type_utils import greatest_ancestor
+from morpheus.utils.type_utils import pretty_print_type_name
 
 config = Config.get()
 
@@ -184,6 +188,38 @@ class Receiver():
         self._is_linked = True
 
 
+def save_init_vals(func: _DecoratorType) -> _DecoratorType:
+
+    # Save the signature only once
+    sig = inspect.signature(func, follow_wrapped=True)
+
+    def inner(self: "StreamWrapper", c: Config, *args, **kwargs):
+
+        # Actually call init first. This way any super classes strings will be overridden
+        func(self, c, *args, **kwargs)
+
+        # Determine all set values
+        bound = sig.bind(self, c, *args, **kwargs)
+        bound.apply_defaults()
+
+        init_pairs = []
+
+        for key, val in bound.arguments.items():
+
+            # We really dont care about these
+            if (key == "self" or key == "c"):
+                continue
+
+            init_pairs.append(f"{key}={val}")
+
+        # Save values on self
+        self._init_str = ", ".join(init_pairs)
+
+        return
+
+    return typing.cast(_DecoratorType, inner)
+
+
 class StreamWrapper(ABC, collections.abc.Hashable):
     """
     This abstract class serves as the morpheus.pipeline's base class. This class wraps a `streamz.Stream`
@@ -201,6 +237,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
     def __init__(self, c: Config):
         self._id = StreamWrapper.__ID_COUNTER.get_and_inc()
         self._pipeline: Pipeline = None
+        self._init_str: str = ""  # Stores the initialization parameters used for creation. Needed for __repr__
 
         # Indicates whether or not this wrapper has been built. Can only be built once
         self._is_built = False
@@ -209,8 +246,22 @@ class StreamWrapper(ABC, collections.abc.Hashable):
         self._input_ports: typing.List[Receiver] = []
         self._output_ports: typing.List[Sender] = []
 
+    def __init_subclass__(cls) -> None:
+
+        # Wrap __init__ to save the arg values
+        cls.__init__ = save_init_vals(cls.__init__)
+
+        return super().__init_subclass__()
+
     def __hash__(self) -> int:
         return self._id
+
+    def __str__(self):
+        text = f"<{self.unique_name}; {self.__class__.__name__}({self._init_str})>"
+
+        return text
+
+    __repr__ = __str__
 
     @property
     @abstractmethod
@@ -370,6 +421,9 @@ class StreamWrapper(ABC, collections.abc.Hashable):
     async def _start(self):
         pass
 
+    async def stop(self):
+        pass
+
     def _create_ports(self, input_count: int, output_count: int):
         assert len(self._input_ports) == 0 and len(self._output_ports) == 0, "Can only create ports once!"
 
@@ -454,8 +508,9 @@ class SourceStage(StreamWrapper):
 
     @typing.final
     def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
-        # Derived source stages should override `_build_source` instead of this method. This allows for tracking the True source
-        # object separate from the output stream. If any other operators need to be added after the source, use `_post_build`
+        # Derived source stages should override `_build_source` instead of this method. This allows for tracking the
+        # True source object separate from the output stream. If any other operators need to be added after the source,
+        # use `_post_build`
         assert len(self.input_ports) == 0, "Sources shouldnt have input ports"
 
         source_pair = self._build_source()
@@ -492,12 +547,13 @@ class SourceStage(StreamWrapper):
 
     def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        # logger.info("Added source: {} -> {}".format(self.unique_name, str(out_pair[1])))
-
         return out_ports_pair
 
     async def _start(self):
         self._source_stream.start()
+
+    async def stop(self):
+        self._source_stream.stop()
 
 
 class SingleOutputSource(SourceStage):
@@ -509,9 +565,14 @@ class SingleOutputSource(SourceStage):
     def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
         return out_pair
 
+    @typing.final
     def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        return [self._post_build_single(out_ports_pair[0])]
+        ret_val = self._post_build_single(out_ports_pair[0])
+
+        logger.info("Added source: {}\n  └─> {}".format(str(self), pretty_print_type_name(ret_val[1])))
+
+        return [ret_val]
 
 
 class Stage(StreamWrapper):
@@ -528,8 +589,6 @@ class Stage(StreamWrapper):
         super().__init__(c)
 
     def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
-
-        # logger.info("Added stage: {} -> {}".format(self.unique_name, str(out_pair[1])))
 
         return out_ports_pair
 
@@ -593,6 +652,20 @@ class SinglePortStage(Stage):
 
         return [self._build_single(in_ports_streams[0])]
 
+    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+        return out_pair
+
+    @typing.final
+    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+
+        ret_val = self._post_build_single(out_ports_pair[0])
+
+        logger.info("Added stage: {}\n  └─ {} -> {}".format(str(self),
+                                                            pretty_print_type_name(self.input_ports[0].in_type),
+                                                            pretty_print_type_name(ret_val[1])))
+
+        return [ret_val]
+
 
 class MultiMessageStage(SinglePortStage):
     def __init__(self, c: Config):
@@ -602,7 +675,7 @@ class MultiMessageStage(SinglePortStage):
 
         super().__init__(c)
 
-    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
 
         # Check if we are debug and should log timestamps
         if (Config.get().debug and self._should_log_timestamps):
@@ -618,9 +691,9 @@ class MultiMessageStage(SinglePortStage):
                 x.set_meta("ts_" + cached_name, curr_time)
 
             # Only have one port
-            out_ports_pair[0][0].gather().sink(post_timestamps)
+            out_pair[0].gather().sink(post_timestamps)
 
-        return super()._post_build(out_ports_pair)
+        return super()._post_build_single(out_pair)
 
 
 class Pipeline():
@@ -700,11 +773,6 @@ class Pipeline():
 
     def add_edge(self, start: typing.Union[StreamWrapper, Sender], end: typing.Union[Stage, Receiver]):
 
-        # assert stage_end not in stage_start._output_streams, f"End Stage already in list of output streams for stage: '{stage_start.unique_name}'"
-        # assert stage_start not in stage_end._output_streams, f"End Stage already in list of output streams for stage: '{stage_start.unique_name}'"
-
-        # assert not isinstance(stage_end, SourceStage), "Target stage cannot be a source"
-
         if (isinstance(start, StreamWrapper)):
             start_port = start.output_ports[0]
         elif (isinstance(start, Sender)):
@@ -729,12 +797,12 @@ class Pipeline():
 
     def build(self):
         """
-        This function sequentially activates all of the Morpheus pipeline stages passed by the users to
-        execute a pipeline. For the `Source` and all added `Stage` objects, `StreamWrapper.build` will be
-        called sequentially to construct the pipeline.
+        This function sequentially activates all of the Morpheus pipeline stages passed by the users to execute a
+        pipeline. For the `Source` and all added `Stage` objects, `StreamWrapper.build` will be called sequentially to
+        construct the pipeline.
 
-        Once the pipeline has been constructed, this will start the pipeline by calling `Source.start` on the
-        source object.
+        Once the pipeline has been constructed, this will start the pipeline by calling `Source.start` on the source
+        object.
         """
         assert not self._is_built, "Pipeline can only be built once!"
         assert len(self._sources) > 0, "Pipeline must have a source stage"
@@ -792,6 +860,11 @@ class Pipeline():
             await s.start()
 
         logger.info("====Pipeline Started====")
+
+    async def stop(self):
+        
+        for s in list(self._sources) + list(self._stages):
+            await s.stop()
 
     async def build_and_start(self):
 
@@ -863,13 +936,15 @@ class Pipeline():
             # Build the ports for the node. Only show ports if there are any (Would like to have this not show for one port, but
             # the lines get all messed up)
             if (show_in_ports):
-                in_port_label = " {{ {} }} | ".format(" | ".join([f"<u{x.port_number}> {x.port_number}" for x in n.input_ports]))
+                in_port_label = " {{ {} }} | ".format(" | ".join(
+                    [f"<u{x.port_number}> {x.port_number}" for x in n.input_ports]))
                 label += in_port_label
 
             label += n.unique_name
 
             if (show_out_ports):
-                out_port_label = " | {{ {} }}".format(" | ".join([f"<d{x.port_number}> {x.port_number}" for x in n.output_ports]))
+                out_port_label = " | {{ {} }}".format(" | ".join(
+                    [f"<d{x.port_number}> {x.port_number}" for x in n.output_ports]))
                 label += out_port_label
 
             if (show_in_ports or show_out_ports):
@@ -883,14 +958,6 @@ class Pipeline():
             # TODO: Eventually allow nodes to have different attributes based on type
             # node_attrs.update(n.get_graphviz_attrs())
             gv_graph.node(n.unique_name, **node_attrs)
-
-        # Determines the label to use for the type. keeps the strings shorter
-        def edge_label_type_name(t: typing.Type) -> str:
-
-            if (t.__module__ == "typing"):
-                return str(t).replace("typing.", "")
-
-            return t.__module__.split(".")[0] + "." + t.__name__
 
         # Build up edges
         for e, attrs in typing.cast(typing.Mapping[typing.Tuple[StreamWrapper, StreamWrapper], dict], self._graph.edges()).items():
@@ -924,17 +991,17 @@ class Pipeline():
             # Check for situation #1
             if (len(in_port._input_senders) == 1 and len(out_port._output_receivers) == 1
                     and (in_port.in_type == out_port.out_type)):
-                edge_attrs["label"] = edge_label_type_name(in_port.in_type)
+                edge_attrs["label"] = pretty_print_type_name(in_port.in_type)
             else:
                 rec_idx = out_port._output_receivers.index(in_port)
                 sen_idx = in_port._input_senders.index(out_port)
 
                 # Add type labels if available
                 if (rec_idx == 0 and out_port.out_type is not None):
-                    edge_attrs["taillabel"] = edge_label_type_name(out_port.out_type)
+                    edge_attrs["taillabel"] = pretty_print_type_name(out_port.out_type)
 
                 if (sen_idx == 0 and in_port.in_type is not None):
-                    edge_attrs["headlabel"] = edge_label_type_name(in_port.in_type)
+                    edge_attrs["headlabel"] = pretty_print_type_name(in_port.in_type)
 
             gv_graph.edge(start_name, end_name, **edge_attrs)
 
@@ -960,15 +1027,18 @@ class Pipeline():
 
         loop.set_exception_handler(error_handler)
 
-        asyncio.ensure_future(self.build_and_start())
-
         try:
+            asyncio.ensure_future(self.build_and_start())
+
             loop.run_forever()
+
         except KeyboardInterrupt:
-            pass
+            tqdm.write("Stopping pipeline. Please wait...")
+
+            loop.run_until_complete(self.stop())
         finally:
             loop.close()
-            logger.debug("Exited")
+            logger.info("Exited")
 
 
 class LinearPipeline(Pipeline):
@@ -990,7 +1060,8 @@ class LinearPipeline(Pipeline):
         """
 
         if (len(self._sources) > 0 and source not in self._sources):
-            logger.warning("LinearPipeline already has a source. Setting a new source will clear out all existing stages")
+            logger.warning(
+                "LinearPipeline already has a source. Setting a new source will clear out all existing stages")
 
             self._sources.clear()
 
