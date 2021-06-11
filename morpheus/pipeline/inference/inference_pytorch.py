@@ -1,3 +1,17 @@
+# Copyright (c) 2021, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
 import queue
 import typing
@@ -15,8 +29,12 @@ try:
     from torch.utils.dlpack import from_dlpack
     from torch.utils.dlpack import to_dlpack
 except ImportError:
-    print("PyTorch Not Found! PyTorch must be installed to use the PyTorchInferenceStage. Due to the limited CUDA options available in the PyTorch stable versions, it must be manually installed by the user. Please see the Getting Started Guide: https://pytorch.org/get-started/locally/")
+    print(("PyTorch Not Found! PyTorch must be installed to use the PyTorchInferenceStage. "
+           "Due to the limited CUDA options available in the PyTorch stable versions, "
+           "it must be manually installed by the user. "
+           "Please see the Getting Started Guide: https://pytorch.org/get-started/locally/"))
     raise
+
 
 class PyTorchInference:
     def __init__(self, c: Config, model_filename: str):

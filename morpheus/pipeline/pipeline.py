@@ -24,8 +24,6 @@ import typing
 from abc import ABC
 from abc import abstractmethod
 
-import cudf
-import distributed
 import networkx
 import streamz
 import typing_utils
@@ -33,6 +31,10 @@ from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
+
+import distributed
+
+import cudf
 
 from morpheus.config import Config
 from morpheus.pipeline.messages import MultiMessage
@@ -159,9 +161,8 @@ class Receiver():
 
                 if (great_ancestor is None):
                     # TODO: Add stage, port, and type info to message
-                    raise RuntimeError(
-                        "Cannot determine single type for senders of input port. Use a merge stage to handle different types of inputs. "
-                    )
+                    raise RuntimeError(("Cannot determine single type for senders of input port. "
+                                        "Use a merge stage to handle different types of inputs."))
 
                 self._input_type = great_ancestor
 
@@ -223,7 +224,7 @@ def save_init_vals(func: _DecoratorType) -> _DecoratorType:
 class StreamWrapper(ABC, collections.abc.Hashable):
     """
     This abstract class serves as the morpheus.pipeline's base class. This class wraps a `streamz.Stream`
-    object and aids in hooking stages up together. 
+    object and aids in hooking stages up together.
 
     Parameters
     ----------
@@ -364,7 +365,8 @@ class StreamWrapper(ABC, collections.abc.Hashable):
         # Allow stages to do any post build steps (i.e. for sinks, or timing functions)
         out_ports_pair = self._post_build(out_ports_pair)
 
-        assert len(out_ports_pair) == len(self.output_ports), "Build must return same number of output pairs as output ports"
+        assert len(out_ports_pair) == len(self.output_ports), \
+            "Build must return same number of output pairs as output ports"
 
         # Assign the output ports
         for port_idx, out_pair in enumerate(out_ports_pair):
@@ -395,7 +397,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
 
         The input value is a `StreamPair` which is a tuple containing the input `streamz.Stream` object and
         the message data type.
-        
+
         Parameters
         ----------
         input_stream : StreamPair
@@ -433,7 +435,8 @@ class StreamWrapper(ABC, collections.abc.Hashable):
 
 class SourceStage(StreamWrapper):
     """
-    The SourceStage is mandatory for the Morpheus pipeline to run. This stage represents the start of the pipeline. All `SourceStage` object take no input but generate output.
+    The SourceStage is mandatory for the Morpheus pipeline to run. This stage represents the start of the pipeline. All
+    `SourceStage` object take no input but generate output.
 
     Parameters
     ----------
@@ -500,7 +503,7 @@ class SourceStage(StreamWrapper):
         Returns
         -------
 
-        StreamPair: 
+        StreamPair:
             A tuple containing the output `streamz.Stream` object from this stage and the message data type.
         """
 
@@ -525,11 +528,12 @@ class SourceStage(StreamWrapper):
                 logging.warning("Detected multiple upstream objects for source {}".format(curr_source))
                 curr_source = None
 
-        assert curr_source is not None, ("Output of `_build_source` must be downstream of a `streamz.Source` object. "
-                                         "Ensure the returned streams only have a single `upstream` object and can find a "
-                                         "`Source` object from by traversing the upstream object. If necessary, return a source "
-                                         "object in `_build_source` and perform additional operators in the `_post_build` "
-                                         "function")
+        assert curr_source is not None, \
+            ("Output of `_build_source` must be downstream of a `streamz.Source` object. "
+             "Ensure the returned streams only have a single `upstream` object and can find a "
+             "`Source` object from by traversing the upstream object. If necessary, return a source "
+             "object in `_build_source` and perform additional operators in the `_post_build` "
+             "function")
 
         self._source_stream = curr_source
 
@@ -644,9 +648,11 @@ class SinglePortStage(Stage):
         pass
 
     def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
-        # Derived source stages should override `_build_source` instead of this method. This allows for tracking the True source
-        # object separate from the output stream. If any other operators need to be added after the source, use `_post_build`
-        assert len(self.input_ports) == 1 and len(self.output_ports) == 1, "SinglePortStage must have 1 input port and 1 output port"
+        # Derived source stages should override `_build_source` instead of this method. This allows for tracking the
+        # True source object separate from the output stream. If any other operators need to be added after the source,
+        # use `_post_build`
+        assert len(self.input_ports) == 1 and len(self.output_ports) == 1, \
+            "SinglePortStage must have 1 input port and 1 output port"
 
         assert len(in_ports_streams) == 1, "Should only have 1 port on input"
 
@@ -862,7 +868,7 @@ class Pipeline():
         logger.info("====Pipeline Started====")
 
     async def stop(self):
-        
+
         for s in list(self._sources) + list(self._stages):
             await s.stop()
 
@@ -933,8 +939,8 @@ class Pipeline():
             show_in_ports = has_ports(n, is_input=True)
             show_out_ports = has_ports(n, is_input=False)
 
-            # Build the ports for the node. Only show ports if there are any (Would like to have this not show for one port, but
-            # the lines get all messed up)
+            # Build the ports for the node. Only show ports if there are any (Would like to have this not show for one
+            # port, but the lines get all messed up)
             if (show_in_ports):
                 in_port_label = " {{ {} }} | ".format(" | ".join(
                     [f"<u{x.port_number}> {x.port_number}" for x in n.input_ports]))
@@ -960,7 +966,7 @@ class Pipeline():
             gv_graph.node(n.unique_name, **node_attrs)
 
         # Build up edges
-        for e, attrs in typing.cast(typing.Mapping[typing.Tuple[StreamWrapper, StreamWrapper], dict], self._graph.edges()).items():
+        for e, attrs in typing.cast(typing.Mapping[typing.Tuple[StreamWrapper, StreamWrapper], dict], self._graph.edges()).items():  # noqa: E501
 
             edge_attrs = {}
 
@@ -991,6 +997,7 @@ class Pipeline():
             # Check for situation #1
             if (len(in_port._input_senders) == 1 and len(out_port._output_receivers) == 1
                     and (in_port.in_type == out_port.out_type)):
+
                 edge_attrs["label"] = pretty_print_type_name(in_port.in_type)
             else:
                 rec_idx = out_port._output_receivers.index(in_port)
@@ -1018,7 +1025,7 @@ class Pipeline():
         """
         loop = asyncio.get_event_loop()
 
-        def error_handler(l, context: dict):
+        def error_handler(_, context: dict):
 
             msg = "Unhandled exception in async loop! Exception: \n{}".format(context["message"])
             exception = context.get("exception", Exception())

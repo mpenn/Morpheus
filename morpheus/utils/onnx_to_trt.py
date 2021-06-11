@@ -37,7 +37,10 @@ def gen_engine(c: ConfigOnnxToTRT):
     # Otherwise we are creating a new model
     EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
 
-    with trt.Builder(TRT_LOGGER) as builder, builder.create_network(EXPLICIT_BATCH) as network, trt.OnnxParser(network, TRT_LOGGER) as parser:
+    with trt.Builder(TRT_LOGGER) as builder, \
+        builder.create_network(EXPLICIT_BATCH) as network, \
+            trt.OnnxParser(network, TRT_LOGGER) as parser:
+
         with open(input_model, "rb") as model_file:
             if (not parser.parse(model_file.read())):
                 for error in range(parser.num_errors):

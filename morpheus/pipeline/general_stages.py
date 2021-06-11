@@ -12,15 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import typing
 from functools import reduce
 
-import cudf
 import cupy as cp
 import streamz
 from streamz.core import Stream
 from tqdm import tqdm
+
+import cudf
 
 from morpheus.config import Config
 from morpheus.pipeline import Stage
@@ -265,7 +265,7 @@ class MonitorStage(SinglePortStage):
         elif (isinstance(x, str)):
             return lambda y: 1
         elif (hasattr(x, "__len__")):
-            return len # Return len directly (same as `lambda y: len(y)`)
+            return len  # Return len directly (same as `lambda y: len(y)`)
         else:
             raise NotImplementedError("Unsupported type: {}".format(type(x)))
 
@@ -283,7 +283,12 @@ class AddClassificationsStage(SinglePortStage):
         Threshold to classify, default is 0.5
 
     """
-    def __init__(self, c: Config, threshold: float = 0.5, labels_file: str = None, labels: typing.List[str] = None, prefix: str = ""):
+    def __init__(self,
+                 c: Config,
+                 threshold: float = 0.5,
+                 labels_file: str = None,
+                 labels: typing.List[str] = None,
+                 prefix: str = ""):
         super().__init__(c)
 
         self._feature_length = c.feature_length
@@ -320,7 +325,8 @@ class AddClassificationsStage(SinglePortStage):
     def _add_labels(self, x: MultiResponseProbsMessage, idx2label: typing.Mapping[int, str]):
 
         if (x.probs.shape[1] != len(idx2label)):
-            raise RuntimeError("Label count does not match output of model. Label count: {}, Model output: {}".format(len(idx2label), x.probs.shape[1]))
+            raise RuntimeError("Label count does not match output of model. Label count: {}, Model output: {}".format(
+                len(idx2label), x.probs.shape[1]))
 
         probs_np = (x.probs > self._threshold).astype(cp.bool).get()
 
@@ -415,11 +421,11 @@ class FilterDetectionsStage(SinglePortStage):
 
             output_list.append(
                 MultiResponseProbsMessage(x.meta,
-                                     mess_offset=mess_offset,
-                                     mess_count=mess_count,
-                                     memory=x.memory,
-                                     offset=pair[0],
-                                     count=mess_count))
+                                          mess_offset=mess_offset,
+                                          mess_count=mess_count,
+                                          memory=x.memory,
+                                          offset=pair[0],
+                                          count=mess_count))
 
         return output_list
 
@@ -437,6 +443,7 @@ class FilterDetectionsStage(SinglePortStage):
         stream = stream.filter(lambda x: x.count > 0)
 
         return stream, MultiResponseProbsMessage
+
 
 class ZipStage(Stage):
     def __init__(self, c: Config):
@@ -468,6 +475,7 @@ class ZipStage(Stage):
         stream = first_stream.zip([s for s, _ in in_ports_streams[1:]])
 
         return [(stream, out_type)]
+
 
 class MergeStage(Stage):
     def __init__(self, c: Config):
@@ -528,4 +536,3 @@ class SwitchStage(Stage):
             out_pairs.append((Stream(upstream=switch_stream), input_stream[1]))
 
         return out_pairs
-

@@ -12,20 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-from functools import partial
 import logging
-from time import time
 import typing
+from functools import partial
+from time import time
 
-from distributed.client import default_client
 from streamz import Stream
 from streamz.core import convert_interval
 from streamz.dask import DaskStream
 from tornado import gen
 from tornado.queues import Queue
 
+from distributed.client import default_client
+
 logger = logging.getLogger(__name__)
+
 
 @Stream.register_api()
 class async_map(Stream):
@@ -99,7 +100,7 @@ class time_delay(Stream):
         self.queue = Queue()
 
         kwargs["ensure_io_loop"] = True
-        Stream.__init__(self, upstream,**kwargs)
+        Stream.__init__(self, upstream, **kwargs)
 
         self.loop.add_callback(self.cb)
 
@@ -107,14 +108,14 @@ class time_delay(Stream):
     def cb(self):
         while True:
             q_time, x, metadata = yield self.queue.get()
-            
+
             duration = self.interval - (time() - q_time)
 
             if duration > 0:
                 yield gen.sleep(duration)
 
             yield self._emit(x, metadata=metadata)
-            
+
             self._release_refs(metadata)
 
     def update(self, x, who=None, metadata=None):
@@ -126,7 +127,7 @@ class time_delay(Stream):
 class scatter_batch(DaskStream):
     """
     Convert local stream to Dask Stream
-    
+
     All elements flowing through the input will be scattered out to the cluster
     """
     async def update(self, x, who=None, metadata=None):
@@ -151,6 +152,7 @@ class scatter_batch(DaskStream):
 
         return f
 
+
 @Stream.register_api()
 class switch(Stream):
     def __init__(self, upstream, predicate: typing.Callable[[typing.Any], bool], *args, **kwargs):
@@ -161,7 +163,7 @@ class switch(Stream):
 
     async def update(self, x, who=None, metadata=None):
         downstream_idx = self.predicate(x)
-        
+
         return await self._emit_idx(x, downstream_idx, metadata=metadata)
 
     async def _emit_idx(self, x, idx: int, metadata=None):
@@ -174,7 +176,7 @@ class switch(Stream):
             metadata = []
 
         result = []
-        
+
         downstream = list(self.downstreams)[idx]
 
         r = await downstream.update(x, who=self, metadata=metadata)

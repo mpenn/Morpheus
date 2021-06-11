@@ -14,10 +14,11 @@
 
 import typing
 
-import cudf
 from streamz import Source
 from streamz.core import Stream
 from tornado.ioloop import IOLoop
+
+import cudf
 
 from morpheus.config import Config
 from morpheus.pipeline.pipeline import SingleOutputSource
@@ -54,12 +55,15 @@ class KafkaSourceStage(SingleOutputSource):
                  poll_interval: str = "10millis"):
         super().__init__(c)
 
-        self._consumer_conf = {'bootstrap.servers': bootstrap_servers, 'group.id': group_id, 'session.timeout.ms': "60000"}
+        self._consumer_conf = {
+            'bootstrap.servers': bootstrap_servers, 'group.id': group_id, 'session.timeout.ms': "60000"
+        }
 
         self._input_topic = input_topic
         self._use_dask = use_dask
         self._poll_interval = poll_interval
         self._max_batch_size = c.pipeline_batch_size
+        self._client = None
 
     @property
     def name(self) -> str:
@@ -69,7 +73,7 @@ class KafkaSourceStage(SingleOutputSource):
 
         if (self._use_dask):
             from dask.distributed import Client
-            client = Client()
+            self._client = Client()
 
             source: Stream = Stream.from_kafka_batched(self._input_topic,
                                                        self._consumer_conf,
@@ -81,7 +85,7 @@ class KafkaSourceStage(SingleOutputSource):
                                                        poll_interval=self._poll_interval,
                                                        loop=IOLoop.current(),
                                                        max_batch_size=self._max_batch_size)
-            
+
             return source, StreamFuture[cudf.DataFrame]
         else:
             source: Stream = Stream.from_kafka_batched(self._input_topic,

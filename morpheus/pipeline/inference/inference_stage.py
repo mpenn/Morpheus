@@ -24,7 +24,7 @@ import typing_utils
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
-from morpheus.pipeline.messages import MultiInferenceMessage, ResponseMemoryProbs
+from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import MultiResponseProbsMessage
 from morpheus.pipeline.messages import ResponseMemoryProbs
 from morpheus.pipeline.pipeline import MultiMessageStage
@@ -68,7 +68,7 @@ class InferenceStage(MultiMessageStage):
     #.  While the pipeline is running:
 
         #.  Get an item of work from the `asyncio.Queue`. Block if the queue is empty
-        
+
             #.  Each item of work will contain a tuple in the form:
 
                 .. code-block:: python
@@ -125,7 +125,7 @@ class InferenceStage(MultiMessageStage):
 
         Returns
         -------
-        typing.Tuple(morpheus.pipeline.messages.MultiInferenceMessage, morpheus.pipeline.StreamFuture[morpheus.pipeline.messages.MultiInferenceMessage])
+        typing.Tuple(messages.MultiInferenceMessage, StreamFuture[messages.MultiInferenceMessage])
             Accepted input types
 
         """
@@ -140,7 +140,7 @@ class InferenceStage(MultiMessageStage):
 
         Returns
         -------
-            typing.Callable: 
+            typing.Callable:
                 Callable function that takes parameters ``(tornado.IOLoop, asyncio.Queue, asyncio.Event)``
         """
         pass

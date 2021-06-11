@@ -23,7 +23,8 @@ import pandas as pd
 
 from morpheus.config import Config
 from morpheus.pipeline.messages import MultiResponseProbsMessage
-from morpheus.pipeline.pipeline import SinglePortStage, StreamPair
+from morpheus.pipeline.pipeline import SinglePortStage
+from morpheus.pipeline.pipeline import StreamPair
 
 
 class GenerateVizFramesStage(SinglePortStage):
@@ -50,9 +51,9 @@ class GenerateVizFramesStage(SinglePortStage):
             if (self._overwrite):
                 shutil.rmtree(self._out_dir)
             elif (len(list(os.listdir(self._out_dir))) > 0):
-                warnings.warn(
-                    "Viz output directory '{}' already exists. Errors will occur if frames try to be written over existing files. Suggest emptying the directory or setting `overwrite=True`"
-                    .format(self._out_dir))
+                warnings.warn(("Viz output directory '{}' already exists. "
+                               "Errors will occur if frames try to be written over existing files. "
+                               "Suggest emptying the directory or setting `overwrite=True`").format(self._out_dir))
 
         os.makedirs(self._out_dir, exist_ok=True)
 
@@ -112,7 +113,7 @@ class GenerateVizFramesStage(SinglePortStage):
         def indent_data(y: str):
             try:
                 return json.dumps(json.loads(y), indent=3)
-            except:
+            except:  # noqa: E722
                 return y
 
         df["data"] = df["data"].apply(indent_data)

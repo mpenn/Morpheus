@@ -28,7 +28,7 @@ from morpheus.config import PipelineModes
 from morpheus.config import auto_determine_bootstrap
 from morpheus.utils.logging import configure_logging
 
-# pylint: disable=line-too-long, import-outside-toplevel, invalid-name, global-at-module-level
+# pylint: disable=line-too-long, import-outside-toplevel, invalid-name, global-at-module-level, unused-argument
 
 # Init click completion to help with installing autocomplete.
 click_completion.init()
@@ -133,8 +133,7 @@ if ("NOTSET" in log_levels):
 def _parse_log_level(ctx, param, value):
     x = logging._nameToLevel.get(value.upper(), None)
     if x is None:
-        raise click.BadParameter(
-            'Must be one of {}. Passed: {} CRITICAL, ERROR, WARNING, INFO or DEBUG, not {}'.format(value))
+        raise click.BadParameter('Must be one of {}. Passed: {}'.format(", ".join(logging._nameToLevel.keys()), value))
     return x
 
 
@@ -145,13 +144,11 @@ def _parse_log_level(ctx, param, value):
               type=click.Choice(log_levels, case_sensitive=False),
               callback=_parse_log_level,
               help="Specify the logging level to use.")
-@click.option(
-    '--log_config_file',
-    default=DEFAULT_CONFIG.log_config_file,
-    type=click.Path(exists=True, dir_okay=False),
-    help=
-    "Config file to use to configure logging. Use only for advanced situations. Can accept both JSON and ini style configurations"
-)
+@click.option('--log_config_file',
+              default=DEFAULT_CONFIG.log_config_file,
+              type=click.Path(exists=True, dir_okay=False),
+              help=("Config file to use to configure logging. Use only for advanced situations. "
+                    "Can accept both JSON and ini style configurations"))
 @click.version_option()
 @prepare_command(Config.get())
 def cli(ctx: click.Context,
@@ -234,12 +231,11 @@ def install(append, case_insensitive, shell, path):
               default=psutil.cpu_count(),
               type=click.IntRange(min=1),
               help="Number of internal pipeline threads to use")
-@click.option(
-    '--pipeline_batch_size',
-    default=DEFAULT_CONFIG.pipeline_batch_size,
-    type=click.IntRange(min=1),
-    help=
-    "Internal batch size for the pipeline. Can be much larger than the model batch size. Also used for Kafka consumers")
+@click.option('--pipeline_batch_size',
+              default=DEFAULT_CONFIG.pipeline_batch_size,
+              type=click.IntRange(min=1),
+              help=("Internal batch size for the pipeline. "
+                    "Can be much larger than the model batch size. Also used for Kafka consumers"))
 @click.option('--model_max_batch_size',
               default=DEFAULT_CONFIG.model_max_batch_size,
               type=click.IntRange(min=1),
@@ -250,10 +246,10 @@ def run(ctx: click.Context, **kwargs):
     pass
 
 
-@click.group(
-    short_help="Place this command before a 'pipeline-*' command to run the pipeline with multiple processes using dask",
-    cls=AliasedGroup,
-    **command_kwargs)
+@click.group(short_help=("Place this command before a 'pipeline-*' command "
+                         "to run the pipeline with multiple processes using dask"),
+             cls=AliasedGroup,
+             **command_kwargs)
 @prepare_command(Config.get().dask)
 def dask(ctx: click.Context, **kwargs):
 
@@ -263,13 +259,13 @@ def dask(ctx: click.Context, **kwargs):
 
 
 @click.group(chain=True, short_help="Run the inference pipeline with a NLP model", cls=AliasedGroup, **command_kwargs)
-@click.option(
-    '--model_seq_length',
-    default=256,
-    type=click.IntRange(min=1),
-    help=
-    "Limits the length of the sequence returned. If tokenized string is shorter than max_length, output will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False, there will be multiple returned sequences containing the overflowing token-ids. Default value is 256"
-)
+@click.option('--model_seq_length',
+              default=256,
+              type=click.IntRange(min=1),
+              help=("Limits the length of the sequence returned. If tokenized string is shorter than max_length, "
+                    "output will be padded with 0s. If the tokenized string is longer than max_length and "
+                    "do_truncate == False, there will be multiple returned sequences containing the "
+                    "overflowing token-ids. Default value is 256"))
 @prepare_command()
 def pipeline_nlp(ctx: click.Context, **kwargs):
     """
@@ -383,14 +379,12 @@ def from_file(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Load messages from a Kafka cluster", **command_kwargs)
-@click.option(
-    '--bootstrap_servers',
-    type=str,
-    default="auto",
-    required=True,
-    help=
-    "Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, this can be set to 'auto' to automatically determine the cluster IPs and ports"
-)
+@click.option('--bootstrap_servers',
+              type=str,
+              default="auto",
+              required=True,
+              help=("Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, "
+                    "this can be set to 'auto' to automatically determine the cluster IPs and ports"))
 @click.option('--input_topic', type=str, default="test_pcap", required=True, help="Kafka topic to read from")
 @click.option('--group_id', type=str, default="custreamz", required=True, help="")
 @click.option('--use_dask', is_flag=True, help="Whether or not to use dask for multiple processes reading from Kafka")
@@ -477,10 +471,9 @@ def delay(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(
-    short_help=
-    "Queue results until the previous stage is complete, then dump entire queue into pipeline. Useful for testing stages independently. Requires finite source such as `from-file`",
-    **command_kwargs)
+@click.command(short_help=("Queue results until the previous stage is complete, then dump entire queue into pipeline. "
+                           "Useful for testing stages independently. Requires finite source such as `from-file`"),
+               **command_kwargs)
 @prepare_command(False)
 def trigger(ctx: click.Context, **kwargs):
 
@@ -515,13 +508,12 @@ def deserialize(ctx: click.Context, **kwargs):
 
 
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
-@click.option(
-    '--vocab_hash_file',
-    default="data/bert-base-cased-hash.txt",
-    type=click.Path(exists=True, dir_okay=False),
-    help=
-    "Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function. Default value is 'data/bert-base-cased-hash.txt'"
-)
+@click.option('--vocab_hash_file',
+              default="data/bert-base-cased-hash.txt",
+              type=click.Path(exists=True, dir_okay=False),
+              help=("Path to hash file containing vocabulary of words with token-ids. "
+                    "This can be created from the raw vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab "
+                    "function. Default value is 'data/bert-base-cased-hash.txt'"))
 @click.option('--truncation', default=False, type=bool)
 @click.option('--do_lower_case', default=False, type=bool)
 @click.option('--add_special_tokens', default=False, type=bool)
@@ -562,13 +554,12 @@ def preprocess_fil(ctx: click.Context, **kwargs):
 @click.command(short_help="Perform inference with Triton", **command_kwargs)
 @click.option('--model_name', type=str, required=True, help="Model name in Triton to send messages to")
 @click.option('--server_url', type=str, required=True, help="Triton server URL (IP:Port)")
-@click.option(
-    '--force_convert_inputs',
-    default=False,
-    type=bool,
-    help=
-    "Instructs this stage to forcibly convert all input types to match what Triton is expecting. Even if this is set to `False`, automatic conversion will be done only if there would be no data loss (i.e. int32 -> int64)."
-)
+@click.option('--force_convert_inputs',
+              default=False,
+              type=bool,
+              help=("Instructs this stage to forcibly convert all input types to match what Triton is expecting. "
+                    "Even if this is set to `False`, automatic conversion will be done only if there would be no "
+                    "data loss (i.e. int32 -> int64)."))
 @prepare_command(False)
 def inf_triton(ctx: click.Context, **kwargs):
 
@@ -684,24 +675,20 @@ def filter(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Deserialize source data from JSON", **command_kwargs)
-@click.option(
-    '--include',
-    type=str,
-    default=tuple(),
-    multiple=True,
-    show_default="All Columns",
-    help=
-    "Which columns to include from MultiMessage into JSON. Can be specified multiple times. Resulting columns is the intersection of all regex. Include applied before exclude"
-)
-@click.option(
-    '--exclude',
-    type=str,
-    default=[r'^ID$', r'^ts_'],
-    multiple=True,
-    required=True,
-    help=
-    "Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. Resulting ignored columns is the intersection of all regex. Include applied before exclude"
-)
+@click.option('--include',
+              type=str,
+              default=tuple(),
+              multiple=True,
+              show_default="All Columns",
+              help=("Which columns to include from MultiMessage into JSON. Can be specified multiple times. "
+                    "Resulting columns is the intersection of all regex. Include applied before exclude"))
+@click.option('--exclude',
+              type=str,
+              default=[r'^ID$', r'^ts_'],
+              multiple=True,
+              required=True,
+              help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
+                    "Resulting ignored columns is the intersection of all regex. Include applied before exclude"))
 @prepare_command(False)
 def serialize(ctx: click.Context, **kwargs):
 
@@ -741,14 +728,12 @@ def to_file(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Write all messages to a Kafka cluster", **command_kwargs)
-@click.option(
-    '--bootstrap_servers',
-    type=str,
-    default="auto",
-    required=True,
-    help=
-    "Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, this can be set to 'auto' to automatically determine the cluster IPs and ports"
-)
+@click.option('--bootstrap_servers',
+              type=str,
+              default="auto",
+              required=True,
+              help=("Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, "
+                    "this can be set to 'auto' to automatically determine the cluster IPs and ports"))
 @click.option('--output_topic', type=str, required=True, help="Output Kafka topic to publish to")
 @prepare_command(False)
 def to_kafka(ctx: click.Context, **kwargs):
