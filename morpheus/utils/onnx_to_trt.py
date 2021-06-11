@@ -28,7 +28,7 @@ def gen_engine(c: ConfigOnnxToTRT):
 
     # Local imports to avoid requiring TensorRT to generate the docs
     import tensorrt as trt
-    TRT_LOGGER = trt.Logger(trt.Logger.VERBOSE)
+    TRT_LOGGER = trt.Logger()
 
     input_model = c.input_model
 

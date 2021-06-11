@@ -107,7 +107,7 @@ class InferenceStage(MultiMessageStage):
 
         self._fea_length = c.feature_length
 
-        self._thread = None
+        self._threads: typing.List[threading.Thread] = []
         self._inf_queue = queue.Queue()
 
         self._max_batch_size = c.model_max_batch_size
@@ -179,14 +179,16 @@ class InferenceStage(MultiMessageStage):
         for _ in range(1):
             ready_event = asyncio.Event()
 
-            threading.Thread(target=self._get_inference_fn(),
-                             daemon=True,
-                             name="Inference Thread",
-                             args=(
-                                 IOLoop.current(),
-                                 self._inf_queue,
-                                 ready_event,
-                             )).start()
+            self._threads.append(
+                threading.Thread(target=self._get_inference_fn(),
+                                 daemon=True,
+                                 name="Inference Thread",
+                                 args=(
+                                     IOLoop.current(),
+                                     self._inf_queue,
+                                     ready_event,
+                                 )))
+            self._threads[-1].start()
 
             # Wait for the inference thread to be ready
             wait_events.append(ready_event.wait())
@@ -194,6 +196,10 @@ class InferenceStage(MultiMessageStage):
         await asyncio.gather(*wait_events, return_exceptions=True)
 
         return await super()._start()
+
+    async def stop(self):
+        if (self._progress is not None):
+            self._progress.close()
 
     @staticmethod
     def _split_batches(x: MultiInferenceMessage, max_batch_size: int) -> typing.List[MultiInferenceMessage]:
@@ -262,7 +268,8 @@ class InferenceStage(MultiMessageStage):
         total_mess_count = reduce(lambda y, z: y + z.mess_count, in_message, 0)
 
         # Create a message data to store the entire list
-        memory = ResponseMemoryProbs(count=total_mess_count, probs=cp.zeros((total_mess_count, out_message[0].probs.shape[1])))
+        memory = ResponseMemoryProbs(count=total_mess_count,
+                                     probs=cp.zeros((total_mess_count, out_message[0].probs.shape[1])))
 
         saved_meta = in_message[0].meta
         saved_offset = in_message[0].mess_offset
@@ -295,8 +302,8 @@ class InferenceStage(MultiMessageStage):
         assert saved_offset == 0
 
         return MultiResponseProbsMessage(meta=saved_meta,
-                                    mess_offset=saved_offset,
-                                    mess_count=saved_count,
-                                    memory=memory,
-                                    offset=0,
-                                    count=memory.count)
+                                         mess_offset=saved_offset,
+                                         mess_count=saved_count,
+                                         memory=memory,
+                                         offset=0,
+                                         count=memory.count)

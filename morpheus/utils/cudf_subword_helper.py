@@ -15,12 +15,11 @@
 import collections
 
 import cudf
-import cupy as cp
+from cudf.core.subword_tokenizer import SubwordTokenizer
 
 Feature = collections.namedtuple(  # pylint: disable=invalid-name
-    "Feature",
-    ["input_ids", "input_mask", "segment_ids"]
-)
+    "Feature", ["input_ids", "input_mask", "segment_ids"])
+
 
 ### Model loading utils
 def create_vocab_table(vocabpath):
@@ -48,7 +47,19 @@ def create_vocab_table(vocabpath):
             vocab2id[token] = index
     return np.array(id2vocab), vocab2id
 
-def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
+
+def create_tokenizer(vocab_hash_file: str, do_lower_case: bool):
+    tokenizer = SubwordTokenizer(vocab_hash_file, do_lower_case=do_lower_case)
+
+    return tokenizer
+
+
+def tokenize_text_series(tokenizer: SubwordTokenizer,
+                         text_ser: cudf.Series,
+                         seq_len: int,
+                         stride: int,
+                         truncation: bool,
+                         add_special_tokens: bool):
     """
     This function tokenizes a text series using the bert subword_tokenizer and vocab-hash
 
@@ -69,33 +80,30 @@ def tokenize_text_series(text_ser, seq_len, stride, vocab_hash_file):
         A dictionary with these keys {'token_ar':,'attention_ar':,'metadata':}
 
     """
-    #print("Tokenizing Text Series")
+
+    assert tokenizer is not None, "Must create tokenizer first using `create_tokenizer()`"
+
     if len(text_ser) == 0:
         return Feature(None, None, None)
 
     max_rows_tensor = len(text_ser) * 2
     max_length = seq_len
 
-    auto_stride = seq_len // 2
-    auto_stride = auto_stride + auto_stride // 2
+    # Call the tokenizer
+    tokenizer_output = tokenizer(text_ser,
+                                 max_length=max_length,
+                                 max_num_rows=max_rows_tensor,
+                                 add_special_tokens=add_special_tokens,
+                                 padding='max_length',
+                                 truncation=truncation,
+                                 stride=stride,
+                                 return_tensors="cp",
+                                 return_token_type_ids=False)
 
-    tokens, attention_masks, metadata = text_ser.str.subword_tokenize(
-        vocab_hash_file,
-        do_lower=False,
-        max_rows_tensor=max_rows_tensor,
-        stride=stride,
-        max_length=max_length,
-        do_truncate=False,
-    )
-    del text_ser
-    ### reshape metadata into a matrix
-    metadata = metadata.reshape(-1, 3)
-    tokens = tokens.reshape(-1, max_length)
-    ## Attention mask
-    attention_masks = attention_masks.reshape(-1, max_length)
-    
-    output_f=Feature(input_ids=tokens,
-            input_mask =attention_masks,
-            segment_ids = metadata)    
-        
+    input_ids = tokenizer_output["input_ids"]
+    attention_mask = tokenizer_output["attention_mask"]
+    metadata = tokenizer_output["metadata"]
+
+    output_f = Feature(input_ids=input_ids, input_mask=attention_mask, segment_ids=metadata)
+
     return output_f

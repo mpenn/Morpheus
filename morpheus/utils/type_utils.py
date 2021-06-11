@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections import defaultdict
+import functools
 import inspect
 import typing
+from collections import defaultdict
 
 T_co = typing.TypeVar("T_co", covariant=True)
 T = typing.TypeVar('T')
@@ -22,6 +23,11 @@ T1 = typing.TypeVar('T1')
 T2 = typing.TypeVar('T2')
 T3 = typing.TypeVar('T3')
 T4 = typing.TypeVar('T4')
+
+# Use _DecoratorType as a type variable for decorators. See:
+# https://github.com/python/mypy/pull/8336/files#diff-eb668b35b7c0c4f88822160f3ca4c111f444c88a38a3b9df9bb8427131538f9cR260
+_DecoratorType = typing.TypeVar("_DecoratorType",
+                                bound=typing.Callable[..., typing.Any])
 
 def greatest_ancestor(*cls_list):
     mros = [list(inspect.getmro(cls)) for cls in cls_list]
@@ -94,3 +100,22 @@ def unpack_tuple(*cls_list: typing.Type) -> typing.Tuple:
             out_tuple = typing.Tuple[out_tuple, t]
 
         return out_tuple
+
+
+def pretty_print_type_name(t: typing.Type) -> str:
+    """
+    Determines a good label to use for a type. Keeps the strings shorter.
+    """
+
+    if (t.__module__ == "typing"):
+        return str(t).replace("typing.", "")
+
+    return t.__module__.split(".")[0] + "." + t.__name__
+
+
+def mirror_args(
+    wrapped: _DecoratorType,
+    assigned=('__doc__', '__annotations__'),
+    updated=functools.WRAPPER_UPDATES
+) -> typing.Callable[[_DecoratorType], _DecoratorType]:
+    return functools.wraps(wrapped=wrapped, assigned=assigned, updated=updated)

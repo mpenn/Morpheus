@@ -19,19 +19,23 @@ from functools import update_wrapper
 import click
 import click_completion
 import psutil
-from click import decorators
 from click.globals import get_current_context
 
-from morpheus.config import (Config, ConfigBase, ConfigOnnxToTRT, PipelineModes, auto_determine_bootstrap)
+from morpheus.config import Config
+from morpheus.config import ConfigBase
+from morpheus.config import ConfigOnnxToTRT
+from morpheus.config import PipelineModes
+from morpheus.config import auto_determine_bootstrap
 from morpheus.utils.logging import configure_logging
 
-# pylint: disable=line-too-long, import-outside-toplevel, invalid-name
+# pylint: disable=line-too-long, import-outside-toplevel, invalid-name, global-at-module-level
 
 # Init click completion to help with installing autocomplete.
 click_completion.init()
 
-# NOTE: This file will get executed when hitting <TAB> for autocompletion. Any classes that require a long import time should be
-# locally imported. For example, `morpheus.Pipeline` takes a long time to import and must be locally imported for each function
+# NOTE: This file will get executed when hitting <TAB> for autocompletion. Any classes that require a long import time
+# should be locally imported. For example, `morpheus.Pipeline` takes a long time to import and must be locally imported
+# for each function
 
 DEFAULT_CONFIG = Config.default()
 
@@ -129,7 +133,8 @@ if ("NOTSET" in log_levels):
 def _parse_log_level(ctx, param, value):
     x = logging._nameToLevel.get(value.upper(), None)
     if x is None:
-        raise click.BadParameter('Must be one of {}. Passed: {} CRITICAL, ERROR, WARNING, INFO or DEBUG, not {}'.format(value))
+        raise click.BadParameter(
+            'Must be one of {}. Passed: {} CRITICAL, ERROR, WARNING, INFO or DEBUG, not {}'.format(value))
     return x
 
 
@@ -233,7 +238,8 @@ def install(append, case_insensitive, shell, path):
     '--pipeline_batch_size',
     default=DEFAULT_CONFIG.pipeline_batch_size,
     type=click.IntRange(min=1),
-    help="Internal batch size for the pipeline. Can be much larger than the model batch size. Also used for Kafka consumers")
+    help=
+    "Internal batch size for the pipeline. Can be much larger than the model batch size. Also used for Kafka consumers")
 @click.option('--model_max_batch_size',
               default=DEFAULT_CONFIG.model_max_batch_size,
               type=click.IntRange(min=1),
@@ -244,9 +250,10 @@ def run(ctx: click.Context, **kwargs):
     pass
 
 
-@click.group(short_help="Place this command before a 'pipeline-*' command to run the pipeline with multiple processes using dask",
-             cls=AliasedGroup,
-             **command_kwargs)
+@click.group(
+    short_help="Place this command before a 'pipeline-*' command to run the pipeline with multiple processes using dask",
+    cls=AliasedGroup,
+    **command_kwargs)
 @prepare_command(Config.get().dask)
 def dask(ctx: click.Context, **kwargs):
 
@@ -256,20 +263,23 @@ def dask(ctx: click.Context, **kwargs):
 
 
 @click.group(chain=True, short_help="Run the inference pipeline with a NLP model", cls=AliasedGroup, **command_kwargs)
-@click.option('--model_vocab_hash_file',
-              default=DEFAULT_CONFIG.nlp.model_vocab_hash_file,
-              type=click.Path(exists=True, dir_okay=False),
-              help="Model vocab file to use for pre-processing")
-@click.option('--model_seq_length',
-              default=DEFAULT_CONFIG.nlp.model_seq_length,
-              type=click.IntRange(min=1),
-              help="Sequence length to use for the model")
-@prepare_command(Config.get().nlp)
+@click.option(
+    '--model_seq_length',
+    default=256,
+    type=click.IntRange(min=1),
+    help=
+    "Limits the length of the sequence returned. If tokenized string is shorter than max_length, output will be padded with 0s. If the tokenized string is longer than max_length and do_truncate == False, there will be multiple returned sequences containing the overflowing token-ids. Default value is 256"
+)
+@prepare_command()
 def pipeline_nlp(ctx: click.Context, **kwargs):
-    """Configure and run the pipeline. To configure the pipeline, list the stages in the order that data should flow. The output of each stage will become the input for the next stage. For example, to read, classify and write to a file, the following stages could be used
+    """
+    Configure and run the pipeline. To configure the pipeline, list the stages in the order that data should flow. The
+    output of each stage will become the input for the next stage. For example, to read, classify and write to a file,
+    the following stages could be used
 
     \b
-    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
+    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model
+    --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
 
     \b
     Pipelines must follow a few rules:
@@ -286,6 +296,8 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     config.mode = PipelineModes.NLP
 
+    config.feature_length = kwargs["model_seq_length"]
+
     from morpheus.pipeline import LinearPipeline
 
     ctx.obj = LinearPipeline(config)
@@ -294,16 +306,20 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
 
 @click.group(chain=True, short_help="Run the inference pipeline with a FIL model", cls=AliasedGroup, **command_kwargs)
-@click.option('--model_max_batch_size',
-              default=DEFAULT_CONFIG.model_max_batch_size,
+@click.option('--model_fea_length',
+              default=29,
               type=click.IntRange(min=1),
-              help="Max batch size to use for the model")
+              help="Number of features trained in the model")
 @prepare_command()
 def pipeline_fil(ctx: click.Context, **kwargs):
-    """Configure and run the pipeline. To configure the pipeline, list the stages in the order that data should flow. The output of each stage will become the input for the next stage. For example, to read, classify and write to a file, the following stages could be used
+    """
+    Configure and run the pipeline. To configure the pipeline, list the stages in the order that data should flow. The
+    output of each stage will become the input for the next stage. For example, to read, classify and write to a file,
+    the following stages could be used
 
     \b
-    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
+    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model
+    --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
 
     \b
     Pipelines must follow a few rules:
@@ -319,6 +335,8 @@ def pipeline_fil(ctx: click.Context, **kwargs):
     config = Config.get()
 
     config.mode = PipelineModes.FIL
+
+    config.feature_length = kwargs["model_fea_length"]
 
     from morpheus.pipeline import LinearPipeline
 
@@ -497,6 +515,17 @@ def deserialize(ctx: click.Context, **kwargs):
 
 
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
+@click.option(
+    '--vocab_hash_file',
+    default="data/bert-base-cased-hash.txt",
+    type=click.Path(exists=True, dir_okay=False),
+    help=
+    "Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab function. Default value is 'data/bert-base-cased-hash.txt'"
+)
+@click.option('--truncation', default=False, type=bool)
+@click.option('--do_lower_case', default=False, type=bool)
+@click.option('--add_special_tokens', default=False, type=bool)
+@click.option('--stride', type=int, default=-1, help="")
 @prepare_command(False)
 def preprocess_nlp(ctx: click.Context, **kwargs):
 
@@ -533,6 +562,13 @@ def preprocess_fil(ctx: click.Context, **kwargs):
 @click.command(short_help="Perform inference with Triton", **command_kwargs)
 @click.option('--model_name', type=str, required=True, help="Model name in Triton to send messages to")
 @click.option('--server_url', type=str, required=True, help="Triton server URL (IP:Port)")
+@click.option(
+    '--force_convert_inputs',
+    default=False,
+    type=bool,
+    help=
+    "Instructs this stage to forcibly convert all input types to match what Triton is expecting. Even if this is set to `False`, automatic conversion will be done only if there would be no data loss (i.e. int32 -> int64)."
+)
 @prepare_command(False)
 def inf_triton(ctx: click.Context, **kwargs):
 
@@ -540,8 +576,7 @@ def inf_triton(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
-    from morpheus.pipeline.inference.inference_triton import \
-        TritonInferenceStage
+    from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
 
     stage = TritonInferenceStage(Config.get(), **kwargs)
 
@@ -558,10 +593,30 @@ def inf_identity(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
-    from morpheus.pipeline.inference.inference_identity import \
-        IdentityInferenceStage
+    from morpheus.pipeline.inference.inference_identity import IdentityInferenceStage
 
     stage = IdentityInferenceStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(short_help="Perform inference with Triton", **command_kwargs)
+@click.option('--model_filename',
+              type=click.Path(exists=True, dir_okay=False),
+              required=True,
+              help="PyTorch model filename to load")
+@prepare_command(False)
+def inf_pytorch(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.inference.inference_pytorch import PyTorchInferenceStage
+
+    stage = PyTorchInferenceStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -578,6 +633,30 @@ def add_class(ctx: click.Context, **kwargs):
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.general_stages import AddClassificationsStage
+
+    if (Config.get().mode == PipelineModes.NLP):
+        # Add the si_prefix to the classes
+        kwargs["prefix"] = "si_"
+
+        # Default labels
+        kwargs["labels"] = [
+            'address',
+            'bank_acct',
+            'credit_card',
+            'email',
+            'govt_id',
+            'name',
+            'password',
+            'phone_num',
+            'secret_keys',
+            'user',
+        ]
+    elif (Config.get().mode == PipelineModes.FIL):
+        # TODO: Are these correct?
+        kwargs["labels"] = [
+            "mining",
+            "not_mining",
+        ]
 
     stage = AddClassificationsStage(Config.get(), **kwargs)
 
@@ -691,7 +770,11 @@ def to_kafka(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Write out vizualization data frames", **command_kwargs)
-@click.option('--out_dir', type=click.Path(dir_okay=True, file_okay=False), default="./viz_frames", required=True, help="")
+@click.option('--out_dir',
+              type=click.Path(dir_okay=True, file_okay=False),
+              default="./viz_frames",
+              required=True,
+              help="")
 @click.option('--overwrite', is_flag=True, help="")
 @prepare_command(False)
 def gen_viz(ctx: click.Context, **kwargs):
@@ -729,6 +812,7 @@ pipeline_nlp.add_command(from_file)
 pipeline_nlp.add_command(gen_viz)
 pipeline_nlp.add_command(inf_identity)
 pipeline_nlp.add_command(inf_triton)
+pipeline_nlp.add_command(inf_pytorch)
 pipeline_nlp.add_command(monitor)
 pipeline_nlp.add_command(preprocess_nlp)
 pipeline_nlp.add_command(serialize)
@@ -744,6 +828,7 @@ pipeline_fil.add_command(from_kafka)
 pipeline_fil.add_command(from_file)
 pipeline_fil.add_command(inf_identity)
 pipeline_fil.add_command(inf_triton)
+pipeline_nlp.add_command(inf_pytorch)
 pipeline_fil.add_command(monitor)
 pipeline_fil.add_command(preprocess_fil)
 pipeline_fil.add_command(serialize)
