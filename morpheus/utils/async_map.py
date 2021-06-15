@@ -23,8 +23,6 @@ from streamz.dask import DaskStream
 from tornado import gen
 from tornado.queues import Queue
 
-from distributed.client import default_client
-
 logger = logging.getLogger(__name__)
 
 
@@ -131,6 +129,8 @@ class scatter_batch(DaskStream):
     All elements flowing through the input will be scattered out to the cluster
     """
     async def update(self, x, who=None, metadata=None):
+        from distributed.client import default_client
+
         client = default_client()
 
         self._retain_refs(metadata)

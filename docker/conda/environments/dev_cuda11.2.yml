@@ -9,6 +9,8 @@ dependencies:
 - cudf_kafka=21.06.*
 - cuml=21.06.*
 - custreamz=21.06.*
+- dask
+- distributed
 - docker-compose
 - docker-py
 - faker
