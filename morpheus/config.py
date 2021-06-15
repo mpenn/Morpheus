@@ -98,7 +98,7 @@ class ConfigDask(ConfigBase):
 
 class PipelineModes(str, Enum):
     """The type of usecases that can be executed by the pipeline is determined by the enum."""
-    Other = "Other"
+    OTHER = "OTHER"
     NLP = "NLP"
     FIL = "FIL"
 
@@ -112,8 +112,13 @@ class Config(ConfigBase):
     ----------
     debug : bool
         Flag to run pipeline in debug mode. Default value is False
+    log_level : int
+        Specifies the log level and above to output. Must be one of the available levels in the `logging` module.
     mode : PipelineModes
-        Determines type of pipeline Ex: FIL or NLP. Use `Other` for custom pipelines.
+        Determines type of pipeline Ex: FIL or NLP. Use `OTHER` for custom pipelines.
+    feature_length : int
+        Specifies the dimension of the second axis for messages in the pipeline. For NLP this is the sequence length.
+        For FIL this is the number of input features
     pipeline_batch_size : int
         Determines number of messages per batch. Default value is 256
     num_threads : int
@@ -138,7 +143,7 @@ class Config(ConfigBase):
     log_level: int = logging.WARN
     log_config_file: str = None
 
-    mode: PipelineModes = PipelineModes.Other
+    mode: PipelineModes = PipelineModes.OTHER
 
     feature_length: int = 256
     pipeline_batch_size: int = 256

@@ -266,6 +266,10 @@ def dask(ctx: click.Context, **kwargs):
                     "output will be padded with 0s. If the tokenized string is longer than max_length and "
                     "do_truncate == False, there will be multiple returned sequences containing the "
                     "overflowing token-ids. Default value is 256"))
+@click.option('--viz_file',
+              default=None,
+              type=click.Path(dir_okay=False, writable=True),
+              help="Save a visualization of the pipeline at the specified location")
 @prepare_command()
 def pipeline_nlp(ctx: click.Context, **kwargs):
     """
@@ -306,6 +310,10 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
               default=29,
               type=click.IntRange(min=1),
               help="Number of features trained in the model")
+@click.option('--viz_file',
+              default=None,
+              type=click.Path(dir_okay=False, writable=True),
+              help="Save a visualization of the pipeline at the specified location")
 @prepare_command()
 def pipeline_fil(ctx: click.Context, **kwargs):
     """
@@ -351,6 +359,12 @@ def post_pipeline(ctx: click.Context, stages, **kwargs):
     from morpheus.pipeline import LinearPipeline
 
     pipeline: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    if ("viz_file" in kwargs and kwargs["viz_file"] is not None):
+        pipeline.build()
+
+        pipeline.visualize(kwargs["viz_file"], rankdir="LR")
+        click.secho("Pipeline visualization saved to {}".format(kwargs["viz_file"]), fg="yellow")
 
     # Run the pipeline
     pipeline.run()

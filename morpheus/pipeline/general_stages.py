@@ -261,7 +261,8 @@ class MonitorStage(SinglePortStage):
             return lambda y: y.mess_count
         elif (isinstance(x, list)):
             item_count_fn = self._auto_count_fn(x[0])
-            return lambda y: reduce(item_count_fn, y, 0)
+            sum_fn = lambda sum, z: sum + item_count_fn(z)
+            return lambda y: reduce(sum_fn, y, 0)
         elif (isinstance(x, str)):
             return lambda y: 1
         elif (hasattr(x, "__len__")):

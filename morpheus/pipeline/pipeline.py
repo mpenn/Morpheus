@@ -60,6 +60,9 @@ StreamPair = typing.Tuple[Stream, typing.Type]
 
 
 class Sender():
+    """
+    The `Sender` object reprents a port on a `StreamWrapper` object that sends messages to a `Receiver`
+    """
     def __init__(self, parent: "StreamWrapper", port_number: int):
 
         self._parent = parent
@@ -92,6 +95,9 @@ class Sender():
 
 
 class Receiver():
+    """
+    The `Receiver` object reprents a downstream port on a `StreamWrapper` object that gets messages from a `Sender`
+    """
     def __init__(self, parent: "StreamWrapper", port_number: int):
 
         self._parent = parent
@@ -110,11 +116,17 @@ class Receiver():
 
     @property
     def is_complete(self):
-        # A receiver is complete if all input senders are complete
+        """
+        A receiver is complete if all input senders are also complete
+        """
         return all([x.is_complete for x in self._input_senders])
 
     @property
     def is_partial(self):
+        """
+        A receiver is partially complete if any input sender is complete. Receivers are usually partially complete if
+        there is a circular pipeline
+        """
         # Its partially complete if any input sender is complete
         return any([x.is_complete for x in self._input_senders])
 
@@ -169,6 +181,13 @@ class Receiver():
         return (self._input_stream, self._input_type)
 
     def link(self):
+        """
+        The linking phase determines the final type of the `Receiver` and connects all underlying stages.
+
+        Raises:
+            RuntimeError: Throws a `RuntimeError` if the predicted input port type determined during the build phase is
+            different than the current port type.
+        """
 
         assert self.is_complete, "Must be complete before linking!"
 
@@ -189,7 +208,7 @@ class Receiver():
         self._is_linked = True
 
 
-def save_init_vals(func: _DecoratorType) -> _DecoratorType:
+def _save_init_vals(func: _DecoratorType) -> _DecoratorType:
 
     # Save the signature only once
     sig = inspect.signature(func, follow_wrapped=True)
@@ -250,7 +269,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
     def __init_subclass__(cls) -> None:
 
         # Wrap __init__ to save the arg values
-        cls.__init__ = save_init_vals(cls.__init__)
+        cls.__init__ = _save_init_vals(cls.__init__)
 
         return super().__init_subclass__()
 
@@ -398,6 +417,8 @@ class StreamWrapper(ABC, collections.abc.Hashable):
         The input value is a `StreamPair` which is a tuple containing the input `streamz.Stream` object and
         the message data type.
 
+        :meta public:
+
         Parameters
         ----------
         input_stream : StreamPair
@@ -499,6 +520,8 @@ class SourceStage(StreamWrapper):
     def _build_source(self) -> StreamPair:
         """
         Abstract method all derived Source classes should implement. Returns the same value as `build`
+
+        :meta public:
 
         Returns
         -------
@@ -875,7 +898,11 @@ class Pipeline():
     async def build_and_start(self):
 
         if (not self.is_built):
-            self.build()
+            try:
+                self.build()
+            except Exception:
+                logger.exception("Error occurred during Pipeline.build(). Exiting.", exc_info=True)
+                return
 
         await self.start()
 
@@ -1015,6 +1042,9 @@ class Pipeline():
         file_format = os.path.splitext(filename)[-1].replace(".", "")
 
         viz_binary = gv_graph.pipe(format=file_format)
+
+        # Ensure the output directory exists
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
 
         with open(filename, "wb") as f:
             f.write(viz_binary)
