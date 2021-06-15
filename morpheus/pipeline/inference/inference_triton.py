@@ -282,7 +282,10 @@ class ShmWrapper:
         self[name].copy_from_device(data.data, data.nbytes)
 
         # Configure the shared memory
-        triton_input.set_shared_memory(self.region_name, data.nbytes, self.get_offset(name))
+        # triton_input.set_shared_memory(self.region_name, data.nbytes, self.get_offset(name))
+
+        # TODO: For EA, we will avoid shared memory to reduce risk.
+        triton_input.set_data_from_numpy(data.get())
 
         return triton_input
 

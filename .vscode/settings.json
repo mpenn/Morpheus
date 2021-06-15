@@ -28,6 +28,5 @@
     "--rcfile=${workspaceFolder}/.pylintrc"
   ],
   "python.linting.pylintEnabled": true,
-  "python.pythonPath": "/home/mdemoret/anaconda3/envs/cyber_dev2/bin/python",
   "rewrap.wrappingColumn": 120,
 }

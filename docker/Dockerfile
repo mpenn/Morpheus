@@ -27,9 +27,11 @@ SHELL ["/bin/bash", "-c"]
 # All code will be under /workspace
 WORKDIR /workspace
 
+RUN /opt/conda/bin/conda install -y -n base -c conda-forge mamba && conda clean -afy
+
 COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environments/
 
-RUN /opt/conda/bin/conda env create -n morpheus \
+RUN /opt/conda/bin/mamba env create -n morpheus \
   --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
   conda clean -afy && \
   sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc

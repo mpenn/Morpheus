@@ -13,12 +13,12 @@
 # limitations under the License.
 
 import logging
+import os
 import warnings
 from functools import update_wrapper
 
 import click
 import click_completion
-import psutil
 from click.globals import get_current_context
 
 from morpheus.config import Config
@@ -228,7 +228,7 @@ def install(append, case_insensitive, shell, path):
 
 @cli.group(short_help="Run one of the available pipelines", cls=AliasedGroup, **command_kwargs)
 @click.option('--num_threads',
-              default=psutil.cpu_count(),
+              default=os.cpu_count(),
               type=click.IntRange(min=1),
               help="Number of internal pipeline threads to use")
 @click.option('--pipeline_batch_size',
@@ -607,7 +607,7 @@ def inf_identity(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Perform inference with Triton", **command_kwargs)
+@click.command(short_help="Perform inference with PyTorch", **command_kwargs)
 @click.option('--model_filename',
               type=click.Path(exists=True, dir_okay=False),
               required=True,
