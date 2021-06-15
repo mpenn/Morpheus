@@ -38,17 +38,29 @@ NVIDIA Morpheus is an open AI application framework that provides cybersecurity 
 
 - [Docker](https://docs.docker.com/get-docker/)
 - [The NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker)
-- [Streamz/CuStreamz](https://streamz.readthedocs.io/)
-  - The default version of `streamz` has several bugs when using an async, Dask stream. To fix this, we are temporarily using a fork of the `streamz` library. Please install with:
-    ```bash
-    pip install git+https://github.com/mdemoret-nv/streamz.git@async
-    ```
+- `conda` or `mamba`
+  - Conda is only necessary when building outside of the container.
+  - See the [Getting Started Guide](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) if `conda` is not already installed
+  - [Optional] Install `mamba` to speed up the package solver:
+
+      ```bash
+      conda activate base
+      conda install -c conda-forge mamba
+      ```
+
+  - **Note:** `mamba` should only be installed once in the base environment
 
 ### Installation
 
 #### Pre-built container
 
-Pre-built Morpheus containers will be available from NGC in the future. In the meantime, you will need to build the container manually or run the code locally.
+Pre-built Morpheus containers can be downloaded from NGC. To download the Morpeus SDK CLI container, run the following command:
+
+```bash
+docker pull nvcr.io/ea-nvidia-morpheus/morpheus-sdk-cli:latest
+```
+
+**Note:** You must be enrolled in the Morpheus Early Access program to download the Morpheus SDK CLI image.
 
 #### Building locally (inside a container)
 
@@ -62,7 +74,32 @@ This will create the `morpheus:latest` docker image. The commands to run Morpheu
 
 #### Building locally (outside a container)
 
-To build Morpheus outside of a container, first ensure all of the necessary requirements are installed (listed above). Then, from the repo root, run the following:
+To build Morpheus outside of a container, first ensure all of the necessary requirements are installed. The easiest way to ensure the necessary dependencies are installed is to create a new `conda` environment using the following commands:
+
+```bash
+export CUDA_VER=11.2
+conda env create -n morpheus \
+  --file docker/conda/environments/dev_cuda${CUDA_VER}.yml
+conda activate morpheus
+
+# Force reinstall of streamz fork
+pip install --upgrade --no-deps --force-reinstall git+https://github.com/mdemoret-nv/streamz.git@async#egg=streamz
+
+# Install the NVIDIA pip index
+pip install nvidia-pyindex
+
+# ===== OPTIONAL =====
+# The following dependencies are optional and only required depending on the workflow and stages that are needed
+
+# TensorRT
+TENSORRT_VERSION=7.2.2.3
+pip install nvidia-tensorrt==${TENSORRT_VERSION}
+
+# PyTorch (works for CUDA 11.1 & 11.2)
+pip install torch==1.8.1+cu111 torchvision==0.9.1+cu111 torchaudio==0.8.1 -f https://download.pytorch.org/whl/torch_stable.html
+```
+
+Then, from the repo root, run the following to build Morpheus and install into the current python environment:
 
 ```bash
 # For non-developers
@@ -84,7 +121,7 @@ Depending on your configuration, it may be necessary to start additional service
 
  - `from-kafka`/`to-kafka`
    - Requires a running Kafka cluster
-   - See the Quick Launch Kafka section. 
+   - See the Quick Launch Kafka section.
  - `inf-triton`
    - Requires a running Trion server
    - See the launching Triton section.
@@ -97,9 +134,9 @@ Launching a full production Kafka cluster is outside of the scope of this projec
    ```bash
    conda install -c conda-forge docker-compose
    ```
-2. Ensure the submodule `kafka-docker` is correctly checked out:
+2. Clone the `kafka-docker` repo from the Morpheus repo root:
    ```bash
-   git submodule update --init --recursive
+   git clone https://github.com/wurstmeister/kafka-docker.git
    ```
 3. Change directory to `kafka-docker`
    ```bash
@@ -109,14 +146,14 @@ Launching a full production Kafka cluster is outside of the scope of this projec
    ```bash
    export KAFKA_ADVERTISED_HOST_NAME=$(docker network inspect bridge | jq -r '.[0].IPAM.Config[0].Gateway')
    ```
-5. Update the `kafka-docker/docker-compose.yml` so the environment variable `KAFKA_ADVERTISED_HOST_NAME` matches the previous step. For example, the line should look like: 
+5. Update the `kafka-docker/docker-compose.yml` so the environment variable `KAFKA_ADVERTISED_HOST_NAME` matches the previous step. For example, the line should look like:
    ```yml
    environment:
       KAFKA_ADVERTISED_HOST_NAME: 172.17.0.1
    ```
    Which should match the value of `$KAFKA_ADVERTISED_HOST_NAME` from the previous step:
    ```bash
-   $ echo $KAFKA_ADVERTISED_HOST_NAME 
+   $ echo $KAFKA_ADVERTISED_HOST_NAME
    "172.17.0.1"
    ```
 6. Launch kafka with 3 instances
