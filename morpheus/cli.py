@@ -657,10 +657,9 @@ def add_class(ctx: click.Context, **kwargs):
             'user',
         ]
     elif (Config.get().mode == PipelineModes.FIL):
-        # TODO: Are these correct?
+        # Only one class by default
         kwargs["labels"] = [
             "mining",
-            "not_mining",
         ]
 
     stage = AddClassificationsStage(Config.get(), **kwargs)
@@ -819,6 +818,7 @@ pipeline_nlp.add_command(to_file)
 pipeline_nlp.add_command(to_kafka)
 
 # FIL Pipeline
+pipeline_fil.add_command(add_class)
 pipeline_fil.add_command(buffer)
 pipeline_fil.add_command(delay)
 pipeline_fil.add_command(deserialize)
