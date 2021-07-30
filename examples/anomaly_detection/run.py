@@ -97,7 +97,7 @@ def run_pipeline(num_threads,
     config.num_threads = num_threads
     config.pipeline_batch_size = pipeline_batch_size
     config.model_max_batch_size = model_max_batch_size
-    config.fil.model_fea_length = model_fea_length
+    config.feature_length = model_fea_length
 
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)
@@ -112,7 +112,8 @@ def run_pipeline(num_threads,
     pipeline.add_stage(UserProfPreprocessingStage(config))
 
     # Add a inference stage.
-    pipeline.add_stage(TritonInferenceStage(config, model_name=model_name, server_url=server_url))
+    pipeline.add_stage(
+        TritonInferenceStage(config, model_name=model_name, server_url=server_url, force_convert_inputs=False))
 
     # Convert the probabilities to serialized JSON strings using the custom serialization stage
     pipeline.add_stage(UserProfSerializeStage(config))

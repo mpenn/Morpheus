@@ -374,8 +374,19 @@ pipeline_nlp.result_callback = post_pipeline
 pipeline_fil.result_callback = post_pipeline
 
 
-@click.command(short_help="Load messages from a file", **command_kwargs)
-@click.option('--filename', type=click.Path(exists=True, dir_okay=False), help="Input filename")
+@click.command(short_help="Source messages from a file", **command_kwargs)
+@click.option('--filename', type=click.Path(exists=True, dir_okay=False), help="Input filename to load")
+@click.option('--iterative',
+              is_flag=True,
+              default=False,
+              help=("Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. "
+                    "Iterative mode is good for interleaving source stages. Non-iterative is better for dask "
+                    "(uploads entire dataset in one call)"))
+@click.option('--file-type',
+              type=click.Choice(['auto', 'json', 'csv'], case_sensitive=False),
+              default="auto",
+              help=("Indicates what type of file to read. "
+                    "Specifying 'auto' will determine the file type from the extension."))
 @prepare_command(False)
 def from_file(ctx: click.Context, **kwargs):
 
@@ -383,7 +394,10 @@ def from_file(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
-    from morpheus.pipeline.input.from_file import FileSourceStage
+    from morpheus.pipeline.input.from_file import FileSourceStage, FileSourceTypes
+
+    if ("file_type" in kwargs):
+        kwargs["file_type"] = FileSourceTypes(kwargs["file_type"])
 
     stage = FileSourceStage(Config.get(), **kwargs)
 

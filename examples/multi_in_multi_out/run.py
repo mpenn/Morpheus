@@ -88,8 +88,10 @@ def run():
     pipeline = Pipeline(c)
 
     # Create two source stages from different files
-    file_source1 = FileSourceStage(c, os.path.join(ex_root_dir, "data", "with_data_len.json"), iterative=True)
-    file_source2 = FileSourceStage(c, os.path.join(ex_root_dir, "data", "without_data_len.json"), iterative=True)
+    file_source1 = FileSourceStage(c, filename=os.path.join(ex_root_dir, "data", "with_data_len.json"), iterative=True)
+    file_source2 = FileSourceStage(c,
+                                   filename=os.path.join(ex_root_dir, "data", "without_data_len.json"),
+                                   iterative=True)
 
     deser_stage = DeserializeStage(c)
 
@@ -105,7 +107,11 @@ def run():
 
     pipeline.add_edge(deser_stage, switch_stage)
 
-    preproc_stage = PreprocessNLPStage(c)
+    preproc_stage = PreprocessNLPStage(c,
+                                       vocab_hash_file="./data/bert-base-cased-hash.txt",
+                                       truncation=False,
+                                       do_lower_case=False,
+                                       add_special_tokens=False)
 
     # Attach the pre-process node to port 1 of the switch stage
     pipeline.add_edge(switch_stage.output_ports[0], preproc_stage)
