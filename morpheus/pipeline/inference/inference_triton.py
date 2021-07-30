@@ -744,13 +744,13 @@ class TritonInferenceStage(InferenceStage):
         server.
     server_url : str
         Triton server URL
-    use_shared_memory: bool, default = True
+    use_shared_memory: bool, default = False
         Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. Using CUDA IPC reduces network
         transfer time but requires that Morpheus and Triton are located on the same machine
 
     """
     def __init__(self, c: Config, model_name: str, server_url: str, force_convert_inputs: bool,
-                 use_shared_memory: bool):
+                 use_shared_memory: bool = False):
         super().__init__(c)
 
         self._kwargs = {

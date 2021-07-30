@@ -17,17 +17,20 @@ import os
 
 import click
 import psutil
+from abp_pcap_preprocessing import AbpPcapPreprocessingStage
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
+from morpheus.pipeline.general_stages import AddClassificationsStage
+from morpheus.pipeline.general_stages import FilterDetectionsStage
+from morpheus.pipeline.general_stages import MonitorStage
 from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
 from morpheus.pipeline.input.from_file import FileSourceStage
+from morpheus.pipeline.output.serialize import SerializeStage
 from morpheus.pipeline.output.to_file import WriteToFileStage
 from morpheus.pipeline.pipeline import LinearPipeline
 from morpheus.pipeline.preprocessing import DeserializeStage
 from morpheus.utils.logging import configure_logging
-from user_prof_preprocessing import UserProfPreprocessingStage
-from user_prof_serialize import UserProfSerializeStage
 
 
 @click.command()
@@ -46,7 +49,7 @@ from user_prof_serialize import UserProfSerializeStage
 )
 @click.option(
     "--model_max_batch_size",
-    default=20000,
+    default=40000,
     type=click.IntRange(min=1),
     help="Max batch size to use for the model",
 )
@@ -70,7 +73,7 @@ from user_prof_serialize import UserProfSerializeStage
 )
 @click.option(
     "--model_name",
-    default="anomaly_detection_fil_model",
+    default="abp-pcap-xgb",
     help="The name of the model that is deployed on Tritonserver",
 )
 @click.option("--server_url", required=True, help="Tritonserver url")
@@ -102,21 +105,34 @@ def run_pipeline(num_threads,
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)
 
-    # Add a source stage from the file created by `pcap_data_producer.py`
+    # Set source stage
     pipeline.set_source(FileSourceStage(config, filename=input_file))
 
     # Add a deserialize stage
     pipeline.add_stage(DeserializeStage(config))
 
     # Add the custom preprocessing stage
-    pipeline.add_stage(UserProfPreprocessingStage(config))
+    pipeline.add_stage(AbpPcapPreprocessingStage(config))
 
-    # Add a inference stage.
+    # Add a monitor stage
+    pipeline.add_stage(MonitorStage(config, description="Preprocessing rate"))
+
+    # Add a inference stage
     pipeline.add_stage(
-        TritonInferenceStage(config, model_name=model_name, server_url=server_url, force_convert_inputs=False))
+        TritonInferenceStage(config, model_name=model_name, server_url=server_url, force_convert_inputs=True))
+
+    # Add a monitor stage
+    pipeline.add_stage(MonitorStage(config, description="Inference rate", unit="inf"))
+
+    # Add a add classification stage
+    pipeline.add_stage(AddClassificationsStage(config, labels=["probs"]))
+
+    # Add a filter stage
+    # Filters all benign entries
+    pipeline.add_stage(FilterDetectionsStage(config))
 
     # Convert the probabilities to serialized JSON strings using the custom serialization stage
-    pipeline.add_stage(UserProfSerializeStage(config))
+    pipeline.add_stage(SerializeStage(config))
 
     # Write the file to the output
     pipeline.add_stage(WriteToFileStage(config, filename=output_file, overwrite=True))

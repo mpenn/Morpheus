@@ -28,7 +28,7 @@ from morpheus.pipeline.messages import (
 )
 
 
-class UserProfPreprocessingStage(PreprocessBaseStage):
+class AbpPcapPreprocessingStage(PreprocessBaseStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -70,21 +70,21 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
 
         x.meta.df["timestamp"] = x.meta.df["timestamp"].astype("int64")
 
-        def round_to_minute_kernel(timestamp, rollup, kwarg1):
+        def round_to_minute_kernel(timestamp, rollup_time, kwarg1):
             for i, ts in enumerate(timestamp):
                 x = ts % 60000000
                 y = 1 - (x / 60000000)
                 delta = y * 60000000
-                rollup[i] = ts + delta
+                rollup_time[i] = ts + delta
 
         x.meta.df = x.meta.df.apply_rows(
             round_to_minute_kernel,
             incols=["timestamp"],
-            outcols=dict(rollup=np.int64),
+            outcols=dict(rollup_time=np.int64),
             kwargs=dict(kwarg1=0),
         )
-        x.meta.df["rollup"] = cudf.to_datetime(x.meta.df["rollup"], unit="us")
-        x.meta.df["rollup"] = x.meta.df["rollup"].dt.strftime("%Y-%m-%d %H:%M")
+        x.meta.df["rollup_time"] = cudf.to_datetime(x.meta.df["rollup_time"], unit="us")
+        x.meta.df["rollup_time"] = x.meta.df["rollup_time"].dt.strftime("%Y-%m-%d %H:%M")
 
         # creating flow_id "src_ip:src_port=dst_ip:dst_port"
         x.meta.df["flow_id"] = (x.meta.df["src_ip"] + ":" + x.meta.df["src_port"].astype("str") + "="
@@ -103,7 +103,7 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
         x.meta.df["data_len"] = x.meta.df["data_len"].astype("int16")
 
         # group by operation
-        x.meta.df = x.meta.df.groupby(["rollup", "flow_id"]).agg(agg_dict)
+        x.meta.df = x.meta.df.groupby(["rollup_time", "flow_id"]).agg(agg_dict)
 
         # Assumption: Each flow corresponds to a single packet flow
         # Given that the roll-up is on 1 minute, packets-per-minute(ppm)=number of flows
@@ -128,7 +128,7 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
         # Convert the dataframe to cupy the same way cuml does
         data = cp.asarray(x.meta.df[fea_cols].as_gpu_matrix(order="C"))
 
-        x.meta.df = x.meta.df[["rollup", "flow_id", "data_len"]].to_pandas()
+        x.meta.df = x.meta.df[["rollup_time", "flow_id", "data_len"]].to_pandas()
         count = data.shape[0]
 
         seg_ids = cp.zeros((count, 3), dtype=cp.uint32)
@@ -151,7 +151,7 @@ class UserProfPreprocessingStage(PreprocessBaseStage):
 
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         return partial(
-            UserProfPreprocessingStage.pre_process_batch,
+            AbpPcapPreprocessingStage.pre_process_batch,
             fea_len=self._fea_length,
             fea_cols=self.features,
         )
