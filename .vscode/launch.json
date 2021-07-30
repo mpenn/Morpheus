@@ -420,17 +420,19 @@
          "name": "Python: Anomaly Detection Example",
          "type": "python",
          "request": "launch",
-         "program": "${workspaceFolder}/examples/anomaly_detection/run.py",
+         "program": "${workspaceFolder}/examples/abp_pcap_detection/run.py",
          "console": "integratedTerminal",
-         "cwd": "${workspaceFolder}/examples/anomaly_detection",
+         "cwd": "${workspaceFolder}/examples/abp_pcap_detection",
          "justMyCode": false,
          "args": [
             "--input_file",
-            "./pcap.jsonlines",
+            "../../data/pcap_dump.jsonlines",
             "--output_file",
             "./pcap_output.jsonlines",
             "--server_url",
             "localhost:8001",
+            "--model_name",
+            "abp-pcap-xgb"
          ]
       },
       {
