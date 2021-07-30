@@ -167,7 +167,7 @@ class ResourcePool:
         self._queue.put(obj)
 
 
-class ShmWrapper:
+class InputWrapper:
     """
     This class is a wrapper around a CUDA shared memory object shared between this process and a Triton server instance.
     Since the Triton server only accepts numpy arrays as inputs, we can use this special class to pass memory references
@@ -186,8 +186,6 @@ class ShmWrapper:
         `TritonInOut` object
 
     """
-    total_count = 0
-
     def __init__(self,
                  client: tritonclient.InferenceServerClient,
                  model_name: str,
@@ -201,21 +199,6 @@ class ShmWrapper:
             self._total_bytes += self._config[key].bytes
 
         self.model_name = model_name
-        self.region_name = model_name + "_{}".format(ShmWrapper.total_count)
-        ShmWrapper.total_count += 1
-
-        # Allocate the total memory
-        self._memory: cp.cuda.Memory = cp.cuda.alloc(self._total_bytes).mem
-
-        # Get memory pointers for each object
-        for key in self._config.keys():
-            self._config[key].ptr = cp.cuda.MemoryPointer(self._memory, self._config[key].offset)
-
-        # Now get the registered IPC handle
-        self._ipc_handle = cp.cuda.runtime.ipcGetMemHandle(self._memory.ptr)
-
-        # Finally, regester this memory with the server. Must be base64 for some reason???
-        client.register_cuda_shared_memory(self.region_name, base64.b64encode(self._ipc_handle), 0, self._total_bytes)
 
     def get_bytes(self, name: str):
         """
@@ -251,45 +234,7 @@ class ShmWrapper:
         """
         return self._config[name].offset
 
-    def build_input(self, name: str, data: cp.ndarray, force_convert_inputs: bool) -> tritonclient.InferInput:
-        """
-        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`.
-        Utilizes the config option passed in the constructor to determine the shape/size/type.
-
-        Parameters
-        ----------
-        name : str
-            Inference input name.
-        data : cp.ndarray
-            Inference input data.
-
-        """
-
-        expected_dtype = cp.dtype(triton_to_np_dtype(self._config[name].datatype))
-
-        if (expected_dtype != data.dtype):
-
-            # See if we can auto convert without loss if force_convert_inputs is False
-            if (not force_convert_inputs):
-                _notify_dtype_once(self.model_name, name, expected_dtype, data.dtype)
-
-            data = data.astype(expected_dtype)
-
-        # Create the input
-        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
-
-        # Set the data
-        self[name].copy_from_device(data.data, data.nbytes)
-
-        # Configure the shared memory
-        # triton_input.set_shared_memory(self.region_name, data.nbytes, self.get_offset(name))
-
-        # TODO: For EA, we will avoid shared memory to reduce risk.
-        triton_input.set_data_from_numpy(data.get())
-
-        return triton_input
-
-    def __getitem__(self, name: str) -> cp.cuda.MemoryPointer:
+    def get_ptr(self, name: str) -> cp.cuda.MemoryPointer:
         """
         Returns the `cupy.cuda.MemoryPointer` object to the internal `ShmWrapper` for the specified
         input/output name.
@@ -309,6 +254,143 @@ class ShmWrapper:
         """
         return self._config[name].ptr
 
+    def _convert_data(self, name: str, data: cp.ndarray, force_convert_inputs: bool):
+        """
+        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`.
+        Utilizes the config option passed in the constructor to determine the shape/size/type.
+
+        Parameters
+        ----------
+        name : str
+            Inference input name.
+        data : cp.ndarray
+            Inference input data.
+        force_convert_inputs: bool
+            Whether or not to convert the inputs to the type specified by Triton. This will happen automatically if no
+            data would be lost in the conversion (i.e. float -> double). Set this to True to convert the input even if
+            data would be lost (i.e. double -> float)
+
+        """
+
+        expected_dtype = cp.dtype(triton_to_np_dtype(self._config[name].datatype))
+
+        if (expected_dtype != data.dtype):
+
+            # See if we can auto convert without loss if force_convert_inputs is False
+            if (not force_convert_inputs):
+                _notify_dtype_once(self.model_name, name, expected_dtype, data.dtype)
+
+            data = data.astype(expected_dtype)
+
+        return data
+
+        # Create the input
+        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
+
+        return triton_input
+
+    def build_input(self, name: str, data: cp.ndarray, force_convert_inputs: bool) -> tritonclient.InferInput:
+        """
+        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`.
+        Utilizes the config option passed in the constructor to determine the shape/size/type.
+
+        Parameters
+        ----------
+        name : str
+            Inference input name.
+        data : cp.ndarray
+            Inference input data.
+        force_convert_inputs: bool
+            Whether or not to convert the inputs to the type specified by Triton. This will happen automatically if no
+            data would be lost in the conversion (i.e. float -> double). Set this to True to convert the input even if
+            data would be lost (i.e. double -> float)
+
+        """
+
+        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
+
+        data = self._convert_data(name, data, force_convert_inputs)
+
+        # Set the memory using numpy
+        triton_input.set_data_from_numpy(data.get())
+
+        return triton_input
+
+
+class ShmInputWrapper(InputWrapper):
+    """
+    This class is a wrapper around a CUDA shared memory object shared between this process and a Triton server instance.
+    Since the Triton server only accepts numpy arrays as inputs, we can use this special class to pass memory references
+    of inputs on the device to the server without having to go to the host eliminating serialization and network
+    overhead.
+
+    Parameters
+    ----------
+    client : tritonclient.InferenceServerClient
+        Triton inference server client instance
+    model_name : str
+        Name of the model. Specifies which model can handle the inference requests that are sent to Triton
+        inference server.
+    config : typing.Dict[str, TritonInOut]
+        Model input and output configuration. Keys represent the input/output names. Values will be a
+        `TritonInOut` object
+
+    """
+    total_count = 0
+
+    def __init__(self,
+                 client: tritonclient.InferenceServerClient,
+                 model_name: str,
+                 config: typing.Dict[str, TritonInOut]):
+        super().__init__(client, model_name, config)
+
+        # Now create the necessary shared memory bits
+        self.region_name = model_name + "_{}".format(ShmInputWrapper.total_count)
+        ShmInputWrapper.total_count += 1
+
+        # Allocate the total memory
+        self._memory: cp.cuda.Memory = cp.cuda.alloc(self._total_bytes).mem
+
+        # Get memory pointers for each object
+        for key in self._config.keys():
+            self._config[key].ptr = cp.cuda.MemoryPointer(self._memory, self._config[key].offset)
+
+        # Now get the registered IPC handle
+        self._ipc_handle = cp.cuda.runtime.ipcGetMemHandle(self._memory.ptr)
+
+        # Finally, regester this memory with the server. Must be base64 for some reason???
+        client.register_cuda_shared_memory(self.region_name, base64.b64encode(self._ipc_handle), 0, self._total_bytes)
+
+    def build_input(self, name: str, data: cp.ndarray, force_convert_inputs: bool) -> tritonclient.InferInput:
+        """
+        This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`.
+        Utilizes the config option passed in the constructor to determine the shape/size/type.
+
+        Parameters
+        ----------
+        name : str
+            Inference input name.
+        data : cp.ndarray
+            Inference input data.
+        force_convert_inputs: bool
+            Whether or not to convert the inputs to the type specified by Triton. This will happen automatically if no
+            data would be lost in the conversion (i.e. float -> double). Set this to True to convert the input even if
+            data would be lost (i.e. double -> float)
+
+        """
+
+        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
+
+        data = self._convert_data(name, data, force_convert_inputs)
+
+        # Set the data
+        self.get_ptr(name).copy_from_device(data.data, data.nbytes)
+
+        # Configure the shared memory
+        triton_input.set_shared_memory(self.region_name, data.nbytes, self.get_offset(name))
+
+        return triton_input
+
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
 class TritonInference:
@@ -327,18 +409,22 @@ class TritonInference:
     inout_mapping : typing.Dict[str, str]
         Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
         Morpheus names do not match the model
-
+    use_shared_memory: bool, default = True
+        Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. Using CUDA IPC reduces network
+        transfer time but requires that Morpheus and Triton are located on the same machine
     """
     def __init__(self,
                  c: Config,
                  model_name: str,
                  server_url: str,
                  force_convert_inputs: bool,
-                 inout_mapping: typing.Dict[str, str] = None):
+                 inout_mapping: typing.Dict[str, str] = None,
+                 use_shared_memory: bool = False):
 
         self._model_name = model_name
         self._server_url = server_url
         self._inout_mapping = inout_mapping if inout_mapping is not None else {}
+        self._use_shared_memory = use_shared_memory
 
         self._requires_seg_ids = False
 
@@ -444,8 +530,14 @@ class TritonInference:
             # Combine the inputs/outputs for the shared memory
             shm_config = {**self._inputs, **self._outputs}
 
-            def create_wrapper():
-                return ShmWrapper(self._triton_client, self._model_name, shm_config)
+            if (self._use_shared_memory):
+
+                def create_wrapper():
+                    return ShmInputWrapper(self._triton_client, self._model_name, shm_config)
+            else:
+
+                def create_wrapper():
+                    return InputWrapper(self._triton_client, self._model_name, shm_config)
 
             self._mem_pool = ResourcePool(create_fn=create_wrapper, max_size=1000)
 
@@ -460,7 +552,7 @@ class TritonInference:
 
     def _infer_callback(self,
                         f: asyncio.Future,
-                        m: ShmWrapper,
+                        m: InputWrapper,
                         result: tritonclient.InferResult,
                         error: tritonclient.InferenceServerException):
 
@@ -494,7 +586,7 @@ class TritonInference:
             Future to capture responses
 
         """
-        mem: ShmWrapper = self._mem_pool.borrow()
+        mem: InputWrapper = self._mem_pool.borrow()
 
         inputs: typing.List[tritonclient.InferInput] = [
             mem.build_input(input.name,
@@ -558,6 +650,9 @@ class TritonInferenceNLP(TritonInference):
     inout_mapping : typing.Dict[str, str]
         Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
         Morpheus names do not match the model
+    use_shared_memory: bool, default = True
+        Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. Using CUDA IPC reduces network
+        transfer time but requires that Morpheus and Triton are located on the same machine
 
     """
     def __init__(self,
@@ -565,6 +660,7 @@ class TritonInferenceNLP(TritonInference):
                  model_name: str,
                  server_url: str,
                  force_convert_inputs: bool,
+                 use_shared_memory: bool,
                  inout_mapping: typing.Dict[str, str] = None):
         # Some models use different names for the same thing. Set that here but allow user customization
         default_mapping = {
@@ -577,6 +673,7 @@ class TritonInferenceNLP(TritonInference):
                          model_name=model_name,
                          server_url=server_url,
                          force_convert_inputs=force_convert_inputs,
+                         use_shared_memory=use_shared_memory,
                          inout_mapping=default_mapping)
 
     def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
@@ -618,11 +715,13 @@ class TritonInferenceFIL(TritonInference):
                  model_name: str,
                  server_url: str,
                  force_convert_inputs: bool,
+                 use_shared_memory: bool,
                  inout_mapping: typing.Dict[str, str] = None):
         super().__init__(c,
                          model_name=model_name,
                          server_url=server_url,
                          force_convert_inputs=force_convert_inputs,
+                         use_shared_memory=use_shared_memory,
                          inout_mapping=inout_mapping)
 
     def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
@@ -650,29 +749,30 @@ class TritonInferenceStage(InferenceStage):
         server.
     server_url : str
         Triton server URL
+    use_shared_memory: bool, default = True
+        Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. Using CUDA IPC reduces network
+        transfer time but requires that Morpheus and Triton are located on the same machine
 
     """
-    def __init__(self, c: Config, model_name: str, server_url: str, force_convert_inputs: bool):
+    def __init__(self, c: Config, model_name: str, server_url: str, force_convert_inputs: bool,
+                 use_shared_memory: bool):
         super().__init__(c)
 
-        self._model_name = model_name
-        self._server_url = server_url
-        self._force_convert_inputs = force_convert_inputs
+        self._kwargs = {
+            "model_name": model_name,
+            "server_url": server_url,
+            "force_convert_inputs": force_convert_inputs,
+            "use_shared_memory": use_shared_memory,
+        }
 
         self._requires_seg_ids = False
 
     def _get_inference_fn(self) -> typing.Callable:
 
         if (Config.get().mode == PipelineModes.NLP):
-            worker = TritonInferenceNLP(Config.get(),
-                                        model_name=self._model_name,
-                                        server_url=self._server_url,
-                                        force_convert_inputs=self._force_convert_inputs)
+            worker = TritonInferenceNLP(Config.get(), **self._kwargs)
         elif (Config.get().mode == PipelineModes.FIL):
-            worker = TritonInferenceFIL(Config.get(),
-                                        model_name=self._model_name,
-                                        server_url=self._server_url,
-                                        force_convert_inputs=self._force_convert_inputs)
+            worker = TritonInferenceFIL(Config.get(), **self._kwargs)
         else:
             raise NotImplementedError("Unknown config mode")
 
