@@ -574,6 +574,12 @@ def preprocess_fil(ctx: click.Context, **kwargs):
               help=("Instructs this stage to forcibly convert all input types to match what Triton is expecting. "
                     "Even if this is set to `False`, automatic conversion will be done only if there would be no "
                     "data loss (i.e. int32 -> int64)."))
+@click.option("--use_shared_memory",
+              type=bool,
+              default=False, # TODO: For EA, Shared memory is giving issues. Default to False for now
+              help=("Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. "
+                    "Using CUDA IPC reduces network transfer time but requires that Morpheus and Triton are "
+                    "located on the same machine"))
 @prepare_command(False)
 def inf_triton(ctx: click.Context, **kwargs):
 
