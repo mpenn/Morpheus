@@ -284,11 +284,6 @@ class InputWrapper:
 
         return data
 
-        # Create the input
-        triton_input = tritonclient.InferInput(name, list(data.shape), self._config[name].datatype)
-
-        return triton_input
-
     def build_input(self, name: str, data: cp.ndarray, force_convert_inputs: bool) -> tritonclient.InferInput:
         """
         This helper function builds a Triton InferInput object that can be directly used by `tritonclient.async_infer`.
