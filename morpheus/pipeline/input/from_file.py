@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import enum
 import logging
+import os
 import typing
 from functools import reduce
 
@@ -33,6 +35,14 @@ from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
 
 logger = logging.getLogger(__name__)
+
+
+@enum.unique
+class FileSourceTypes(str, enum.Enum):
+    """The type of files that the `FileSourceStage` can read. Use 'auto' to determine from the file extension."""
+    Auto = "auto"
+    Json = "json"
+    Csv = "csv"
 
 
 @Stream.register_api(staticmethod)
@@ -98,28 +108,43 @@ def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
 
 class FileSourceStage(SingleOutputSource):
     """
-    This class Load messages from a file and dumps the contents into the pipeline immediately. Useful for
-    testing throughput.
+    Source stage ised to load messages from a file and dumping the contents into the pipeline immediately. Useful for
+    testing performance and accuracy of a pipeline.
 
     Parameters
     ----------
     c : morpheus.config.Config
         Pipeline configuration instance.
     filename : str
-        Name of the file from which the messages will be read. Must be JSON lines.
-
+        Name of the file from which the messages will be read.
+    iterative: boolean
+        Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode is
+        good for interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
+    file_type : FileSourceTypes, default = 'auto'
+        Indicates what type of file to read. Specifying 'auto' will determine the file type from the extension.
+        Supported extensions: 'json', 'csv'
+    cudf_kwargs: dict, default=None
+        keyword args passed to underlying cuDF I/O function. See the cuDF documentation for `cudf.read_csv()` and
+        `cudf.read_json()` for the available options. With `file_type` == 'json', this defaults to ``{ "lines": True }``
+        and with `file_type` == 'csv', this defaults to ``{}``
     """
-    def __init__(self, c: Config, filename: str, iterative: bool = None):
+    def __init__(self,
+                 c: Config,
+                 filename: str,
+                 iterative: bool = None,
+                 file_type: FileSourceTypes = FileSourceTypes.Auto,
+                 cudf_kwargs: dict = None):
         super().__init__(c)
 
-        self._filename = filename
         self._batch_size = c.pipeline_batch_size
-        self._input_count = None
         self._use_dask = c.use_dask
 
-        # Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode
-        # is good for interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
+        self._filename = filename
         self._iterative = iterative if iterative is not None else not c.use_dask
+        self._file_type = file_type
+        self._cudf_kwargs = {} if cudf_kwargs is None else cudf_kwargs
+
+        self._input_count = None
 
     @property
     def name(self) -> str:
@@ -130,11 +155,43 @@ class FileSourceStage(SingleOutputSource):
         """Return None for no max intput count"""
         return self._input_count
 
+    def _read_file(self) -> cudf.DataFrame:
+
+        mode = self._file_type
+        cudf_args = {}
+
+        if (mode == FileSourceTypes.Auto):
+            # Determine from the file extension
+            ext = os.path.splitext(self._filename)
+
+            # Get the extension without the dot
+            ext = ext[1].lower()[1:]
+
+            # Check against supported options
+            if (ext == "json" or ext == "jsonlines"):
+                mode = FileSourceTypes.Json
+                cudf_args = { "engine": "cudf", "lines": True }
+            elif (ext == "csv"):
+                mode = FileSourceTypes.Csv
+            else:
+                raise RuntimeError("Unsupported extension '{}' with 'auto' type. 'auto' only works with: csv, json".format(ext))
+
+        # Update with any args set by the user. User values overwrite defaults
+        cudf_args.update(self._cudf_kwargs)
+
+        if (mode == FileSourceTypes.Json):
+            df = cudf.read_json(self._filename, **cudf_args)
+            df = df_onread_cleanup(df)
+            return df
+        elif (mode == FileSourceTypes.Csv):
+            df = cudf.read_csv(self._filename, **cudf_args)
+            return df
+        else:
+            assert False, "Unsupported file type mode: {}".format(mode)
+
     def _build_source(self) -> typing.Tuple[Source, typing.Type]:
 
-        df = cudf.read_json(self._filename, engine="cudf", lines=True)
-
-        df = df_onread_cleanup(df)
+        df = self._read_file()
 
         out_stream: Source = Stream.from_iterable_done(self._generate_frames(df),
                                                        asynchronous=True,
