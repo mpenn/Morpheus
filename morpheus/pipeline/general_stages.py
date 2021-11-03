@@ -261,8 +261,7 @@ class MonitorStage(SinglePortStage):
             return lambda y: y.mess_count
         elif (isinstance(x, list)):
             item_count_fn = self._auto_count_fn(x[0])
-            sum_fn = lambda sum, z: sum + item_count_fn(z)
-            return lambda y: reduce(sum_fn, y, 0)
+            return lambda y: reduce(lambda sum, z, item_count_fn=item_count_fn: sum + item_count_fn(z), y, 0)
         elif (isinstance(x, str)):
             return lambda y: 1
         elif (hasattr(x, "__len__")):
@@ -284,19 +283,16 @@ class AddClassificationsStage(SinglePortStage):
         Threshold to classify, default is 0.5
 
     """
-    def __init__(self,
-                 c: Config,
-                 threshold: float = 0.5,
-                 labels_file: str = None,
-                 labels: typing.List[str] = None,
-                 prefix: str = ""):
+    def __init__(self, c: Config, threshold: float = 0.5, labels: typing.List[str] = None, prefix: str = ""):
         super().__init__(c)
 
         self._feature_length = c.feature_length
         self._threshold = threshold
-        self._labels_file = labels_file
-        self._labels = labels
         self._prefix = prefix
+        self._labels = labels if labels is not None else c.class_labels
+
+        # combine any prefix
+        self._idx2label = {i: self._prefix + l for i, l in enumerate(self._labels)}
 
     @property
     def name(self) -> str:
@@ -314,15 +310,6 @@ class AddClassificationsStage(SinglePortStage):
         """
         return (MultiResponseProbsMessage, )
 
-    def _determine_labels(self) -> typing.List[str]:
-
-        if (self._labels is not None):
-            return self._labels
-        elif (self._labels_file is not None):
-            raise NotImplementedError("Labels must be specified manually or via the defaults provided in the CLI")
-        else:
-            raise RuntimeError("Labels or a labels file must be specified for AddClassificationStage")
-
     def _add_labels(self, x: MultiResponseProbsMessage, idx2label: typing.Mapping[int, str]):
 
         if (x.probs.shape[1] != len(idx2label)):
@@ -339,17 +326,12 @@ class AddClassificationsStage(SinglePortStage):
 
     def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
-        # First, determine the labels
-        labels = self._determine_labels()
-
-        assert len(labels) > 0, "Labels must be non-zero array"
-
-        idx2label = {i: self._prefix + l for i, l in enumerate(labels)}
+        assert len(self._labels) > 0, "Labels must be non-zero array"
 
         stream = input_stream[0]
 
         # Convert the messages to rows of strings
-        stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool, idx2label=idx2label)
+        stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool, idx2label=self._idx2label)
 
         # Return input unchanged
         return stream, MultiResponseProbsMessage
