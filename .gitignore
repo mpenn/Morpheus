@@ -191,3 +191,4 @@ triton_models/**/*.onnx
 triton_models/**/*.engine
 docs/source/_modules
 data/*
+mlruns/*

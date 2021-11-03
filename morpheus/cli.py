@@ -266,6 +266,11 @@ def dask(ctx: click.Context, **kwargs):
                     "output will be padded with 0s. If the tokenized string is longer than max_length and "
                     "do_truncate == False, there will be multiple returned sequences containing the "
                     "overflowing token-ids. Default value is 256"))
+@click.option('--labels_file',
+              default="data/labels_nlp.txt",
+              type=click.Path(dir_okay=False, exists=True, file_okay=True),
+              help=("Specifies a file to read labels from in order to convert class IDs into labels. "
+                    "A label file is a simple text file where each line corresponds to a label"))
 @click.option('--viz_file',
               default=None,
               type=click.Path(dir_okay=False, writable=True),
@@ -298,6 +303,11 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     config.feature_length = kwargs["model_seq_length"]
 
+    if (kwargs["labels_file"] is not None):
+        with open(kwargs["labels_file"], "r") as lf:
+            config.class_labels = [x.strip() for x in lf.readlines()]
+            logger.info("Loaded labels file. Current labels: [%s]", str(config.class_labels))
+
     from morpheus.pipeline import LinearPipeline
 
     ctx.obj = LinearPipeline(config)
@@ -310,6 +320,12 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
               default=29,
               type=click.IntRange(min=1),
               help="Number of features trained in the model")
+@click.option('--labels_file',
+              default=None,
+              type=click.Path(dir_okay=False, exists=True, file_okay=True),
+              help=("Specifies a file to read labels from in order to convert class IDs into labels. "
+                    "A label file is a simple text file where each line corresponds to a label. "
+                    "If unspecified, only a single output label is created for FIL"))
 @click.option('--viz_file',
               default=None,
               type=click.Path(dir_okay=False, writable=True),
@@ -341,6 +357,14 @@ def pipeline_fil(ctx: click.Context, **kwargs):
     config.mode = PipelineModes.FIL
 
     config.feature_length = kwargs["model_fea_length"]
+
+    if (kwargs["labels_file"] is not None):
+        with open(kwargs["labels_file"], "r") as lf:
+            config.class_labels = lf.readlines()
+            logger.info("Loaded labels file. Current labels: [%s]", str(config.class_labels))
+    else:
+        # Use a default single label
+        config.class_labels = ["mining"]
 
     from morpheus.pipeline import LinearPipeline
 
@@ -398,7 +422,8 @@ def from_file(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
-    from morpheus.pipeline.input.from_file import FileSourceStage, FileSourceTypes
+    from morpheus.pipeline.input.from_file import FileSourceStage
+    from morpheus.pipeline.input.from_file import FileSourceTypes
 
     if ("file_type" in kwargs):
         kwargs["file_type"] = FileSourceTypes(kwargs["file_type"])
@@ -592,12 +617,13 @@ def preprocess_fil(ctx: click.Context, **kwargs):
               help=("Instructs this stage to forcibly convert all input types to match what Triton is expecting. "
                     "Even if this is set to `False`, automatic conversion will be done only if there would be no "
                     "data loss (i.e. int32 -> int64)."))
-@click.option("--use_shared_memory",
-              type=bool,
-              default=False, # TODO: For EA, Shared memory is giving issues. Default to False for now
-              help=("Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. "
-                    "Using CUDA IPC reduces network transfer time but requires that Morpheus and Triton are "
-                    "located on the same machine"))
+@click.option(
+    "--use_shared_memory",
+    type=bool,
+    default=False,  # TODO: For EA, Shared memory is giving issues. Default to False for now
+    help=("Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. "
+          "Using CUDA IPC reduces network transfer time but requires that Morpheus and Triton are "
+          "located on the same machine"))
 @prepare_command(False)
 def inf_triton(ctx: click.Context, **kwargs):
 
@@ -665,26 +691,8 @@ def add_class(ctx: click.Context, **kwargs):
 
     if (Config.get().mode == PipelineModes.NLP):
         # Add the si_prefix to the classes
-        kwargs["prefix"] = "si_"
-
-        # Default labels
-        kwargs["labels"] = [
-            'address',
-            'bank_acct',
-            'credit_card',
-            'email',
-            'govt_id',
-            'name',
-            'password',
-            'phone_num',
-            'secret_keys',
-            'user',
-        ]
-    elif (Config.get().mode == PipelineModes.FIL):
-        # Only one class by default
-        kwargs["labels"] = [
-            "mining",
-        ]
+        if ("prefix" not in kwargs):
+            kwargs["prefix"] = "si_"
 
     stage = AddClassificationsStage(Config.get(), **kwargs)
 
@@ -739,6 +747,54 @@ def serialize(ctx: click.Context, **kwargs):
     from morpheus.pipeline.output.serialize import SerializeStage
 
     stage = SerializeStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(short_help="Report model drift statistics to ML Flow", **command_kwargs)
+@click.option('--tracking_uri',
+              type=str,
+              default=None,
+              help=("The ML Flow tracking URI to connect to the tracking backend. If not speficied, MF Flow will use "
+                    "'file:///mlruns' relative to the current directory"))
+@click.option('--experiment_name', type=str, default="Morpheus", help=("The experiement name to use in ML Flow"))
+@click.option('--run_id',
+              type=str,
+              default=None,
+              help=("The ML Flow Run ID to report metrics to. If unspecified, Morpheus will attempt to reuse any "
+                    "previously created runs that are still active. Otherwise, a new run will be created. By default, "
+                    "runs are left in an active state."))
+@click.option('--labels',
+              type=str,
+              default=tuple(),
+              multiple=True,
+              show_default="Determined by mode",
+              help=("Converts probability indexes into labels for the ML Flow UI. If no labels are specified, "
+                    "the probability labels are determined by the pipeline mode."))
+@click.option('--batch_size',
+              type=int,
+              default=-1,
+              help=("The batch size to calculate model drift statistics. Allows for increasing or decreasing how "
+                    "much data is reported to MLFlow. Default is -1 which will use the pipeline batch_size."))
+@click.option('--force_new_run',
+              is_flag=True,
+              help=("Whether or not to reuse the most recent run ID in ML Flow or create a new one each time the "
+                    "pipeline is run"))
+@prepare_command(False)
+def mlflow_drift(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    # Ensure labels is not a tuple
+    kwargs["labels"] = list(kwargs["labels"])
+
+    from morpheus.pipeline.postprocess.mlflow_drift import MLFlowDriftStage
+
+    stage = MLFlowDriftStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -829,12 +885,13 @@ pipeline_nlp.add_command(buffer)
 pipeline_nlp.add_command(delay)
 pipeline_nlp.add_command(deserialize)
 pipeline_nlp.add_command(filter)
-pipeline_nlp.add_command(from_kafka)
 pipeline_nlp.add_command(from_file)
+pipeline_nlp.add_command(from_kafka)
 pipeline_nlp.add_command(gen_viz)
 pipeline_nlp.add_command(inf_identity)
-pipeline_nlp.add_command(inf_triton)
 pipeline_nlp.add_command(inf_pytorch)
+pipeline_nlp.add_command(inf_triton)
+pipeline_nlp.add_command(mlflow_drift)
 pipeline_nlp.add_command(monitor)
 pipeline_nlp.add_command(preprocess_nlp)
 pipeline_nlp.add_command(serialize)
@@ -847,11 +904,12 @@ pipeline_fil.add_command(buffer)
 pipeline_fil.add_command(delay)
 pipeline_fil.add_command(deserialize)
 pipeline_fil.add_command(filter)
-pipeline_fil.add_command(from_kafka)
 pipeline_fil.add_command(from_file)
+pipeline_fil.add_command(from_kafka)
 pipeline_fil.add_command(inf_identity)
+pipeline_fil.add_command(inf_pytorch)
 pipeline_fil.add_command(inf_triton)
-pipeline_nlp.add_command(inf_pytorch)
+pipeline_fil.add_command(mlflow_drift)
 pipeline_fil.add_command(monitor)
 pipeline_fil.add_command(preprocess_fil)
 pipeline_fil.add_command(serialize)

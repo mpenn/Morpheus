@@ -150,8 +150,10 @@ class Config(ConfigBase):
     num_threads: int = 1
     model_max_batch_size: int = 8
 
-    use_dask: bool = False
+    # Class labels to convert class index to label.
+    class_labels: typing.List[str] = dataclasses.field(default_factory=list)
 
+    use_dask: bool = False
     dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
 
     @staticmethod
