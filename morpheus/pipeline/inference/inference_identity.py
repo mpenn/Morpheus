@@ -20,21 +20,18 @@ import cupy as cp
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
-from morpheus.pipeline.inference.inference_stage import InferenceStage
+from morpheus.pipeline.inference.inference_stage import InferenceStage, InferenceWorker
 from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import ResponseMemoryProbs
 
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
-class IdentityInference:
-    def __init__(self, c: Config):
+class IdentityInferenceWorker(InferenceWorker):
+    def __init__(self, inf_queue: ProducerConsumerQueue, c: Config):
+        super().__init__(inf_queue)
 
         self._max_batch_size = c.model_max_batch_size
         self._seq_length = c.feature_length
-
-    def init(self, loop: IOLoop):
-
-        self._loop = loop
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
         def tmp(b: MultiInferenceMessage, f):
@@ -47,30 +44,10 @@ class IdentityInference:
 
         self._loop.add_callback(tmp, batch, fut)
 
-    def main_loop(self, loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
-
-        self.init(loop)
-
-        if (ready_event is not None):
-            loop.asyncio_loop.call_soon_threadsafe(ready_event.set)
-
-        while True:
-
-            # Get the next work item
-            message: typing.Tuple[MultiInferenceMessage, asyncio.Future] = inf_queue.get(block=True)
-
-            batch = message[0]
-            fut = message[1]
-
-            self.process(batch, fut)
-
 
 class IdentityInferenceStage(InferenceStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-    def _get_inference_fn(self) -> typing.Callable:
-
-        worker = IdentityInference(Config.get())
-
-        return worker.main_loop
+    def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
+        return IdentityInferenceWorker(inf_queue=inf_queue, c=Config.get())

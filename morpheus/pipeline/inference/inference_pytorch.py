@@ -21,8 +21,10 @@ from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
+from morpheus.pipeline.inference.inference_stage import InferenceWorker
 from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import ResponseMemoryProbs
+from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
 
 try:
     import torch
@@ -36,19 +38,17 @@ except ImportError:
     raise
 
 
-class PyTorchInference:
-    def __init__(self, c: Config, model_filename: str):
+class PyTorchInference(InferenceWorker):
+    def __init__(self, inf_queue: ProducerConsumerQueue, c: Config, model_filename: str):
+        super().__init__(inf_queue)
 
         self._max_batch_size = c.model_max_batch_size
         self._seq_length = c.feature_length
         self._model_filename: str = model_filename
 
-        self._loop: IOLoop = None
         self._model = None
 
-    def init(self, loop: IOLoop):
-
-        self._loop = loop
+    def init(self):
 
         # Load the model into CUDA memory
         self._model = torch.load(self._model_filename).to('cuda')
@@ -78,23 +78,6 @@ class PyTorchInference:
 
         self._loop.add_callback(tmp, response_mem)
 
-    def main_loop(self, loop: IOLoop, inf_queue: queue.Queue, ready_event: asyncio.Event = None):
-
-        self.init(loop)
-
-        if (ready_event is not None):
-            loop.asyncio_loop.call_soon_threadsafe(ready_event.set)
-
-        while True:
-
-            # Get the next work item
-            message: typing.Tuple[MultiInferenceMessage, asyncio.Future] = inf_queue.get(block=True)
-
-            batch = message[0]
-            fut = message[1]
-
-            self.process(batch, fut)
-
 
 class PyTorchInferenceStage(InferenceStage):
     def __init__(self, c: Config, model_filename: str):
@@ -102,8 +85,6 @@ class PyTorchInferenceStage(InferenceStage):
 
         self._model_filename = model_filename
 
-    def _get_inference_fn(self) -> typing.Callable:
+    def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
 
-        worker = PyTorchInference(Config.get(), model_filename=self._model_filename)
-
-        return worker.main_loop
+        return PyTorchInference(inf_queue, Config.get(), model_filename=self._model_filename)

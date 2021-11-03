@@ -374,8 +374,8 @@ pipeline_nlp.result_callback = post_pipeline
 pipeline_fil.result_callback = post_pipeline
 
 
-@click.command(short_help="Source messages from a file", **command_kwargs)
-@click.option('--filename', type=click.Path(exists=True, dir_okay=False), help="Input filename to load")
+@click.command(short_help="Load messages from a file", **command_kwargs)
+@click.option('--filename', type=click.Path(exists=True, dir_okay=False), help="Input filename")
 @click.option('--iterative',
               is_flag=True,
               default=False,
@@ -387,6 +387,10 @@ pipeline_fil.result_callback = post_pipeline
               default="auto",
               help=("Indicates what type of file to read. "
                     "Specifying 'auto' will determine the file type from the extension."))
+@click.option('--repeat',
+              default=1,
+              type=click.IntRange(min=1),
+              help=("Repeats the input dataset multiple times. Useful to extend small datasets for debugging."))
 @prepare_command(False)
 def from_file(ctx: click.Context, **kwargs):
 

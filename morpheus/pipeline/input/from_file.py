@@ -71,6 +71,13 @@ class from_iterable_done(Source):
         self._total_count = 0
         self._counters: typing.List[RefCounter] = []
 
+    async def _source_generator(self):
+        async for x in self._iterable:
+            yield self._emit(x)
+
+            if (self.stopped):
+                break
+
     @gen.coroutine
     def _ref_callback(self):
         self._total_count -= 1
@@ -123,6 +130,8 @@ class FileSourceStage(SingleOutputSource):
     file_type : FileSourceTypes, default = 'auto'
         Indicates what type of file to read. Specifying 'auto' will determine the file type from the extension.
         Supported extensions: 'json', 'csv'
+    repeat: int, default = 1
+        Repeats the input dataset multiple times. Useful to extend small datasets for debugging.
     cudf_kwargs: dict, default=None
         keyword args passed to underlying cuDF I/O function. See the cuDF documentation for `cudf.read_csv()` and
         `cudf.read_json()` for the available options. With `file_type` == 'json', this defaults to ``{ "lines": True }``
@@ -133,6 +142,7 @@ class FileSourceStage(SingleOutputSource):
                  filename: str,
                  iterative: bool = None,
                  file_type: FileSourceTypes = FileSourceTypes.Auto,
+                 repeat: int = 1,
                  cudf_kwargs: dict = None):
         super().__init__(c)
 
@@ -145,6 +155,12 @@ class FileSourceStage(SingleOutputSource):
         self._cudf_kwargs = {} if cudf_kwargs is None else cudf_kwargs
 
         self._input_count = None
+        self._max_concurrent = c.num_threads
+
+        # Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode
+        # is good for interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
+        self._iterative = iterative if iterative is not None else not c.use_dask
+        self._repeat_count = repeat
 
     @property
     def name(self) -> str:
@@ -170,11 +186,12 @@ class FileSourceStage(SingleOutputSource):
             # Check against supported options
             if (ext == "json" or ext == "jsonlines"):
                 mode = FileSourceTypes.Json
-                cudf_args = { "engine": "cudf", "lines": True }
+                cudf_args = {"engine": "cudf", "lines": True}
             elif (ext == "csv"):
                 mode = FileSourceTypes.Csv
             else:
-                raise RuntimeError("Unsupported extension '{}' with 'auto' type. 'auto' only works with: csv, json".format(ext))
+                raise RuntimeError(
+                    "Unsupported extension '{}' with 'auto' type. 'auto' only works with: csv, json".format(ext))
 
         # Update with any args set by the user. User values overwrite defaults
         cudf_args.update(self._cudf_kwargs)
@@ -194,6 +211,7 @@ class FileSourceStage(SingleOutputSource):
         df = self._read_file()
 
         out_stream: Source = Stream.from_iterable_done(self._generate_frames(df),
+                                                       max_concurrent=self._max_concurrent,
                                                        asynchronous=True,
                                                        loop=IOLoop.current())
         out_type = cudf.DataFrame if self._iterative else typing.List[cudf.DataFrame]
@@ -225,18 +243,20 @@ class FileSourceStage(SingleOutputSource):
         count = 0
         out = []
 
-        for x in df.groupby(np.arange(len(df)) // self._batch_size):
-            y = x[1].reset_index(drop=True)
+        for _ in range(self._repeat_count):
+            for x in df.groupby(np.arange(len(df)) // self._batch_size):
+                y = x[1].reset_index(drop=True)
 
-            count += 1
+                count += 1
 
-            if (self._iterative):
-                yield y
-            else:
-                out.append(y)
+                if (self._iterative):
+                    yield y
+                else:
+                    out.append(y)
 
-        if (not self._iterative):
-            yield out
+            if (not self._iterative):
+                yield out
+                out = []
 
         # Indicate that we are stopping (not the best way of doing this)
         self._source_stream.stop()
