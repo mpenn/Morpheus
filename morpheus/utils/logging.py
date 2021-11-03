@@ -110,6 +110,13 @@ def _configure_from_log_level(log_level: int):
     queue_listener.start()
     queue_listener._thread.name = "Logging Thread"
 
+    # Register a function to kill the listener thread before shutting down. prevents error on intpreter close
+    def stop_queue_listener():
+        queue_listener.stop()
+
+    import atexit
+    atexit.register(stop_queue_listener)
+
 
 def configure_logging(log_level: int, log_config_file: str = None):
     """

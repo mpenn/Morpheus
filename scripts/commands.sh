@@ -36,7 +36,7 @@ $KAFKA_HOME/bin/kafka-console-consumer.sh --topic=test_pcap --bootstrap-server `
 
 # OTHER COMMANDS USED
 # Launch Triton server
-docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v/home/mdemoret/Repos/rapids/cyber-dev/triton_models:/models nvcr.io/nvidia/tritonserver:21.02-py3 tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1
+docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v${PWD}/models/triton-model-repo:/models nvcr.io/nvidia/tritonserver:21.02-py3 tritonserver --model-repository=/models --model-control-mode=explicit --load-model sid-minibert-onnx
 
 # Run inference container
 docker run --rm -ti --gpus=all -e CLX_INFERENCE_PIPELINE="pytorch" -e CLX_KAFKA_BOOTSTRAP_SERVERS=$(kafka-docker/broker-list.sh) -e CLX_MODEL_SEQ_LENGTH=512 498186410471.dkr.ecr.us-east-2.amazonaws.com/gtc-cyber-demo:latest

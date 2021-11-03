@@ -20,6 +20,7 @@ from abc import abstractmethod
 from functools import partial
 
 import cupy as cp
+import numpy as np
 import streamz
 import typing_utils
 
@@ -171,8 +172,7 @@ class PreprocessBaseStage(MultiMessageStage):
             out_type = preproc_sig.return_annotation
 
         if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-            stream = streamz.map(upstream=None, func=preprocess_fn)
-            # stream = stream.map(preprocess_fn)
+            stream = stream.map(preprocess_fn)
             out_type = StreamFuture[out_type]
         else:
             stream = stream.async_map(preprocess_fn, executor=self._pipeline.thread_pool)
@@ -222,7 +222,8 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
     @staticmethod
     def pre_process_batch(x: MultiMessage,
-                          tokenizer: SubwordTokenizer,
+                          vocab_hash_file: str,
+                          do_lower_case: bool,
                           seq_len: int,
                           stride: int,
                           truncation: bool,
@@ -254,7 +255,8 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
         """
         text_ser = cudf.Series(x.get_meta("data"))
-        tokenized = tokenize_text_series(tokenizer=tokenizer,
+        tokenized = tokenize_text_series(vocab_hash_file=vocab_hash_file,
+                                         do_lower_case=do_lower_case,
                                          text_ser=text_ser,
                                          seq_len=seq_len,
                                          stride=stride,
@@ -280,10 +282,10 @@ class PreprocessNLPStage(PreprocessBaseStage):
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
 
         # Build the tokenizer first
-        self._tokenizer = create_tokenizer(self._vocab_hash_file, self._do_lower_case)
 
         return partial(PreprocessNLPStage.pre_process_batch,
-                       tokenizer=self._tokenizer,
+                       vocab_hash_file=self._vocab_hash_file,
+                       do_lower_case=self._do_lower_case,
                        stride=self._stride,
                        seq_len=self._seq_length,
                        truncation=self._truncation,
@@ -369,7 +371,12 @@ class PreprocessFILStage(PreprocessBaseStage):
 
         # Extract just the numbers from each feature col
         for col in fea_cols:
-            x.meta.df[col] = x.meta.df[col].str.extract(r"(\d+)", expand=False).astype("float32")
+            if (x.meta.df[col].dtype == np.dtype(str) or x.meta.df[col].dtype == np.dtype(object)):
+                # If the column is a string, parse the number
+                x.meta.df[col] = x.meta.df[col].str.extract(r"(\d+)", expand=False).astype("float32")
+            elif (x.meta.df[col].dtype != np.float32):
+                # Convert to float32
+                x.meta.df[col] = x.meta.df[col].astype("float32")
 
         # Convert the dataframe to cupy the same way cuml does
         data = cp.asarray(cudf.from_pandas(x.meta.df[fea_cols]).as_gpu_matrix(order='C'))
