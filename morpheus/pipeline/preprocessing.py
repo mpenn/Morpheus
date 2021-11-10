@@ -489,8 +489,6 @@ class PreprocessFILStage(PreprocessBaseStage):
             infer_message
 
         """
-        # Drop some extra columns we dont need
-        x.meta.df.drop(x.meta.df.columns.difference(fea_cols + ["ts_start", "ts_deserialize"]), 1, inplace=True)
 
         # Extract just the numbers from each feature col. Not great to operate on x.meta.df here but the operations will
         # only happen once.
