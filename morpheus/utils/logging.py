@@ -100,7 +100,6 @@ def _configure_from_log_level(log_level: int):
 
     # Tqdm stream handler (avoids messing with progress bars)
     console_handler = TqdmLoggingHandler()
-    console_handler.setLevel(logging.INFO)
 
     # Build and run the queue listener to actually process queued messages
     queue_listener = logging.handlers.QueueListener(morpheus_logging_queue,

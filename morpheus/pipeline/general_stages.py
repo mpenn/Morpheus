@@ -319,7 +319,7 @@ class AddClassificationsStage(SinglePortStage):
         probs_np = (x.probs > self._threshold).astype(cp.bool).get()
 
         for i, label in idx2label.items():
-            x.set_meta(label, probs_np[:, i].tolist())
+            x.set_meta(probs_np[:, i].tolist(), label)
 
         # Return list of strs to write out
         return x

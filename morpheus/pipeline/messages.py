@@ -136,7 +136,7 @@ class MultiMessage(MessageData):
 
         return self.get_meta_list("timestamp")
 
-    def get_meta(self, col_name: str):
+    def get_meta(self, columns: typing.Union[None, str, typing.List[str]] = None):
         """
         Return a column values from morpheus.messages.MessageMeta.df
 
@@ -152,7 +152,11 @@ class MultiMessage(MessageData):
 
         """
 
-        return self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], col_name]
+        if (columns is None):
+            return self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], :]
+        else:
+            # If its a str or list, this is the same
+            return self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns]
 
     def get_meta_list(self, col_name: str = None):
         """
@@ -172,7 +176,7 @@ class MultiMessage(MessageData):
 
         return self.get_meta(col_name=col_name).to_list()
 
-    def set_meta(self, col_name: str, value):
+    def set_meta(self, value, columns: typing.Union[None, str, typing.List[str]] = None):
         """
         Set column values to morpheus.messages.MessageMeta.df
 
@@ -184,8 +188,32 @@ class MultiMessage(MessageData):
             Column values.
 
         """
+        if (columns is None):
+            # Set all columns
+            self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], :] = value
+        else:
+            # If its a single column or list of columns, this is the same
+            self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns] = value
 
-        self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], col_name] = value
+    def get_slice(self, start, stop):
+        """
+        Returns sliced batches based on offsets supplied. Automatically calculates the correct `mess_offset`
+        and `mess_count`.
+
+        Parameters
+        ----------
+        start : int
+            Start offset address.
+        stop : int
+            Stop offset address.
+
+        Returns
+        -------
+        morpheus.messages.MultiInferenceMessage
+            A new `MultiInferenceMessage` with sliced offset and count.
+
+        """
+        return MultiMessage(meta=self.meta, mess_offset=start, mess_count=stop - start)
 
 
 @dataclasses.dataclass
@@ -318,6 +346,30 @@ class InferenceMemoryFIL(InferenceMemory):
 
 
 @dataclasses.dataclass
+class InferenceMemoryAE(InferenceMemory):
+    """
+    This is a container class for data that needs to be submitted to the inference server for FIL category
+    usecases.
+
+    Parameters
+    ----------
+    input__0 : cp.ndarray
+        Inference input.
+    seq_ids : cp.ndarray
+        Ids used to index from an inference input to a message. Necessary since there can be more inference
+        inputs than messages (i.e. If some messages get broken into multiple inference requests)
+
+    """
+
+    input: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
+    seq_ids: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_input, set_input)
+
+    def __post_init__(self, input, seq_ids):
+        self.input = input
+        self.seq_ids = seq_ids
+
+
+@dataclasses.dataclass
 class MultiInferenceMessage(MultiMessage):
     """
     This is a container class that holds the InferenceMemory container and the metadata of the data contained
@@ -410,8 +462,8 @@ class MultiInferenceMessage(MultiMessage):
             A new `MultiInferenceMessage` with sliced offset and count.
 
         """
-        mess_start = self.seq_ids[start, 0].item()
-        mess_stop = self.seq_ids[stop - 1, 0].item() + 1
+        mess_start = self.mess_offset + self.seq_ids[start, 0].item()
+        mess_stop = self.mess_offset + self.seq_ids[stop - 1, 0].item() + 1
         return MultiInferenceMessage(meta=self.meta,
                                      mess_offset=mess_start,
                                      mess_count=mess_stop - mess_start,
@@ -518,6 +570,41 @@ def set_output(instance: "ResponseMemory", name: str, value):
 
 
 @dataclasses.dataclass
+class MultiInferenceAEMessage(MultiInferenceMessage):
+    """
+    A stronger typed version of `MultiInferenceMessage` that is used for NLP workloads. Helps ensure the
+    proper inputs are set and eases debugging.
+    """
+    @property
+    def input(self):
+        """
+        Returns autoecoder input tensor
+
+        Returns
+        -------
+        cupy.ndarray
+            The autoencoder input tensor
+
+        """
+
+        return self.get_input("input")
+
+    @property
+    def seq_ids(self):
+        """
+        Returns sequence ids, which are used to keep track of messages in a multi-threaded environment.
+
+        Returns
+        -------
+        cupy.ndarray
+            seq_ids
+
+        """
+
+        return self.get_input("seq_ids")
+
+
+@dataclasses.dataclass
 class ResponseMemory(MessageData):
     """
     Output memory block holding the results of inference.
@@ -534,6 +621,85 @@ class ResponseMemoryProbs(ResponseMemory):
 
     def __post_init__(self, probs):
         self.probs = probs
+
+
+@dataclasses.dataclass
+class ResponseMemoryAE(ResponseMemory):
+
+    num: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    bin: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    eventSource: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    eventName: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    sourceIPAddress: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    userAgent: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    requestParametersroleArn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    requestParametersroleSessionName: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    responseElementsassumedRoleUserassumedRoleId: dataclasses.InitVar[cp.ndarray] = DataClassProp(
+        get_output, set_output)
+    responseElementsassumedRoleUserarn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    apiVersion: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    userIdentityprincipalId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    userIdentityarn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    userIdentityaccessKeyId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    userIdentitysessionContextsessionIssuerprincipalId: dataclasses.InitVar[cp.ndarray] = DataClassProp(
+        get_output, set_output)
+    userIdentitysessionContextsessionIssuerarn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    userIdentitysessionContextsessionIssueruserName: dataclasses.InitVar[cp.ndarray] = DataClassProp(
+        get_output, set_output)
+    requestParametersinstancesSetitems: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    errorCode: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    errorMessage: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    responseElementsrequestId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    responseElementsinstancesSetitems: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    responseElementsreservationId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+
+    def __post_init__(self,
+                      num,
+                      bin,
+                      eventSource,
+                      eventName,
+                      sourceIPAddress,
+                      userAgent,
+                      requestParametersroleArn,
+                      requestParametersroleSessionName,
+                      responseElementsassumedRoleUserassumedRoleId,
+                      responseElementsassumedRoleUserarn,
+                      apiVersion,
+                      userIdentityprincipalId,
+                      userIdentityarn,
+                      userIdentityaccessKeyId,
+                      userIdentitysessionContextsessionIssuerprincipalId,
+                      userIdentitysessionContextsessionIssuerarn,
+                      userIdentitysessionContextsessionIssueruserName,
+                      requestParametersinstancesSetitems,
+                      errorCode,
+                      errorMessage,
+                      responseElementsrequestId,
+                      responseElementsinstancesSetitems,
+                      responseElementsreservationId):
+        self.num = num
+        self.bin = bin
+        self.eventSource = eventSource
+        self.eventName = eventName
+        self.userAgent = userAgent
+        self.sourceIPAddress = sourceIPAddress
+        self.requestParametersroleArn = requestParametersroleArn
+        self.requestParametersroleSessionName = requestParametersroleSessionName
+        self.responseElementsassumedRoleUserassumedRoleId = responseElementsassumedRoleUserassumedRoleId
+        self.responseElementsassumedRoleUserarn = responseElementsassumedRoleUserarn
+        self.apiVersion = apiVersion
+        self.userIdentityprincipalId = userIdentityprincipalId
+        self.userIdentityarn = userIdentityarn
+        self.userIdentityaccessKeyId = userIdentityaccessKeyId
+        self.userIdentitysessionContextsessionIssuerprincipalId = userIdentitysessionContextsessionIssuerprincipalId
+        self.userIdentitysessionContextsessionIssuerarn = userIdentitysessionContextsessionIssuerarn
+        self.userIdentitysessionContextsessionIssueruserName = userIdentitysessionContextsessionIssueruserName
+        self.requestParametersinstancesSetitems = requestParametersinstancesSetitems
+        self.errorCode = errorCode
+        self.errorMessage = errorMessage
+        self.responseElementsrequestId = responseElementsrequestId
+        self.responseElementsinstancesSetitems = responseElementsinstancesSetitems
+        self.responseElementsreservationId = responseElementsreservationId
 
 
 @dataclasses.dataclass

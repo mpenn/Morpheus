@@ -22,6 +22,7 @@ import click_completion
 from click.globals import get_current_context
 
 from morpheus.config import Config
+from morpheus.config import ConfigAutoEncoder
 from morpheus.config import ConfigBase
 from morpheus.config import ConfigOnnxToTRT
 from morpheus.config import PipelineModes
@@ -373,6 +374,59 @@ def pipeline_fil(ctx: click.Context, **kwargs):
     return ctx.obj
 
 
+@click.group(chain=True,
+             short_help="Run the inference pipeline with an AutoEncoder model",
+             cls=AliasedGroup,
+             **command_kwargs)
+@click.option('--model_fea_length',
+              default=296,
+              type=click.IntRange(min=1),
+              help="Number of features trained in the model")
+@click.option('--ae_path',
+              required=True,
+              type=click.Path(dir_okay=False, exists=True),
+              help="The autoencoder file to use in the pipeline")
+@click.option('--viz_file',
+              default=None,
+              type=click.Path(dir_okay=False, writable=True),
+              help="Save a visualization of the pipeline at the specified location")
+@prepare_command()
+def pipeline_ae(ctx: click.Context, **kwargs):
+    """
+    Configure and run the pipeline. To configure the pipeline, list the stages in the order that data should flow. The
+    output of each stage will become the input for the next stage. For example, to read, classify and write to a file,
+    the following stages could be used
+
+    \b
+    pipeline from-file --filename=my_dataset.json deserialize preprocess inf-triton --model_name=my_model
+    --server_url=localhost:8001 filter --threshold=0.5 to-file --filename=classifications.json
+
+    \b
+    Pipelines must follow a few rules:
+    1. Data must originate in a source stage. Current options are `from-file` or `from-kafka`
+    2. A `deserialize` stage must be placed between the source stages and the rest of the pipeline
+    3. Only one inference stage can be used. Zero is also fine
+    4. The following stages must come after an inference stage: `add-class`, `filter`, `gen-viz`
+
+    """
+
+    click.secho("Configuring Pipeline via CLI", fg="green")
+
+    config = Config.get()
+
+    config.mode = PipelineModes.AE
+
+    config.ae = ConfigAutoEncoder(autoencoder_path=kwargs["ae_path"])
+
+    config.feature_length = kwargs["model_fea_length"]
+
+    from morpheus.pipeline import LinearPipeline
+
+    ctx.obj = LinearPipeline(config)
+
+    return ctx.obj
+
+
 @click.pass_context
 def post_pipeline(ctx: click.Context, stages, **kwargs):
 
@@ -396,6 +450,7 @@ def post_pipeline(ctx: click.Context, stages, **kwargs):
 
 pipeline_nlp.result_callback = post_pipeline
 pipeline_fil.result_callback = post_pipeline
+pipeline_ae.result_callback = post_pipeline
 
 
 @click.command(short_help="Load messages from a file", **command_kwargs)
@@ -468,6 +523,54 @@ def from_kafka(ctx: click.Context, **kwargs):
     from morpheus.pipeline.input.from_kafka import KafkaSourceStage
 
     stage = KafkaSourceStage(Config.get(), **kwargs)
+
+    p.set_source(stage)
+
+    return stage
+
+
+@click.command(short_help="Load messages from a Cloudtrail directory", **command_kwargs)
+@click.option('--input_glob',
+              type=str,
+              required=True,
+              help=("Input glob pattern to match files to read. For example, './input_dir/*.json' would read all "
+                    "files with the 'json' extension in the directory input_dir."))
+@click.option('--watch_directory',
+              type=bool,
+              default=False,
+              help=("The watch directory option instructs this stage to not close down once all files have been read. "
+                    "Instead it will read all files that match the 'input_glob' pattern, and then continue to watch "
+                    "the directory for additional files. Any new files that are added that match the glob will then "
+                    "be processed."))
+@click.option('--iterative',
+              is_flag=True,
+              default=False,
+              help=("Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. "
+                    "Iterative mode is good for interleaving source stages. Non-iterative is better for dask "
+                    "(uploads entire dataset in one call)"))
+@click.option('--max_files',
+              type=click.IntRange(min=1),
+              help=("Max number of files to read. Useful for debugging to limit startup time. "
+                    "Default value of -1 is unlimited."))
+@click.option('--file-type',
+              type=click.Choice(['auto', 'json', 'csv'], case_sensitive=False),
+              default="auto",
+              help=("Indicates what type of file to read. "
+                    "Specifying 'auto' will determine the file type from the extension."))
+@click.option('--repeat',
+              default=1,
+              type=click.IntRange(min=1),
+              help=("Repeats the input dataset multiple times. Useful to extend small datasets for debugging."))
+@prepare_command(False)
+def from_cloudtrail(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.input.from_cloudtrail import CloudTrailSourceStage
+
+    stage = CloudTrailSourceStage(Config.get(), **kwargs)
 
     p.set_source(stage)
 
@@ -625,6 +728,23 @@ def preprocess_fil(ctx: click.Context, **kwargs):
     from morpheus.pipeline.preprocessing import PreprocessFILStage
 
     stage = PreprocessFILStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
+@prepare_command(False)
+def preprocess_ae(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.preprocess.autoencoder import PreprocessAEStage
+
+    stage = PreprocessAEStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -824,6 +944,54 @@ def mlflow_drift(ctx: click.Context, **kwargs):
     return stage
 
 
+@click.command(short_help="Perform time series anomaly detection and add prediction.", **command_kwargs)
+@click.option('--resolution',
+              type=str,
+              default="1 h",
+              help=("Time series resolution. Logs will be binned into groups of this size. Uses the pandas time "
+                    "delta format, i.e. '10m' for 10 minutes"))
+@click.option('--min_window',
+              type=str,
+              default="12 h",
+              help=("Minimum window on either side of a log necessary for calculation. Logs will be skipped "
+                    "during a warmup phase while this window is filled. Uses the pandas time delta format, "
+                    "i.e. '10m' for 10 minutes"))
+@click.option('--hot_start',
+              is_flag=True,
+              default=False,
+              help=("This flag prevents the stage from ignoring messages during a warm up phase while the "
+                    "min_window is filled. Enabling 'hot_start' will run calculations on all messages even "
+                    "if the min_window is not satisfied on both sides, i.e. during startup or teardown. This "
+                    "is likely to increase the number of false positives but can be helpful for debugging "
+                    "and testing on small datasets."))
+@click.option('--filter_percent',
+              type=click.FloatRange(min=0.0, max=100.0),
+              default=90.0,
+              required=True,
+              help="The percent of timeseries samples to remove from the inverse FFT for spectral density filtering.")
+@click.option('--zscore_threshold',
+              type=click.FloatRange(min=0.0),
+              default=8.0,
+              required=True,
+              help=("The z-score threshold required to flag datapoints. The value indicates the number of standard "
+                    "deviations from the mean that is required to be flagged. Increasing this value will decrease "
+                    "the number of detections."))
+@prepare_command(False)
+def timeseries(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.postprocess.timeseries import TimeSeriesStage
+
+    stage = TimeSeriesStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
 @click.command(short_help="Write all messages to a file", **command_kwargs)
 @click.option('--filename', type=click.Path(writable=True), required=True, help="")
 @click.option('--overwrite', is_flag=True, help="")
@@ -897,10 +1065,12 @@ def gen_viz(ctx: click.Context, **kwargs):
 run.add_command(dask)
 run.add_command(pipeline_nlp)
 run.add_command(pipeline_fil)
+run.add_command(pipeline_ae)
 
 # Wrap both pipelines in dask commands
 dask.add_command(pipeline_nlp)
 dask.add_command(pipeline_fil)
+dask.add_command(pipeline_ae)
 
 # NLP Pipeline
 pipeline_nlp.add_command(add_class)
@@ -940,6 +1110,26 @@ pipeline_fil.add_command(preprocess_fil)
 pipeline_fil.add_command(serialize)
 pipeline_fil.add_command(to_file)
 pipeline_fil.add_command(to_kafka)
+
+# AE Pipeline
+pipeline_ae.add_command(add_class)
+pipeline_ae.add_command(buffer)
+pipeline_ae.add_command(delay)
+pipeline_ae.add_command(deserialize)
+pipeline_ae.add_command(filter)
+pipeline_ae.add_command(from_cloudtrail)
+pipeline_ae.add_command(from_file)
+pipeline_ae.add_command(from_kafka)
+pipeline_ae.add_command(gen_viz)
+pipeline_ae.add_command(inf_identity)
+pipeline_ae.add_command(inf_pytorch)
+pipeline_ae.add_command(inf_triton)
+pipeline_ae.add_command(monitor)
+pipeline_ae.add_command(preprocess_ae)
+pipeline_ae.add_command(serialize)
+pipeline_ae.add_command(timeseries)
+pipeline_ae.add_command(to_file)
+pipeline_ae.add_command(to_kafka)
 
 
 def run_cli():
