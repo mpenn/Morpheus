@@ -293,6 +293,7 @@ Commands:
   buffer        Buffer results
   delay         Delay results
   deserialize   Deserialize source data from JSON
+  dropna        Drop null data entries
   filter        Filter message by a classification threshold
   from-file     Load messages from a file
   from-kafka    Load messages from a Kafka cluster
@@ -317,6 +318,7 @@ Commands:
   buffer        Buffer results
   delay         Delay results
   deserialize   Deserialize source data from JSON
+  dropna        Drop null data entries
   filter        Filter message by a classification threshold
   from-file     Load messages from a file
   from-kafka    Load messages from a Kafka cluster

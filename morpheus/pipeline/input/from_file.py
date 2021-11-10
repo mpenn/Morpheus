@@ -101,13 +101,16 @@ class from_iterable_done(Source):
         self.stopped = True
 
 
-def df_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
+def filter_null_data(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
+    return x[~x['data'].isna()]
+
+
+def cudf_json_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
     """
     Fixes parsing issues when reading from a file. When loading a JSON file, cuDF converts ``\\n`` to
     ``\\\\n`` for some reason
     """
-
-    if ("data" in x):
+    if ("data" in x and not x.empty):
         x["data"] = x["data"].str.replace('\\n', '\n', regex=False)
 
     return x
@@ -132,6 +135,9 @@ class FileSourceStage(SingleOutputSource):
         Supported extensions: 'json', 'csv'
     repeat: int, default = 1
         Repeats the input dataset multiple times. Useful to extend small datasets for debugging.
+    filter_null: bool, default = True
+        Whether or not to filter rows with null 'data' column. Null values in the 'data' column can cause issues down
+        the line with processing. Setting this to True is recommended
     cudf_kwargs: dict, default=None
         keyword args passed to underlying cuDF I/O function. See the cuDF documentation for `cudf.read_csv()` and
         `cudf.read_json()` for the available options. With `file_type` == 'json', this defaults to ``{ "lines": True }``
@@ -143,6 +149,7 @@ class FileSourceStage(SingleOutputSource):
                  iterative: bool = None,
                  file_type: FileSourceTypes = FileSourceTypes.Auto,
                  repeat: int = 1,
+                 filter_null: bool = True,
                  cudf_kwargs: dict = None):
         super().__init__(c)
 
@@ -152,6 +159,7 @@ class FileSourceStage(SingleOutputSource):
         self._filename = filename
         self._iterative = iterative if iterative is not None else not c.use_dask
         self._file_type = file_type
+        self._filter_null = filter_null
         self._cudf_kwargs = {} if cudf_kwargs is None else cudf_kwargs
 
         self._input_count = None
@@ -198,10 +206,18 @@ class FileSourceStage(SingleOutputSource):
 
         if (mode == FileSourceTypes.Json):
             df = cudf.read_json(self._filename, **cudf_args)
-            df = df_onread_cleanup(df)
+
+            if (self._filter_null):
+                df = filter_null_data(df)
+
+            df = cudf_json_onread_cleanup(df)
             return df
         elif (mode == FileSourceTypes.Csv):
             df = cudf.read_csv(self._filename, **cudf_args)
+
+            if (self._filter_null):
+                df = filter_null_data(df)
+
             return df
         else:
             assert False, "Unsupported file type mode: {}".format(mode)

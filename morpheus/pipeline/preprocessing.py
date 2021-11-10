@@ -21,7 +21,6 @@ from functools import partial
 
 import cupy as cp
 import numpy as np
-import streamz
 import typing_utils
 
 import cudf
@@ -36,9 +35,9 @@ from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import MultiInferenceNLPMessage
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.pipeline import MultiMessageStage
+from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
-from morpheus.utils.cudf_subword_helper import create_tokenizer
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 
 
@@ -125,6 +124,63 @@ class DeserializeStage(MultiMessageStage):
             stream = stream.async_map(DeserializeStage.process_dataframe, executor=self._pipeline.thread_pool)
 
         return stream, out_type
+
+
+class DropNullStage(SinglePortStage):
+    """
+    Drop null/empty data input entries.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    column : str
+        Column name to perform null check.
+
+    """
+    def __init__(self, c: Config, column: str):
+        super().__init__(c)
+
+        self._use_dask = c.use_dask
+        self._column = column
+
+        # Mark these stages to log timestamps if requested
+        self._should_log_timestamps = True
+
+    @property
+    def name(self) -> str:
+        return "dropna"
+
+    def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types
+
+        """
+        return (cudf.DataFrame, StreamFuture[cudf.DataFrame])
+
+    @staticmethod
+    def filter(x: cudf.DataFrame, column: str):
+        x = x[~x[column].isna()]
+
+        return x
+
+    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+        stream = input_stream[0]
+
+        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
+            stream = stream.map(DropNullStage.filter, column=self._column)
+        else:
+            stream = stream.async_map(DropNullStage.filter, executor=self._pipeline.thread_pool, column=self._column)
+
+        # Filter out empty message groups
+        stream = stream.filter(lambda x: not x.empty)
+
+        return stream, input_stream[1]
 
 
 class PreprocessBaseStage(MultiMessageStage):
