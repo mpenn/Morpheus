@@ -415,6 +415,11 @@ pipeline_fil.result_callback = post_pipeline
               default=1,
               type=click.IntRange(min=1),
               help=("Repeats the input dataset multiple times. Useful to extend small datasets for debugging."))
+@click.option('--filter_null',
+              default=True,
+              type=bool,
+              help=("Whether or not to filter rows with null 'data' column. Null values in the 'data' column can "
+                    "cause issues down the line with processing. Setting this to True is recommended."))
 @prepare_command(False)
 def from_file(ctx: click.Context, **kwargs):
 
@@ -504,6 +509,24 @@ def buffer(ctx: click.Context, **kwargs):
     from morpheus.pipeline.general_stages import BufferStage
 
     stage = BufferStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(short_help="Drop null data entries from a DataFrame", **command_kwargs)
+@click.option('--column', type=str, default="data", help="Which column to use when searching for null values.")
+@prepare_command(False)
+def dropna(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.preprocessing import DropNullStage
+
+    stage = DropNullStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -884,6 +907,7 @@ pipeline_nlp.add_command(add_class)
 pipeline_nlp.add_command(buffer)
 pipeline_nlp.add_command(delay)
 pipeline_nlp.add_command(deserialize)
+pipeline_nlp.add_command(dropna)
 pipeline_nlp.add_command(filter)
 pipeline_nlp.add_command(from_file)
 pipeline_nlp.add_command(from_kafka)
@@ -903,6 +927,7 @@ pipeline_fil.add_command(add_class)
 pipeline_fil.add_command(buffer)
 pipeline_fil.add_command(delay)
 pipeline_fil.add_command(deserialize)
+pipeline_fil.add_command(dropna)
 pipeline_fil.add_command(filter)
 pipeline_fil.add_command(from_file)
 pipeline_fil.add_command(from_kafka)
