@@ -12,17 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import queue
 import typing
 
 import cupy as cp
-from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
-from morpheus.pipeline.inference.inference_stage import InferenceStage, InferenceWorker
+from morpheus.pipeline.inference.inference_stage import InferenceStage
+from morpheus.pipeline.inference.inference_stage import InferenceWorker
 from morpheus.pipeline.messages import MultiInferenceMessage
 from morpheus.pipeline.messages import ResponseMemoryProbs
+from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
 
 
 # This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
@@ -33,16 +32,20 @@ class IdentityInferenceWorker(InferenceWorker):
         self._max_batch_size = c.model_max_batch_size
         self._seq_length = c.feature_length
 
-    def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
+    def calc_output_dims(self, x: MultiInferenceMessage) -> typing.Tuple:
+        return (x.count, self._seq_length)
+
+    def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemoryProbs], None]):
         def tmp(b: MultiInferenceMessage, f):
 
-            f.set_result(
-                ResponseMemoryProbs(
-                    count=b.count,
-                    probs=cp.zeros((b.count, self._seq_length), dtype=cp.float32),
-                ))
+            f(ResponseMemoryProbs(
+                count=b.count,
+                probs=cp.zeros((b.count, self._seq_length), dtype=cp.float32),
+            ))
 
-        self._loop.add_callback(tmp, batch, fut)
+        # self._loop.add_callback(tmp, batch, fut)
+        # Call directly instead of enqueing
+        tmp(batch, cb)
 
 
 class IdentityInferenceStage(InferenceStage):

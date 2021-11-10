@@ -16,6 +16,10 @@ import copy
 import json
 import re
 import typing
+from functools import partial
+
+import neo
+import pandas as pd
 
 import cudf
 
@@ -43,13 +47,13 @@ class SerializeStage(SinglePortStage):
                  c: Config,
                  include: typing.List[str] = None,
                  exclude: typing.List[str] = [r'^ID$', r'^ts_'],
-                 as_cudf_df=False):
+                 output_type: typing.Literal["pandas", "cudf", "json", "csv"] = "pandas"):
         super().__init__(c)
 
         # Make copies of the arrays to prevent changes after the Regex is compiled
         self._include_columns = copy.copy(include)
         self._exclude_columns = copy.copy(exclude)
-        self._as_cudf_df = as_cudf_df
+        self._output_type = output_type
 
     @property
     def name(self) -> str:
@@ -97,15 +101,15 @@ class SerializeStage(SinglePortStage):
         # Get metadata from columns
         df = x.get_meta(columns)
 
-        def double_serialize(y: str):
-            try:
-                return json.dumps(json.dumps(json.loads(y)))
-            except:  # noqa: E722
-                return y
+        # def double_serialize(y: str):
+        #     try:
+        #         return json.dumps(json.dumps(json.loads(y)))
+        #     except:  # noqa: E722
+        #         return y
 
-        # Special processing for the data column (need to double serialize to match input)
-        if ("data" in df):
-            df["data"] = df["data"].apply(double_serialize)
+        # # Special processing for the data column (need to double serialize to match input)
+        # if ("data" in df):
+        #     df["data"] = df["data"].apply(double_serialize)
 
         return df
 
@@ -121,13 +125,24 @@ class SerializeStage(SinglePortStage):
         return output_strs
 
     @staticmethod
+    def convert_to_csv(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
+
+        df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
+
+        # Convert to list of json string objects
+        output_strs = df.to_csv(header=False).split("\n")
+
+        # Return list of strs to write out
+        return output_strs
+
+    @staticmethod
     def convert_to_cudf(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
 
         df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
 
         return cudf.from_pandas(df)
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         include_columns = None
 
@@ -137,11 +152,34 @@ class SerializeStage(SinglePortStage):
         exclude_columns = [re.compile(x) for x in self._exclude_columns]
 
         # Convert the messages to rows of strings
-        stream = input_stream[0].async_map(
-            SerializeStage.convert_to_cudf if self._as_cudf_df else SerializeStage.convert_to_json,
-            executor=self._pipeline.thread_pool,
-            include_columns=include_columns,
-            exclude_columns=exclude_columns)
+        # stream = input_stream[0].async_map(
+        #     SerializeStage.convert_to_cudf if self._as_cudf_df else SerializeStage.convert_to_json,
+        #     executor=self._pipeline.thread_pool,
+        #     include_columns=include_columns,
+        #     exclude_columns=exclude_columns)
+
+        fn = None
+        out_type = None
+
+        if (self._output_type == "pandas"):
+            fn = SerializeStage.convert_to_df
+            out_type = pd.DataFrame
+        elif (self._output_type == "cudf"):
+            fn = SerializeStage.convert_to_cudf
+            out_type = cudf.DataFrame
+        elif (self._output_type == "json"):
+            fn = SerializeStage.convert_to_json
+            out_type = typing.List[str]
+        elif (self._output_type == "pandas"):
+            fn = SerializeStage.convert_to_csv
+            out_type = typing.List[str]
+        else:
+            raise NotImplementedError("Unknown output type: {}".format(self._output_type))
+
+        stream = seg.make_node(self.unique_name,
+                               partial(fn, include_columns=include_columns, exclude_columns=exclude_columns))
+
+        seg.make_edge(input_stream[0], stream)
 
         # Return input unchanged
-        return stream, cudf.DataFrame if self._as_cudf_df else typing.List[str]
+        return stream, out_type

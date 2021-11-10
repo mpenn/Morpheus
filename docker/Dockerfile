@@ -1,12 +1,33 @@
-ARG FROM_IMAGE=gpuci/miniconda-cuda
-ARG CUDA_VER=11.2
-ARG LINUX_VER=ubuntu18.04
-FROM ${FROM_IMAGE}:${CUDA_VER}-runtime-${LINUX_VER} AS base
+# Args used in FROM commands must come first
+ARG FROM_IMAGE="gpuci/miniconda-cuda"
+ARG CUDA_VER=11.4
+ARG LINUX_DISTRO=ubuntu
+ARG LINUX_VER=20.04
+
+# Stage 0 - Vcpkg build
+# Builds vcpkg so dependencies can be easily installed on the command line
+FROM ${LINUX_DISTRO}:${LINUX_VER} as vcpkg_build
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Denver
+
+RUN apt update && apt -y install build-essential cmake git curl unzip tar zip
+
+RUN git clone https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+
+WORKDIR /opt/vcpkg
+
+# Build vcpkg and delete any data in packages/buildtrees/downloads
+RUN ./bootstrap-vcpkg.sh -disableMetrics &&\
+    rm -rf "/opt/vcpkg/packages" "/opt/vcpkg/buildtrees" "/opt/vcpkg/downloads"
+
+# Stage 1 - Dependencies
+FROM ${FROM_IMAGE}:${CUDA_VER}-devel-${LINUX_DISTRO}${LINUX_VER} AS base
 
 # Required arguments
 ARG IMAGE_TYPE=base
 ARG RAPIDS_CHANNEL=rapidsai-nightly
-ARG RAPIDS_VER=21.06
+ARG RAPIDS_VER=21.10
 ARG PYTHON_VER=3.8
 
 # The TensorRT Version must be the full version (i.e. 7.2.2.3) and match Triton EXACTLY
@@ -15,11 +36,28 @@ ARG TENSORRT_VERSION=7.2.2.3
 # Capture argument used for FROM
 ARG CUDA_VER
 
-# Install build-essential. Needed to call `make`
+# Install dependencies to build vcpkg dependencies
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
-      build-essential \
+      build-essential pkg-config curl unzip tar zip openssh-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Accept all gitlab-master.nvidia.com hosts
+# TODO(MDD): Do we need/want this?
+# RUN ssh-keyscan gitlab-master.nvidia.com >> ~/.ssh/known_hosts
+
+# Vcpkg Install
+COPY --from=vcpkg_build /opt/vcpkg/ /opt/vcpkg/
+ENV VCPKG_ROOT=/opt/vcpkg
+
+# Run the install and bash integrate scripts. Also add VCPKG_BUILD_TYPE
+RUN /opt/vcpkg/vcpkg integrate install && \
+    /opt/vcpkg/vcpkg integrate bash && \
+    echo 'export PATH=$PATH:/opt/vcpkg' >>~/.bashrc &&\
+    echo 'export VCPKG_ROOT="/opt/vcpkg/"' >>~/.bashrc
+
+# Set the default cache to be in the work folder. Ensure it exists
+ENV VCPKG_DEFAULT_BINARY_CACHE=/workspace/.cache/vcpkg
 
 # Enables "source activate conda"
 SHELL ["/bin/bash", "-c"]
@@ -32,13 +70,20 @@ RUN conda config --set ssl_verify false \
 
 COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environments/
 
-RUN /opt/conda/bin/mamba env create -n morpheus \
-  --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
+RUN /opt/conda/bin/mamba env create -n morpheus --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
+  # Install only the dependencies for cudf. Need to build cudf manually
+  /opt/conda/bin/mamba install -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER} &&\
+  # Clean and activate
   conda clean -afy && \
   sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
 
 # Enables all RUN commands to use the conda env
 SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
+
+# Set the permenant conda channes to use for morpheus
+RUN conda config --env --add channels conda-forge &&\
+    conda config --env --add channels nvidia &&\
+    conda config --env --add channels rapidsai
 
 # Install nvidia-pyindex which is needed for tritonclient[all] but must be
 # installed before setup is run. Also force reinstall of just streamz since it
@@ -51,18 +96,45 @@ RUN pip install nvidia-pyindex && \
   pip install git+https://github.com/efajardo-nv/dfencoder.git@nv-updates#egg=dfencoder &&\
   pip install dill
 
+# Set the CUDAToolkit_ROOT variable to help CMake find CUDA
+ENV CUDAToolkit_ROOT=/usr/local/cuda-${CUDA_VER}
+
+# Set the entrypoint to use the entrypoint.sh script which sets the conda env
+ENTRYPOINT [ "/opt/conda/bin/tini", "--", "docker/entrypoint.sh" ]
+
+# Reset the shell back to normal
+SHELL ["/bin/bash", "-c"]
+
+# Manually build cuDF to get around libcudacxx issues when building as CPM package. See
+# https://github.com/NVIDIA/libcudacxx/issues/209
+FROM base as cudf_build
+
+# Recapture args again
+ARG RAPIDS_VER
+
+COPY cmake/deps/patches/cudf.patch /workspace/cmake/deps/patches/
+
+# Clone to .cache/cudf to make it easy to rebuild
+RUN git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf /workspace/.cache/cudf &&\
+    cd /workspace/.cache/cudf &&\
+    git apply --whitespace=fix /workspace/cmake/deps/patches/cudf.patch &&\
+    source activate morpheus &&\
+    ./build.sh --ptds libcudf cudf &&\
+    cd -
+
+FROM cudf_build as build
 
 # Copy the source
 COPY . ./
 
-# Build/Install morpheus and put CLI on PATH
-RUN pip install .
+# Build/Install neo/morpheus C++ libraries
+RUN source activate morpheus && ./scripts/compile.sh
 
-# Set the entrypoint to use the entrypoint.sh script which sets the conda env
-ENTRYPOINT [ "/usr/bin/tini", "--", "docker/entrypoint.sh" ]
+# Build/Install morpheus CLI and put on PATH
+RUN source activate morpheus && pip install .
 
-# Reset the shell back to normal
-SHELL ["/bin/bash", "-c"]
+# Setup container for runtime environment
+FROM build as runtime
 
 # Use morpheus by default
 CMD [ "morpheus" ]

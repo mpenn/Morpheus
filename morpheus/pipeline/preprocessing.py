@@ -20,6 +20,7 @@ from abc import abstractmethod
 from functools import partial
 
 import cupy as cp
+import neo
 import numpy as np
 import pandas as pd
 import typing_utils
@@ -82,7 +83,7 @@ class DeserializeStage(MultiMessageStage):
         return (cudf.DataFrame, StreamFuture[cudf.DataFrame], pd.DataFrame, StreamFuture[pd.DataFrame])
 
     @staticmethod
-    def process_dataframe(x: typing.Union[cudf.DataFrame, pd.DataFrame], batch_size: int):
+    def process_dataframe(x: typing.Union[cudf.DataFrame, pd.DataFrame], batch_size: int) -> typing.List[MultiMessage]:
         """
         The deserialization of the cudf is implemented in this function.
 
@@ -92,27 +93,29 @@ class DeserializeStage(MultiMessageStage):
             Input rows that needs to be deserilaized.
 
         """
+
         # Convert here to pandas since this will persist after the message is done
         if (isinstance(x, cudf.DataFrame)):
             x_pd = x.to_pandas()
         else:
             x_pd = x
 
-        if ("_orig" in x.columns):
-            input_json = x_pd["_orig"].to_list()
-        else:
-            # Now determine the list of input strings before modification
-            input_json = [json.dumps(y) for y in x_pd.loc[:, x_pd.columns != 'ID'].to_dict(orient="records")]
+        # if ("_orig" in x.columns):
+        #     input_json = x_pd["_orig"].to_list()
+        # else:
+        #     # Now determine the list of input strings before modification
+        #     input_json = [json.dumps(y) for y in x_pd.loc[:, x_pd.columns != 'ID'].to_dict(orient="records")]
+        input_json = [""] * len(x_pd)
 
-        # Try to double deserialize
-        def deserialize_data(y: str):
-            try:
-                return str(json.loads(y))
-            except:  # noqa: E722
-                return y
+        # # Try to double deserialize
+        # def deserialize_data(y: str):
+        #     try:
+        #         return str(json.loads(y))
+        #     except:  # noqa: E722
+        #         return y
 
-        if ("data" in x_pd):
-            x_pd["data"] = x_pd["data"].apply(deserialize_data)
+        # if ("data" in x_pd):
+        #     x_pd["data"] = x_pd["data"].apply(deserialize_data)
 
         # Build the message data
         meta = MessageMeta(df=x_pd, input_json=input_json)
@@ -132,11 +135,11 @@ class DeserializeStage(MultiMessageStage):
 
         curr_time = get_time_ms()
 
-        x.set_meta(curr_time, "ts_start")
+        x.set_meta("ts_start", curr_time)
 
         return x
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiMessage
@@ -146,21 +149,42 @@ class DeserializeStage(MultiMessageStage):
             stream = stream.map(DeserializeStage.process_dataframe)
             out_type = StreamFuture[MultiMessage]
         else:
-            stream = stream.async_map(partial(DeserializeStage.process_dataframe, batch_size=self._batch_size),
-                                      executor=self._pipeline.thread_pool)
-            stream = stream.flatten(max_concurrent=self._max_concurrent)
+            # stream = stream.async_map(DeserializeStage.process_dataframe, executor=self._pipeline.thread_pool)
+            def deserialize_fn(input: neo.Observable, output: neo.Subscriber):
+                def obs_on_next(x: pd.DataFrame):
+
+                    message_list: typing.List[MultiMessage] = DeserializeStage.process_dataframe(x, self._batch_size)
+
+                    for y in message_list:
+
+                        output.on_next(y)
+
+                def obs_on_error(x):
+                    output.on_error(x)
+
+                def obs_on_completed():
+                    output.on_completed()
+
+                obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+                input.subscribe(obs)
+
+            stream = seg.make_node_full(self.unique_name + "-flatten", deserialize_fn)
+            seg.make_edge(input_stream[0], stream)
 
         return stream, out_type
 
-    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+    def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
 
         if (self._should_log_timestamps):
 
-            # Only have one port
-            out_pair = (out_pair[0].async_map(DeserializeStage.add_start_time, executor=self._pipeline.thread_pool),
-                        out_pair[1])
+            stream = seg.make_node(self.unique_name + "-ts", DeserializeStage.add_start_time)
+            seg.make_edge(out_pair[0], stream)
 
-        return super()._post_build_single(out_pair)
+            # Only have one port
+            out_pair = (stream, out_pair[1])
+
+        return super()._post_build_single(seg, out_pair)
 
 
 class DropNullStage(SinglePortStage):
@@ -251,7 +275,7 @@ class PreprocessBaseStage(MultiMessageStage):
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         pass
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiInferenceMessage
@@ -268,7 +292,9 @@ class PreprocessBaseStage(MultiMessageStage):
             stream = stream.map(preprocess_fn)
             out_type = StreamFuture[out_type]
         else:
-            stream = stream.async_map(preprocess_fn, executor=self._pipeline.thread_pool)
+            # stream = stream.async_map(preprocess_fn, executor=self._pipeline.thread_pool)
+            stream = seg.make_node(self.unique_name, preprocess_fn)
+            seg.make_edge(input_stream[0], stream)
 
         return stream, out_type
 
@@ -351,7 +377,7 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
         # handles special characters tokenization
         text_ser = "[CLS] " + text_ser
-        
+
         tokenized = tokenize_text_series(vocab_hash_file=vocab_hash_file,
                                          do_lower_case=do_lower_case,
                                          text_ser=text_ser,
@@ -466,7 +492,8 @@ class PreprocessFILStage(PreprocessBaseStage):
         # Drop some extra columns we dont need
         x.meta.df.drop(x.meta.df.columns.difference(fea_cols + ["ts_start", "ts_deserialize"]), 1, inplace=True)
 
-        # Extract just the numbers from each feature col
+        # Extract just the numbers from each feature col. Not great to operate on x.meta.df here but the operations will
+        # only happen once.
         for col in fea_cols:
             if (x.meta.df[col].dtype == np.dtype(str) or x.meta.df[col].dtype == np.dtype(object)):
                 # If the column is a string, parse the number
@@ -476,7 +503,7 @@ class PreprocessFILStage(PreprocessBaseStage):
                 x.meta.df[col] = x.meta.df[col].astype("float32")
 
         # Convert the dataframe to cupy the same way cuml does
-        data = cp.asarray(cudf.from_pandas(x.meta.df[fea_cols]).as_gpu_matrix(order='C'))
+        data = cp.asarray(cudf.from_pandas(x.get_meta(fea_cols)).as_gpu_matrix(order='C'))
 
         count = data.shape[0]
 

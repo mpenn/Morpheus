@@ -15,7 +15,8 @@
 # re-run 'versioneer.py setup' after changing this section, and commit the
 # resulting files.
 
-from setuptools import setup, find_packages
+from setuptools import find_packages
+from setuptools import setup
 
 import versioneer
 
@@ -26,19 +27,19 @@ setup(
     classifiers=[
         "Development Status :: 3 - Alpha",
 
-        # Utilizes NVIDIA GPUs
+  # Utilizes NVIDIA GPUs
         "Environment :: GPU :: NVIDIA CUDA",
 
-        # Audience (TODO: (MDD) Audit these)
+  # Audience (TODO: (MDD) Audit these)
         "Intended Audience :: Developers",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Security",
         "Topic :: System :: Networking :: Monitoring",
 
-        # License
+  # License
         "License :: OSI Approved :: Apache Software License",
 
-        # Only support Python 3.8+
+  # Only support Python 3.8+
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
@@ -48,11 +49,12 @@ setup(
     packages=find_packages(include=["morpheus", "morpheus.*"]),
     include_package_data=True,
     install_requires=[
-        "streamz @ git+https://github.com/mdemoret-nv/streamz.git@on_completed#egg=streamz",
         "appdirs",
         "click-completion",
         "click<8",
         "configargparse",
+        "dask",
+        "distributed",
         "docker",
         "grpcio-channelz",
         "networkx",
@@ -60,6 +62,8 @@ setup(
         "tritonclient[all]",
         "typing-utils",
         "xgboost",
+        # To Remove:
+        "distributed",
     ],
     license="Apache",
     python_requires='>=3.8, <4',

@@ -192,3 +192,4 @@ triton_models/**/*.engine
 docs/source/_modules
 data/*
 mlruns/*
+/build*/

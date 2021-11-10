@@ -176,7 +176,7 @@ class MultiMessage(MessageData):
 
         return self.get_meta(col_name=col_name).to_list()
 
-    def set_meta(self, value, columns: typing.Union[None, str, typing.List[str]] = None):
+    def set_meta(self, columns: typing.Union[None, str, typing.List[str]], value):
         """
         Set column values to morpheus.messages.MessageMeta.df
 
@@ -194,6 +194,26 @@ class MultiMessage(MessageData):
         else:
             # If its a single column or list of columns, this is the same
             self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns] = value
+
+    def get_slice(self, start, stop):
+        """
+        Returns sliced batches based on offsets supplied. Automatically calculates the correct `mess_offset`
+        and `mess_count`.
+
+        Parameters
+        ----------
+        start : int
+            Start offset address.
+        stop : int
+            Stop offset address.
+
+        Returns
+        -------
+        morpheus.messages.MultiInferenceMessage
+            A new `MultiInferenceMessage` with sliced offset and count.
+
+        """
+        return MultiMessage(meta=self.meta, mess_offset=start, mess_count=stop - start)
 
     def get_slice(self, start, stop):
         """

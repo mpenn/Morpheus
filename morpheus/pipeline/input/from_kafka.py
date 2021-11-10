@@ -14,10 +14,9 @@
 
 import typing
 
-from streamz import Source
-from streamz.core import Stream
 from tornado.ioloop import IOLoop
 
+import neo
 import cudf
 
 from morpheus.config import Config
@@ -70,7 +69,7 @@ class KafkaSourceStage(SingleOutputSource):
     def name(self) -> str:
         return "from-kafka"
 
-    def _build_source(self) -> typing.Tuple[Source, typing.Type]:
+    def _build_source(self, seg: neo.Segment) -> typing.Tuple[Source, typing.Type]:
 
         if (self._use_dask):
             from dask.distributed import Client

@@ -13,14 +13,14 @@
 # limitations under the License.
 
 import asyncio
-import queue
 import threading
 import typing
 from abc import abstractmethod
-from concurrent.futures import thread
+from functools import partial
 from functools import reduce
 
 import cupy as cp
+import neo
 import typing_utils
 from tornado.ioloop import IOLoop
 
@@ -71,7 +71,11 @@ class InferenceWorker:
         self._thread.join()
 
     @abstractmethod
-    def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
+    def calc_output_dims(self, x: MultiInferenceMessage) -> typing.Tuple:
+        pass
+
+    @abstractmethod
+    def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemory], None]):
         pass
 
     def main_loop(self, ready_event: asyncio.Event = None):
@@ -189,6 +193,7 @@ class InferenceStage(MultiMessageStage):
 
         self._fea_length = c.feature_length
 
+        self._thread_count = c.num_threads
         self._workers: typing.List[InferenceWorker] = []
         self._inf_queue = ProducerConsumerQueue()
 
@@ -227,7 +232,7 @@ class InferenceStage(MultiMessageStage):
         """
         pass
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiResponseProbsMessage
@@ -243,29 +248,129 @@ class InferenceStage(MultiMessageStage):
             out_type = StreamFuture[MultiResponseProbsMessage]
         else:
             # First convert to manageable batches. If the batches are too large, we cant process them
-            stream = stream.async_map(self._split_batches,
-                                      executor=self._pipeline.thread_pool,
-                                      max_batch_size=self._max_batch_size)
+            # stream = stream.async_map(self._split_batches,
+            #                           executor=self._pipeline.thread_pool,
+            #                           max_batch_size=self._max_batch_size)
+            # split = seg.make_node(self.unique_name + "split", partial(self._split_batches, max_batch_size=self._max_batch_size))
+            def split_batches_fn(input: neo.Observable, output: neo.Subscriber):
 
-            # Queue the inference work
-            stream = stream.async_map(self._queue_inf_work)
+                worker = self._get_inference_worker(self._inf_queue)
 
-            stream = stream.async_map(self._convert_response, executor=self._pipeline.thread_pool)
+                worker.init()
+
+                outstanding_requests = 0
+
+                def obs_on_next(x: MultiInferenceMessage):
+                    nonlocal outstanding_requests
+
+                    batches = self._split_batches(x, self._max_batch_size)
+
+                    output_dims = worker.calc_output_dims(x)
+
+                    memory = ResponseMemoryProbs(count=x.count, probs=cp.zeros(output_dims))
+
+                    fut_list = []
+
+                    for batch in batches:
+                        outstanding_requests += 1
+
+                        fut = neo.Future()
+
+                        def set_output_onnext(resp: ResponseMemoryProbs, b):
+                            nonlocal outstanding_requests
+
+                            m = self._convert_one_response(memory, b, resp)
+
+                            output.on_next(m)
+
+                            outstanding_requests -= 1
+
+                        def set_output_fut(resp: ResponseMemoryProbs, b, f: neo.Future):
+                            nonlocal outstanding_requests
+                            m = self._convert_one_response(memory, b, resp)
+
+                            f.set_result(m)
+
+                            outstanding_requests -= 1
+
+                        fut_list.append(fut)
+
+                        worker.process(batch, partial(set_output_fut, b=batch, f=fut))
+                        # worker.process(batch, partial(set_output_onnext, b=batch))
+
+                    for f in fut_list:
+                        f.result()
+
+                    # Now return the entire thing as a whole
+                    output.on_next(
+                        MultiResponseProbsMessage(meta=x.meta,
+                                                  mess_offset=x.mess_offset,
+                                                  mess_count=x.mess_count,
+                                                  memory=memory,
+                                                  offset=x.offset,
+                                                  count=x.count))
+
+                def obs_on_error(x):
+                    output.on_error(x)
+
+                def obs_on_completed():
+                    print("Inference on_completed called. Outstanding: {}".format(outstanding_requests))
+                    output.on_completed()
+
+                obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+                input.subscribe(obs)
+                print("Inference subscribe() complete. Outstanding: {}".format(outstanding_requests))
+
+            split = seg.make_node_full(self.unique_name + "split", split_batches_fn)
+            split.concurrency = self._thread_count
+            seg.make_edge(stream, split)
+
+            # # Queue the inference work
+            # # stream = stream.async_map(self._queue_inf_work)
+            # # queue_work = seg.make_node(self.unique_name + "queue", self._queue_inf_work)
+            # def queue_inf_work_fn(inp: neo.Observable, output: neo.Subscriber):
+
+            #     process_inf = self._get_inference_fn()
+
+            #     def obs_on_next(x: MultiInferenceMessage):
+
+            #         process_inf(x, lambda ret: output.on_next(([x], [ret])))
+
+            #     def obs_on_error(x):
+            #         output.on_error(x)
+
+            #     def obs_on_completed():
+            #         output.on_completed()
+
+            #     obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            #     inp.subscribe(obs)
+
+            # queue_work = seg.make_node_full(self.unique_name + "queue", queue_inf_work_fn)
+            # queue_work.concurrency = 2
+            # seg.make_edge(split, queue_work)
+
+            # # stream = stream.async_map(self._convert_response, executor=self._pipeline.thread_pool)
+            # convert_resp = seg.make_node(self.unique_name + "convert", self._convert_response)
+            # seg.make_edge(queue_work, convert_resp)
+
+            stream = split
 
         return stream, out_type
 
     async def _start(self):
 
-        wait_events = []
+        # wait_events = []
 
-        for _ in range(1):
+        # for _ in range(1):
 
-            self._workers.append(self._get_inference_worker(self._inf_queue))
+        #     self._workers.append(self._get_inference_worker(self._inf_queue))
 
-            # Wait for the inference thread to be ready
-            wait_events.append(self._workers[-1].start())
+        #     # Wait for the inference thread to be ready
+        #     wait_events.append(self._workers[-1].start())
 
-        await asyncio.gather(*wait_events, return_exceptions=True)
+        # await asyncio.gather(*wait_events, return_exceptions=True)
 
         return await super()._start()
 
@@ -324,7 +429,7 @@ class InferenceStage(MultiMessageStage):
 
         return out_resp
 
-    async def _queue_inf_work(self, x: typing.List[MultiInferenceMessage]):
+    def _queue_inf_work(self, x: typing.List[MultiInferenceMessage]):
         # Get the current event loop.
         loop = asyncio.get_running_loop()
 
@@ -337,7 +442,7 @@ class InferenceStage(MultiMessageStage):
 
             futures.append(fut)
 
-        res = await asyncio.gather(*futures, return_exceptions=True)
+        res = asyncio.gather(*futures, return_exceptions=True)
 
         return x, res
 
@@ -392,3 +497,28 @@ class InferenceStage(MultiMessageStage):
                                          memory=memory,
                                          offset=0,
                                          count=memory.count)
+
+    @staticmethod
+    def _convert_one_response(memory: ResponseMemoryProbs, inf: MultiInferenceMessage, res: ResponseMemoryProbs):
+        # Make sure we have a continuous list
+        # assert inf.mess_offset == saved_offset + saved_count
+
+        # Two scenarios:
+        if (inf.mess_count == inf.count):
+            # In message and out message have same count. Just use probs as is
+            memory.probs[inf.offset:inf.count + inf.offset, :] = res.probs
+        else:
+            assert inf.count == res.count
+
+            mess_ids = inf.seq_ids[:, 0].get().tolist()
+
+            # Out message has more reponses, so we have to do key based blending of probs
+            for i, idx in enumerate(mess_ids):
+                memory.probs[idx, :] = cp.maximum(memory.probs[idx, :], res.probs[i, :])
+
+        return MultiResponseProbsMessage(meta=inf.meta,
+                                         mess_offset=inf.mess_offset,
+                                         mess_count=inf.mess_count,
+                                         memory=memory,
+                                         offset=inf.offset,
+                                         count=inf.count)

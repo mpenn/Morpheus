@@ -25,11 +25,9 @@ import typing
 from abc import ABC
 from abc import abstractmethod
 
+import neo
 import networkx
-import streamz
 import typing_utils
-from streamz import Source
-from streamz.core import Stream
 from tornado.ioloop import IOLoop
 from tqdm import tqdm
 
@@ -57,7 +55,7 @@ T = typing.TypeVar('T')
 
 StreamFuture = typing._GenericAlias(distributed.client.Future, T, special=True, inst=False, name="StreamFuture")
 
-StreamPair = typing.Tuple[Stream, typing.Type]
+StreamPair = typing.Tuple[neo.Node, typing.Type]
 
 
 class Sender():
@@ -161,13 +159,15 @@ class Receiver():
                 # We have multiple senders. Create a dummy stream to connect all senders
                 if (self.is_complete):
                     # Connect all streams now
-                    self._input_stream = streamz.Stream(upstreams=[x.out_stream for x in self._input_senders],
-                                                        asynchronous=True,
-                                                        loop=IOLoop.current())
+                    # self._input_stream = streamz.Stream(upstreams=[x.out_stream for x in self._input_senders],
+                    #                                     asynchronous=True,
+                    #                                     loop=IOLoop.current())
+                    raise NotImplementedError("Still using streamz")
                     self._is_linked = True
                 else:
                     # Create a dummy stream that needs to be linked later
-                    self._input_stream = streamz.Stream(asynchronous=True, loop=IOLoop.current())
+                    # self._input_stream = streamz.Stream(asynchronous=True, loop=IOLoop.current())
+                    raise NotImplementedError("Still using streamz")
 
                 # Now determine the output type from what we have
                 great_ancestor = greatest_ancestor(*[x.out_type for x in self._input_senders if x.is_complete])
@@ -373,17 +373,17 @@ class StreamWrapper(ABC, collections.abc.Hashable):
 
             return True
 
-    def build(self, do_propagate=True):
+    def build(self, seg: neo.Segment, do_propagate=True):
         assert not self.is_built, "Can only build stages once!"
         assert self._pipeline is not None, "Must be attached to a pipeline before building!"
 
         # Pre-Build returns the input pairs for each port
         in_ports_pairs = self._pre_build()
 
-        out_ports_pair = self._build(in_ports_pairs)
+        out_ports_pair = self._build(seg, in_ports_pairs)
 
         # Allow stages to do any post build steps (i.e. for sinks, or timing functions)
-        out_ports_pair = self._post_build(out_ports_pair)
+        out_ports_pair = self._post_build(seg, out_ports_pair)
 
         assert len(out_ports_pair) == len(self.output_ports), \
             "Build must return same number of output pairs as output ports"
@@ -402,7 +402,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
             if (not dep.can_build()):
                 continue
 
-            dep.build(do_propagate=do_propagate)
+            dep.build(seg, do_propagate=do_propagate)
 
     def _pre_build(self) -> typing.List[StreamPair]:
         in_pairs: typing.List[StreamPair] = [x.get_input_pair() for x in self.input_ports]
@@ -410,7 +410,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
         return in_pairs
 
     @abstractmethod
-    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
         """
         This function is responsible for constructing this Stage's internal `streamz.Stream` object. The input
         of this function is the returned value from the upstream stage.
@@ -433,7 +433,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
         """
         pass
 
-    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
         return out_ports_pair
 
     async def start(self):
@@ -475,7 +475,7 @@ class SourceStage(StreamWrapper):
         self._start_callbacks: typing.List[typing.Callable] = []
         self._stop_callbacks: typing.List[typing.Callable] = []
 
-        self._source_stream: Source = None
+        self._source_stream: neo.Node = None
 
     @property
     def input_count(self) -> int:
@@ -521,7 +521,7 @@ class SourceStage(StreamWrapper):
         self._stop_callbacks.append(cb)
 
     @abstractmethod
-    def _build_source(self) -> StreamPair:
+    def _build_source(self, seg: neo.Segment) -> StreamPair:
         """
         Abstract method all derived Source classes should implement. Returns the same value as `build`
 
@@ -537,46 +537,46 @@ class SourceStage(StreamWrapper):
         pass
 
     @typing.final
-    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
         # Derived source stages should override `_build_source` instead of this method. This allows for tracking the
         # True source object separate from the output stream. If any other operators need to be added after the source,
         # use `_post_build`
         assert len(self.input_ports) == 0, "Sources shouldnt have input ports"
 
-        source_pair = self._build_source()
+        source_pair = self._build_source(seg)
 
         curr_source = source_pair[0]
 
-        while (curr_source is not None and not isinstance(curr_source, Source)):
+        # while (curr_source is not None and not isinstance(curr_source, Source)):
 
-            try:
-                curr_source = curr_source.upstream
-            except ValueError:
-                logging.warning("Detected multiple upstream objects for source {}".format(curr_source))
-                curr_source = None
+        #     try:
+        #         curr_source = curr_source.upstream
+        #     except ValueError:
+        #         logging.warning("Detected multiple upstream objects for source {}".format(curr_source))
+        #         curr_source = None
 
-        assert curr_source is not None, \
-            ("Output of `_build_source` must be downstream of a `streamz.Source` object. "
-             "Ensure the returned streams only have a single `upstream` object and can find a "
-             "`Source` object from by traversing the upstream object. If necessary, return a source "
-             "object in `_build_source` and perform additional operators in the `_post_build` "
-             "function")
+        # assert curr_source is not None, \
+        #     ("Output of `_build_source` must be downstream of a `streamz.Source` object. "
+        #      "Ensure the returned streams only have a single `upstream` object and can find a "
+        #      "`Source` object from by traversing the upstream object. If necessary, return a source "
+        #      "object in `_build_source` and perform additional operators in the `_post_build` "
+        #      "function")
 
         self._source_stream = curr_source
 
         # Now setup the output ports
         self._output_ports[0]._out_stream_pair = source_pair
 
-        # Add any existing start/done callbacks
-        for cb in self._start_callbacks:
-            self._source_stream.add_on_start_callback(cb)
+        # # Add any existing start/done callbacks
+        # for cb in self._start_callbacks:
+        #     self._source_stream.add_on_start_callback(cb)
 
-        for cb in self._stop_callbacks:
-            self._source_stream.add_on_stop_callback(cb)
+        # for cb in self._stop_callbacks:
+        #     self._source_stream.add_on_stop_callback(cb)
 
         return [source_pair]
 
-    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
         return out_ports_pair
 
@@ -587,7 +587,8 @@ class SourceStage(StreamWrapper):
         self._source_stream.stop()
 
     async def join(self):
-        await self._source_stream.join()
+        # await self._source_stream.join()
+        pass
 
 
 class SingleOutputSource(SourceStage):
@@ -596,13 +597,13 @@ class SingleOutputSource(SourceStage):
 
         self._create_ports(0, 1)
 
-    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+    def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
         return out_pair
 
     @typing.final
-    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        ret_val = self._post_build_single(out_ports_pair[0])
+        ret_val = self._post_build_single(seg, out_ports_pair[0])
 
         logger.info("Added source: {}\n  └─> {}".format(str(self), pretty_print_type_name(ret_val[1])))
 
@@ -622,7 +623,7 @@ class Stage(StreamWrapper):
     def __init__(self, c: Config):
         super().__init__(c)
 
-    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
         return out_ports_pair
 
@@ -636,7 +637,7 @@ class Stage(StreamWrapper):
         """
         pass
 
-    def _on_complete(self, stream: Stream):
+    def _on_complete(self, stream):
 
         logger.info("Stage Complete: {}".format(self.name))
 
@@ -674,10 +675,10 @@ class SinglePortStage(Stage):
         return in_ports_pairs
 
     @abstractmethod
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
         pass
 
-    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
         # Derived source stages should override `_build_source` instead of this method. This allows for tracking the
         # True source object separate from the output stream. If any other operators need to be added after the source,
         # use `_post_build`
@@ -686,15 +687,15 @@ class SinglePortStage(Stage):
 
         assert len(in_ports_streams) == 1, "Should only have 1 port on input"
 
-        return [self._build_single(in_ports_streams[0])]
+        return [self._build_single(seg, in_ports_streams[0])]
 
-    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+    def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
         return out_pair
 
     @typing.final
-    def _post_build(self, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        ret_val = self._post_build_single(out_ports_pair[0])
+        ret_val = self._post_build_single(seg, out_ports_pair[0])
 
         logger.info("Added stage: {}\n  └─ {} -> {}".format(str(self),
                                                             pretty_print_type_name(self.input_ports[0].in_type),
@@ -711,7 +712,7 @@ class MultiMessageStage(SinglePortStage):
 
         super().__init__(c)
 
-    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+    def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
 
         # Check if we are debug and should log timestamps
         if (Config.get().debug and self._should_log_timestamps):
@@ -724,12 +725,12 @@ class MultiMessageStage(SinglePortStage):
 
                 curr_time = get_time_ms()
 
-                x.set_meta(curr_time, "ts_" + cached_name)
+                x.set_meta("ts_" + cached_name, curr_time)
 
             # Only have one port
             out_pair[0].gather().sink(post_timestamps)
 
-        return super()._post_build_single(out_pair)
+        return super()._post_build_single(seg, out_pair)
 
 
 class Pipeline():
@@ -754,6 +755,8 @@ class Pipeline():
         self._stages: typing.Set[Stage] = set()
 
         self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=c.num_threads)
+        self._exec_options = neo.Options()
+        self._exec_options.topology.user_cpuset = "0-{}".format(c.num_threads - 1)
 
         self.batch_size = c.pipeline_batch_size
 
@@ -763,6 +766,9 @@ class Pipeline():
 
         self._is_built = False
         self._is_started = False
+
+        self._neo_executor: neo.Executor = None
+        self._neo_pipeline: neo.Pipeline = None
 
     @property
     def is_built(self) -> bool:
@@ -843,32 +849,37 @@ class Pipeline():
 
         logger.info("====Building Pipeline====")
 
-        # Get the list of stages and source
-        source_and_stages: typing.List[StreamWrapper] = list(self._sources) + list(self._stages)
+        self._neo_pipeline = neo.Pipeline()
 
-        # Now loop over stages
-        for s in source_and_stages:
+        def inner_build(seg: neo.Segment):
+            # Get the list of stages and source
+            source_and_stages: typing.List[StreamWrapper] = list(self._sources) + list(self._stages)
 
-            if (s.can_build()):
-                s.build()
-
-        if (not all([x.is_built for x in source_and_stages])):
-            # raise NotImplementedError("Circular pipelines are not yet supported!")
-            logger.warning("Circular pipeline detected! Building with reduced constraints")
-
+            # Now loop over stages
             for s in source_and_stages:
 
-                if (s.can_build(check_ports=True)):
-                    s.build()
+                if (s.can_build()):
+                    s.build(seg)
 
-        if (not all([x.is_built for x in source_and_stages])):
-            raise RuntimeError("Could not build pipeline. Ensure all types can be determined")
+            if (not all([x.is_built for x in source_and_stages])):
+                # raise NotImplementedError("Circular pipelines are not yet supported!")
+                logger.warning("Circular pipeline detected! Building with reduced constraints")
 
-        # Finally, execute the link phase (only necessary for circular pipelines)
-        for s in source_and_stages:
+                for s in source_and_stages:
 
-            for p in s.input_ports:
-                p.link()
+                    if (s.can_build(check_ports=True)):
+                        s.build()
+
+            if (not all([x.is_built for x in source_and_stages])):
+                raise RuntimeError("Could not build pipeline. Ensure all types can be determined")
+
+            # Finally, execute the link phase (only necessary for circular pipelines)
+            for s in source_and_stages:
+
+                for p in s.input_ports:
+                    p.link()
+
+        self._neo_pipeline.make_segment("main", inner_build)
 
         self._is_built = True
 
@@ -1102,7 +1113,18 @@ class Pipeline():
             loop.add_signal_handler(s, term_signal)
 
         try:
-            loop.run_until_complete(self.build_and_start())
+
+            self._neo_executor = neo.Executor(self._exec_options)
+
+            self.build()
+
+            self._neo_executor.register_pipeline(self._neo_pipeline)
+
+            self._neo_executor.start()
+
+            self._neo_executor.join()
+
+            # loop.run_until_complete(self.build_and_start())
 
             # Wait for completion
             loop.run_until_complete(self.join())

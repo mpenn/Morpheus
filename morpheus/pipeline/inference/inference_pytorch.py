@@ -48,10 +48,29 @@ class PyTorchInference(InferenceWorker):
 
         self._model = None
 
+        # Use this to cache the output size
+        self._output_size = None
+
     def init(self):
 
         # Load the model into CUDA memory
         self._model = torch.load(self._model_filename).to('cuda')
+
+    def calc_output_dims(self, x: MultiInferenceMessage) -> typing.Tuple:
+
+        # If we havent cached the output dimension, do that here
+        if (not self._output_size):
+            test_intput_ids_shape = (self._max_batch_size, ) + x.get_input("input_ids").shape[1:]
+            test_input_mask_shape = (self._max_batch_size, ) + x.get_input("input_mask").shape[1:]
+
+            test_outputs = self._model(torch.randint(65000, (test_intput_ids_shape), dtype=torch.long).cuda(),
+                                       token_type_ids=None,
+                                       attention_mask=torch.ones(test_input_mask_shape).cuda())
+
+            # Send random input through the model
+            self._output_size = test_outputs[0].data.shape
+
+        return (x.count, self._outputs[list(self._outputs.keys())[0]].shape[1])
 
     def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
 
