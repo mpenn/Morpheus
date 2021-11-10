@@ -311,6 +311,10 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
         """
         text_ser = cudf.Series(x.get_meta("data"))
+
+        # handles special characters tokenization
+        text_ser = "[CLS] " + text_ser
+        
         tokenized = tokenize_text_series(vocab_hash_file=vocab_hash_file,
                                          do_lower_case=do_lower_case,
                                          text_ser=text_ser,
