@@ -304,7 +304,7 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     config.feature_length = kwargs["model_seq_length"]
 
-    if (kwargs["labels_file"] is not None):
+    if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
         with open(kwargs["labels_file"], "r") as lf:
             config.class_labels = [x.strip() for x in lf.readlines()]
             logger.info("Loaded labels file. Current labels: [%s]", str(config.class_labels))
@@ -359,7 +359,7 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     config.feature_length = kwargs["model_fea_length"]
 
-    if (kwargs["labels_file"] is not None):
+    if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
         with open(kwargs["labels_file"], "r") as lf:
             config.class_labels = lf.readlines()
             logger.info("Loaded labels file. Current labels: [%s]", str(config.class_labels))
@@ -483,10 +483,10 @@ def from_file(ctx: click.Context, **kwargs):
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.input.from_file import FileSourceStage
-    from morpheus.pipeline.input.from_file import FileSourceTypes
+    from morpheus.pipeline.input.from_file import FileTypes
 
     if ("file_type" in kwargs):
-        kwargs["file_type"] = FileSourceTypes(kwargs["file_type"])
+        kwargs["file_type"] = FileTypes(kwargs["file_type"])
 
     stage = FileSourceStage(Config.get(), **kwargs)
 

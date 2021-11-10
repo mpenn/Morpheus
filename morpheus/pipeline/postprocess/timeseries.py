@@ -335,12 +335,12 @@ class TimeSeriesStage(SinglePortStage):
         is_anomaly = fftAD(signal_cp, p=self._filter_percent, zt=self._zscore_threshold)
 
         # Start by setting them all to false
-        action.message.set_meta(False, "is_anomaly")
+        action.message.set_meta("is_anomaly", False)
 
         if (len(is_anomaly) > 0):
             anomalies = (elapsed_seconds // self._resolution_sec).astype(int).isin(is_anomaly.get())
 
-            action.message.set_meta(anomalies, "is_anomaly")
+            action.message.set_meta("is_anomaly", anomalies)
 
             logger.debug("Found anomalies: %s",
                          window_start + pd.to_timedelta((cp.choose(is_anomaly, signal_bins)).get(), unit='s'))

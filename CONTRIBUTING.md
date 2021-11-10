@@ -3,7 +3,7 @@
 Contributions to Morpheus fall into the following three categories.
 
 1. To report a bug, request a new feature, or report a problem with
-    documentation, please file an [issue](https://gitlab-master.nvidia.com/morpheus/morpheus/-/issues/new?issue%5Bassignee_id%5D=&issue%5Bmilestone_id%5D=) 
+    documentation, please file an [issue](https://gitlab-master.nvidia.com/morpheus/morpheus/-/issues/new?issue%5Bassignee_id%5D=&issue%5Bmilestone_id%5D=)
     describing in detail the problem or new feature. The Morpheus team evaluates
     and triages issues, and schedules them for a release. If you believe the
     issue needs priority attention, please comment on the issue to notify the
@@ -47,6 +47,117 @@ Look at the unassigned issues, and find an issue to which you are comfortable
 contributing. Start with _Step 2_ above, commenting on the issue to let
 others know you are working on it. If you have any questions related to the
 implementation of the issue, ask them in the issue instead of the MR.
+
+## Setting Up Your Build Environment
+
+The following instructions are for developers who are getting started with the Morpheus repository. The Morpheus development environment is flexible (Docker, Conda and bare metal workflows) but has a high number of dependencies that can be difficult to setup. These instructions outline the steps for setting up a development environment inside a Docker container or on a host machine with Conda.
+
+All of the following instructions assume several variables have been set:
+ - `MORPHEUS_ROOT`: The Morpheus repository has been checked out at a location specified by this variable. Any non-absolute paths are relative to `MORPHEUS_ROOT`.
+ - `PYTHON_VER`: The desired Python version. Minimum required is 3.8
+ - `RAPIDS_VER`: The desired RAPIDS version for all RAPIDS libraries including cuDF and RMM. This is also used for Triton.
+ - `CUDA_VER`: The desired CUDA version to use.
+
+### Build in Docker Container
+
+This workflow utilizes a docker container to setup most dependencies ensuring a consistent environement.
+
+1. Build the development container
+   ```bash
+   ./docker/build_dev_container.sh
+   ```
+   1. The container tag will default to `morpheus:YYMMDD` where `YYMMDD` is the current 2 digit year, month and day respectively. The tag can be overridden by setting `MORPHEUS_TAG`. For example,
+      ```bash
+      MORPHEUS_TAG=my_tag ./docker/build_dev_container.sh
+      ```
+      Would build the container `morpheus:my_tag`.
+   1. Note: This does not build any Morpheus or Neo code and defers building the code until the entire repo can be mounted into a running container. This allows for faster incremental builds during development.
+2. Run the development container
+   ```bash
+   ./docker/run_dev_container.sh
+   ```
+   1. The container tag follows the same rules as `build_dev_container.sh` and will default to the current `YYMMDD`. Specify the desired tag with `MORPHEUS_TAG`. i.e. `MORPHEUS_TAG=my_tag ./docker/run_dev_container.sh`
+   2. This will automatically mount the current working directory to `/workspace`. In addition, this script sets up `SSH_AUTH_SOCK` to allow docker containers to pull from private repos.
+3. Compile Morpheus
+   ```bash
+   ./scripts/compile.sh
+   ```
+   This script will run both CMake Configure with default options and CMake build.
+4. Install Morpheus
+   ```bash
+   pip install -e /workspace
+   ```
+   Once Morpheus has been built, it can be installed into the current virtual environment.
+5. Run Morpheus
+   ```bash
+   morpheus run pipeline-nlp ...
+   ```
+   At this point, Morpheus can be fully used. Any changes to Python code will not require a rebuild. Changes to C++ code will require calling `./scripts/compile.sh`. Installing Morpheus is only required once per virtual environment.
+
+### Build in a Conda Environment
+
+If a Conda environment on the host machine is preferred over Docker, it is relatively easy to install the necessary dependencies (In reality, the Docker workflow creates a Conda environment inside the container).
+
+Note: These instructions assume the user is using `mamba` instead of `conda` since it's improved solver speed is very helpful when working with a large number of dependencies. If you are not familiar with `mamba` you can install it with `conda install -n base -c conda-forge mamba` (Make sure to only install into the base environment). `mamba` is a drop in replacement for `conda` and all conda commands are compatible between the two.
+
+1. Create a new Conda environment
+   ```bash
+   mamba create -n morpheus -c conda-forge python=${PYTHON_VER}
+   conda activate morpheus
+   # Setup the default channels
+   mamba config --env --add channels conda-forge
+   mamba config --env --add channels nvidia
+   mamba config --env --add channels rapidsai
+   ```
+   This creates an environment named `morpheus`, activates that environment, and sets the default channels to use.
+2. Install the Conda dependencies
+   ```bash
+   mamba env update -n morpheus --file ./docker/conda/dev_cuda${CUDA_VER}.yml
+   ```
+3. Insteall cuDF dependencies
+   ```bash
+   mamba install -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER}
+   ```
+   Since it's necessary to manually build cuDF, this will install all necessary cuDF dependencies without actually installing cuDF.
+4. Build cuDF
+   ```bash
+   # Clone cuDF
+   git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf ${MORPHEUS_ROOT}/.cache/cudf
+   cd ${MORPHEUS_ROOT}/.cache/cudf
+   # Apply the Morpheus cuDF patch
+   git apply --whitespace=fix /workspace/cmake/deps/patches/cudf.patch &&\
+   # Build cuDF
+   ./build.sh --ptds libcudf cudf
+   cd -
+   ```
+   This will checkout, patch, build and install cuDF with the necessary fixes to allow Morpheus to work smoothly with cuDF DataFrames in C++.
+5. Build Morpheus
+   ```bash
+   ./scripts/compile.sh
+   ```
+   This script will run both CMake Configure with default options and CMake build.
+6. Insteall Morpheus
+   ```bash
+   pip install -e /workspace
+   ```
+   Once Morpheus has been built, it can be installed into the current virtual environment.
+7. Run Morpheus
+   ```bash
+   morpheus run pipeline-nlp ...
+   ```
+   At this point, Morpheus can be fully used. Any changes to Python code will not require a rebuild. Changes to C++ code will require calling `./scripts/compile.sh`. Installing Morpheus is only required once per virtual environment.
+
+### Troubleshooting the Build
+
+Due to the large number of dependencies, it's common to run into build issues. The follow are some common issues, tips, and suggestions:
+
+ - Issues with the build cache
+   - To avoid rebuilding every compilation unit for all dependencies after each change, a fair amount of the build is cached. By default, the cache is located at `${MORPHEUS_ROOT}/.cache`. The cache contains both compiled object files, source repositories, ccache files, clangd files and even the cuDF build.
+   - The entire cache folder can be deleted at any time and will be redownload/recreated on the next build
+ - Message indicating `git apply ...` failed
+   - Many of the dependencies require small patches to make them work. These patches must be applied once and only once. If you see this error, try deleting the offending package from the `build/_deps/<offending_packag>` directory or from `.cache/cpm/<offending_package>`.
+   - If all else fails, delete the entire `build/` directory and `.cache/` directory.
+
 
 ---
 

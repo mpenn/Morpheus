@@ -1,0 +1,68 @@
+#=============================================================================
+# Copyright (c) 2020, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#=============================================================================
+
+function(find_and_configure_neo version branch)
+
+  list(APPEND CMAKE_MESSAGE_CONTEXT "neo")
+
+  rapids_cpm_find(trtlab ${version}
+    GLOBAL_TARGETS
+      trtlab::neo trtlab::pyneo
+    BUILD_EXPORT_SET
+      ${PROJECT_NAME}-exports
+    INSTALL_EXPORT_SET
+      ${PROJECT_NAME}-exports
+    CPM_ARGS
+      GIT_REPOSITORY  ssh://git@gitlab-master.nvidia.com:12051/morpheus/dev/trtlab.git
+      GIT_TAG         ${branch}
+      GIT_SHALLOW     TRUE
+      OPTIONS         "NEO_BUILD_EXAMPLES OFF"
+                      "NEO_BUILD_TESTS OFF"
+                      "NEO_BUILD_PYTHON ON"
+                      "NEO_USE_CCACHE ${MORPHEUS_USE_CCACHE}"
+                      "NEO_USE_CLANG_TIDY ${MORPHEUS_USE_CLANG_TIDY}"
+                      "NEO_PYTHON_INPLACE_BUILD OFF"
+  )
+
+  # Now ensure its installed
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+  # detect virtualenv and set Pip args accordingly
+  if(DEFINED ENV{VIRTUAL_ENV} OR DEFINED ENV{CONDA_PREFIX})
+    set(_pip_args)
+  else()
+    set(_pip_args "--user")
+  endif()
+
+  if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+    list(APPEND _pip_args "-e")
+  endif()
+
+  add_custom_command(
+    OUTPUT ${trtlab_BINARY_DIR}/trtlab/neo/python/neo.egg-info/PKG-INFO
+    COMMAND ${Python3_EXECUTABLE} -m pip install ${_pip_args} ${trtlab_BINARY_DIR}/trtlab/neo/python
+    DEPENDS neo_python_rebuild
+    COMMENT "Installing neo python package"
+  )
+
+  add_custom_target(
+    install_neo_python ALL
+    DEPENDS ${trtlab_BINARY_DIR}/trtlab/neo/python/neo.egg-info/PKG-INFO
+  )
+
+endfunction()
+
+find_and_configure_neo(${NEO_VERSION} ${NEO_BRANCH})

@@ -15,6 +15,7 @@
 import typing
 
 import typing_utils
+import neo
 
 from morpheus.config import Config
 from morpheus.pipeline.pipeline import SinglePortStage
@@ -58,7 +59,7 @@ class WriteToKafkaStage(SinglePortStage):
         """
         return (typing.List[str], )
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
         stream = input_stream[0]

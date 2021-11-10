@@ -1,4 +1,13 @@
 {
+  "[cpp]": {
+    "editor.wordBasedSuggestions": false,
+    "editor.suggest.insertMode": "replace",
+    "editor.semanticHighlighting.enabled": true,
+    "editor.tabSize": 4,
+    "editor.detectIndentation": false,
+    "editor.wordWrapColumn": 120,
+    "editor.formatOnSave": true,
+  },
   "[python]": {
     "editor.codeActionsOnSave": {
       "source.organizeImports": true
@@ -14,6 +23,12 @@
       120
     ]
   },
+  "cmake.configureArgs": [
+    "-DCMAKE_MESSAGE_CONTEXT_SHOW=ON", // Show message context by default
+    "-DMORPHEUS_USE_CLANG_TIDY=OFF", // If we are using clangd extension, disable clang-tidy in VS Code to prevent double errors
+    "-DMORPHEUS_PYTHON_INPLACE_BUILD=ON", // Allow inplace build for python. Use `pip install -e .` from the python folder to install
+    "-DMORPHEUS_USE_CCACHE=ON", // Enable ccache when building in vscode
+  ],
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
   "files.trimTrailingWhitespace": true,

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import base64
 import dataclasses
 import logging
@@ -27,7 +26,6 @@ from functools import partial
 import cupy as cp
 import numpy as np
 import tritonclient.grpc as tritonclient
-from tornado.ioloop import IOLoop
 from tritonclient.utils import InferenceServerException
 from tritonclient.utils import triton_to_np_dtype
 
@@ -521,12 +519,15 @@ class TritonInferenceWorker(InferenceWorker):
                              exc_info=ex)
             raise ex
 
+    def calc_output_dims(self, x: MultiInferenceMessage) -> typing.Tuple:
+        return (x.count, self._outputs[list(self._outputs.keys())[0]].shape[1])
+
     @abstractmethod
     def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemory:
         pass
 
     def _infer_callback(self,
-                        f: asyncio.Future,
+                        cb: typing.Callable[[ResponseMemory], None],
                         m: InputWrapper,
                         b: MultiInferenceMessage,
                         result: tritonclient.InferResult,
@@ -534,23 +535,28 @@ class TritonInferenceWorker(InferenceWorker):
 
         # If its an error, return that here
         if (error is not None):
-            self._loop.add_callback(f.set_exception, error)
-            return
+            # self._loop.add_callback(f.set_exception, error)
+            raise error
 
         # Build response
         response_mem = self._build_response(b, result)
 
-        def tmp(mem: ResponseMemoryProbs):
-            # Set result on future
-            f.set_result(mem)
+        # Call the callback with the memory
+        cb(response_mem)
 
-            # Return mempool obj
-            self._mem_pool.return_obj(m)
+        self._mem_pool.return_obj(m)
 
-        # We have to schedule a callback here to set the future result on the asyncio thread
-        self._loop.add_callback(tmp, response_mem)
+        # def tmp(mem: ResponseMemoryProbs):
+        #     # Set result on future
+        #     f.set_result(mem)
 
-    def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
+        #     # Return mempool obj
+        #     self._mem_pool.return_obj(m)
+
+        # # We have to schedule a callback here to set the future result on the asyncio thread
+        # self._loop.add_callback(tmp, response_mem)
+
+    def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemory], None]):
         """
         This function sends batch of events as a requests to Triton inference server using triton client API.
 
@@ -575,8 +581,11 @@ class TritonInferenceWorker(InferenceWorker):
         # Inference call
         self._triton_client.async_infer(model_name=self._model_name,
                                         inputs=inputs,
-                                        callback=partial(self._infer_callback, fut, mem, batch),
+                                        callback=partial(self._infer_callback, cb, mem, batch),
                                         outputs=outputs)
+        # result = self._triton_client.infer(model_name=self._model_name, inputs=inputs, outputs=outputs)
+
+        # self._infer_callback(cb, mem, result, None)
 
 
 class TritonInferenceNLP(TritonInferenceWorker):

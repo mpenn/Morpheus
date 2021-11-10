@@ -13,11 +13,11 @@
 # limitations under the License.
 
 import typing
+from functools import partial
 from functools import reduce
 
 import cupy as cp
-import streamz
-from streamz.core import Stream
+import neo
 from tqdm import tqdm
 
 import cudf
@@ -65,7 +65,7 @@ class BufferStage(SinglePortStage):
         """
         return (typing.Any, )
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         return input_stream[0].buffer(self._buffer_count), input_stream[1]
 
@@ -102,7 +102,7 @@ class DelayStage(SinglePortStage):
         """
         return (typing.Any, )
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         return input_stream[0].time_delay(self._duration), input_stream[1]
 
@@ -137,7 +137,7 @@ class TriggerStage(SinglePortStage):
         """
         return (typing.Any, )
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 
@@ -209,23 +209,42 @@ class MonitorStage(SinglePortStage):
 
     def on_start(self):
 
+        # Set the monitor interval to check back in more frequently
+        tqdm.monitor_interval = 1
+
         self._progress = tqdm(desc=self._description,
                               smoothing=self._smoothing,
                               dynamic_ncols=True,
                               unit=self._unit,
                               mininterval=0.25,
-                              maxinterval=1.0)
+                              maxinterval=1.0,
+                              miniters=1)
 
         self._progress.reset()
 
     async def stop(self):
         if (self._progress is not None):
+            self._progress.refresh()
             self._progress.close()
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         # Add the progress sink to the current stream. Use a gather here just in case its a Dask stream
-        input_stream[0].gather().sink(self._progress_sink)
+        # input_stream[0].gather().sink(self._progress_sink)
+        # stream = seg.make_node(self.unique_name, self._progress_sink)
+
+        def sink_on_error(x):
+            print("Got error: {}".format(x))
+
+        def sink_on_completed():
+            print("Got completed")
+
+        stream = seg.make_sink("my_sink", self._progress_sink, sink_on_error, sink_on_completed)
+
+        seg.make_edge(input_stream[0], stream)
+
+        # Call on_start because we must be creating here
+        self.on_start()
 
         return input_stream
 
@@ -319,19 +338,20 @@ class AddClassificationsStage(SinglePortStage):
         probs_np = (x.probs > self._threshold).astype(cp.bool).get()
 
         for i, label in idx2label.items():
-            x.set_meta(probs_np[:, i].tolist(), label)
+            x.set_meta(label, probs_np[:, i].tolist())
 
         # Return list of strs to write out
         return x
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         assert len(self._labels) > 0, "Labels must be non-zero array"
 
-        stream = input_stream[0]
-
         # Convert the messages to rows of strings
-        stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool, idx2label=self._idx2label)
+        # stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool, idx2label=self._idx2label)
+        stream = seg.make_node(self.unique_name, partial(self._add_labels, idx2label=self._idx2label))
+
+        seg.make_edge(input_stream[0], stream)
 
         # Return input unchanged
         return stream, MultiResponseProbsMessage
@@ -402,6 +422,10 @@ class FilterDetectionsStage(SinglePortStage):
             mess_offset = x.mess_offset + pair[0]
             mess_count = pair[1] - pair[0]
 
+            # Filter empty message groups
+            if (mess_count == 0):
+                continue
+
             output_list.append(
                 MultiResponseProbsMessage(x.meta,
                                           mess_offset=mess_offset,
@@ -412,18 +436,41 @@ class FilterDetectionsStage(SinglePortStage):
 
         return output_list
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        stream = input_stream[0]
+        # stream = input_stream[0]
 
         # Reduce messages to only have detections
-        stream = stream.async_map(self.filter, executor=self._pipeline.thread_pool)
+        # stream = stream.async_map(self.filter, executor=self._pipeline.thread_pool)
+        stream = seg.make_node(self.unique_name, self.filter)
 
-        # Convert list back to single MultiResponseProbsMessage
-        stream = stream.flatten()
+        seg.make_edge(input_stream[0], stream)
 
-        # Filter out empty message groups
-        stream = stream.filter(lambda x: x.count > 0)
+        # # Convert list back to single MultiResponseProbsMessage
+        # stream = stream.flatten()
+        # out_stream = out_stream.flatten()
+        def flatten_fn(input: neo.Observable, output: neo.Subscriber):
+            def obs_on_next(x: typing.List):
+
+                for y in x:
+                    output.on_next(y)
+
+            def obs_on_error(x):
+                output.on_error(x)
+
+            def obs_on_completed():
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+        flattened = seg.make_node_full(self.unique_name + "-flatten", flatten_fn)
+        seg.make_edge(stream, flattened)
+        stream = flattened
+
+        # # Filter out empty message groups
+        # stream = stream.filter(lambda x: x.count > 0)
 
         return stream, MultiResponseProbsMessage
 
@@ -439,7 +486,7 @@ class ZipStage(Stage):
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any, )
 
-    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
         # Check for compatible types
         stream_types = [s_type for s, s_type in in_ports_streams[1:]]
@@ -471,7 +518,7 @@ class MergeStage(Stage):
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any, )
 
-    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
         # Check for compatible types
         stream_types = [s_type for s, s_type in in_ports_streams]
@@ -482,7 +529,8 @@ class MergeStage(Stage):
         if (out_type is None):
             out_type = unpack_tuple(*stream_types)
 
-        stream = streamz.union(*[s for s, _ in in_ports_streams])
+        # stream = streamz.union(*[s for s, _ in in_ports_streams])
+        raise NotImplementedError("Still using streamz")
 
         return [(stream, out_type)]
 
@@ -503,7 +551,7 @@ class SwitchStage(Stage):
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any, )
 
-    def _build(self, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
+    def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
         # Since we are a SiSo stage, there will only be 1 input
         input_stream = in_ports_streams[0]

@@ -16,7 +16,6 @@ All objects related to building and running a pipeline.
 """
 
 # Auto import async_map to load the streamz extension
-from ..utils import async_map
 from .messages import MultiInferenceMessage
 from .messages import MultiMessage
 from .messages import MultiResponseMessage

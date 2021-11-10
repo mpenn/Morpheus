@@ -12,12 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 import typing
 
+import neo
+import pandas as pd
 import typing_utils
 
+import cudf
+
 from morpheus.config import Config
+from morpheus.pipeline.file_types import FileTypes
+from morpheus.pipeline.file_types import determine_file_type
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
@@ -38,7 +45,7 @@ class WriteToFileStage(SinglePortStage):
         Overwrite file if exists. Will generate an error otherwise
 
     """
-    def __init__(self, c: Config, filename: str, overwrite: bool):
+    def __init__(self, c: Config, filename: str, overwrite: bool, file_type: FileTypes = FileTypes.Auto):
         super().__init__(c)
 
         self._output_file = filename
@@ -50,6 +57,13 @@ class WriteToFileStage(SinglePortStage):
             else:
                 raise FileExistsError("Cannot output classifications to '{}'. File exists and overwrite = False".format(
                     self._output_file))
+
+        self._file_type = file_type
+
+        if (self._file_type == FileTypes.Auto):
+            self._file_type = determine_file_type(self._output_file)
+
+        self._is_first = True
 
     @property
     def name(self) -> str:
@@ -65,9 +79,27 @@ class WriteToFileStage(SinglePortStage):
             Accepted input types
 
         """
-        return (typing.List[str], )
+        return (typing.List[str], pd.DataFrame, cudf.DataFrame)
 
-    def write_to_file(self, x: typing.List[str]):
+    def _convert_to_strings(self, x: typing.Union[pd.DataFrame, cudf.DataFrame]):
+
+        # Convert here to pandas since this will persist after the message is done
+        if (isinstance(x, cudf.DataFrame)):
+            x_pd = x.to_pandas()
+        else:
+            x_pd = x
+
+        if (self._file_type == FileTypes.Json):
+            output_strs = [json.dumps(y) for y in x_pd.to_dict(orient="records")]
+        elif (self._file_type == FileTypes.Csv):
+            output_strs = x_pd.to_csv(header=self._is_first).split("\n")
+            self._is_first = False
+        else:
+            raise NotImplementedError("Unknown file type: {}".format(self._file_type))
+
+        return output_strs
+
+    def _write_str_to_file(self, x: typing.List[str]):
         """
         Messages are written to a file using this function.
 
@@ -81,19 +113,30 @@ class WriteToFileStage(SinglePortStage):
             f.writelines("\n".join(x))
             f.write("\n")
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+        return x
+
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 
         # Wrap single strings into lists
         if (typing_utils.issubtype(input_stream[1], StreamFuture[str]) or typing_utils.issubtype(input_stream[1], str)):
-            stream = stream.map(lambda x: [x])
+            # stream = stream.map(lambda x: [x])
+            raise NotImplementedError()
 
-        # Do a gather just in case we are using dask
-        stream = stream.gather()
+        if (typing_utils.issubtype(input_stream[1], typing.Union[pd.DataFrame, cudf.DataFrame])):
+            to_string = seg.make_node(self.unique_name + "-tostr", self._convert_to_strings)
+            seg.make_edge(stream, to_string)
+            stream = to_string
 
-        # Sink to file
-        stream.sink(self.write_to_file)
+        # # Do a gather just in case we are using dask
+        # stream = stream.gather()
+
+        # # Sink to file
+        # stream.sink(self.write_to_file)
+        to_file = seg.make_node(self.unique_name, self._write_str_to_file)
+        seg.make_edge(stream, to_file)
+        stream = to_file
 
         # Return input unchanged
         return input_stream

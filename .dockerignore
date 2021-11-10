@@ -1,3 +1,4 @@
+# Folders to ignore
 ./.git*
 models
 .vscode
@@ -5,6 +6,11 @@ __pycache__
 .ipynb_checkpoints
 **/*Dockerfile*
 .tmp
+
+# Ignore any build folder
+./build*
+# Ignore the build cache
+./.cache
 
 # Ignore specific files
 docker/commands.sh
