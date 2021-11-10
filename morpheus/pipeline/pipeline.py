@@ -724,7 +724,7 @@ class MultiMessageStage(SinglePortStage):
 
                 curr_time = get_time_ms()
 
-                x.set_meta("ts_" + cached_name, curr_time)
+                x.set_meta(curr_time, "ts_" + cached_name)
 
             # Only have one port
             out_pair[0].gather().sink(post_timestamps)

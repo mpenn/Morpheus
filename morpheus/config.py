@@ -96,11 +96,26 @@ class ConfigDask(ConfigBase):
     use_processes: bool = False
 
 
+@dataclasses.dataclass
+class ConfigAutoEncoder(ConfigBase):
+    """
+    Pipeline Dask configuration class.
+
+    Parameters
+    ----------
+    use_processes : bool
+        Not currently used.
+
+    """
+    autoencoder_path: str = None
+
+
 class PipelineModes(str, Enum):
     """The type of usecases that can be executed by the pipeline is determined by the enum."""
     OTHER = "OTHER"
     NLP = "NLP"
     FIL = "FIL"
+    AE = "AE"
 
 
 @dataclasses.dataclass
@@ -155,6 +170,8 @@ class Config(ConfigBase):
 
     use_dask: bool = False
     dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
+
+    ae: ConfigAutoEncoder = dataclasses.field(default=None)
 
     @staticmethod
     def default() -> "Config":

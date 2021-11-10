@@ -21,6 +21,7 @@ from functools import partial
 
 import cupy as cp
 import numpy as np
+import pandas as pd
 import typing_utils
 
 import cudf
@@ -38,6 +39,7 @@ from morpheus.pipeline.pipeline import MultiMessageStage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
+from morpheus.pipeline.pipeline import get_time_ms
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 
 
@@ -56,6 +58,9 @@ class DeserializeStage(MultiMessageStage):
         super().__init__(c)
 
         self._use_dask = c.use_dask
+        self._batch_size = c.pipeline_batch_size
+
+        self._max_concurrent = c.num_threads
 
         # Mark these stages to log timestamps if requested
         self._should_log_timestamps = True
@@ -74,10 +79,10 @@ class DeserializeStage(MultiMessageStage):
             Accepted input types
 
         """
-        return (cudf.DataFrame, StreamFuture[cudf.DataFrame])
+        return (cudf.DataFrame, StreamFuture[cudf.DataFrame], pd.DataFrame, StreamFuture[pd.DataFrame])
 
     @staticmethod
-    def process_dataframe(x: cudf.DataFrame):
+    def process_dataframe(x: typing.Union[cudf.DataFrame, pd.DataFrame], batch_size: int):
         """
         The deserialization of the cudf is implemented in this function.
 
@@ -88,13 +93,16 @@ class DeserializeStage(MultiMessageStage):
 
         """
         # Convert here to pandas since this will persist after the message is done
-        x_pd = x.to_pandas()
+        if (isinstance(x, cudf.DataFrame)):
+            x_pd = x.to_pandas()
+        else:
+            x_pd = x
 
-        # Now determine the list of input strings before modification
-        input_json = [json.dumps(y) for y in x_pd.loc[:, x_pd.columns != 'ID'].to_dict(orient="records")]
-
-        # Add the start_time field
-        x_pd["ts_start"] = round(time.time() * 1000)
+        if ("_orig" in x.columns):
+            input_json = x_pd["_orig"].to_list()
+        else:
+            # Now determine the list of input strings before modification
+            input_json = [json.dumps(y) for y in x_pd.loc[:, x_pd.columns != 'ID'].to_dict(orient="records")]
 
         # Try to double deserialize
         def deserialize_data(y: str):
@@ -109,7 +117,24 @@ class DeserializeStage(MultiMessageStage):
         # Build the message data
         meta = MessageMeta(df=x_pd, input_json=input_json)
 
-        return MultiMessage(meta=meta, mess_offset=0, mess_count=len(x_pd))
+        full_message = MultiMessage(meta=meta, mess_offset=0, mess_count=len(x_pd))
+
+        # Now break it up by batches
+        output = []
+
+        for i in range(0, full_message.mess_count, batch_size):
+            output.append(full_message.get_slice(i, min(i + batch_size, full_message.mess_count)))
+
+        return output
+
+    @staticmethod
+    def add_start_time(x: MultiMessage):
+
+        curr_time = get_time_ms()
+
+        x.set_meta(curr_time, "ts_start")
+
+        return x
 
     def _build_single(self, input_stream: StreamPair) -> StreamPair:
 
@@ -121,9 +146,21 @@ class DeserializeStage(MultiMessageStage):
             stream = stream.map(DeserializeStage.process_dataframe)
             out_type = StreamFuture[MultiMessage]
         else:
-            stream = stream.async_map(DeserializeStage.process_dataframe, executor=self._pipeline.thread_pool)
+            stream = stream.async_map(partial(DeserializeStage.process_dataframe, batch_size=self._batch_size),
+                                      executor=self._pipeline.thread_pool)
+            stream = stream.flatten(max_concurrent=self._max_concurrent)
 
         return stream, out_type
+
+    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
+
+        if (self._should_log_timestamps):
+
+            # Only have one port
+            out_pair = (out_pair[0].async_map(DeserializeStage.add_start_time, executor=self._pipeline.thread_pool),
+                        out_pair[1])
+
+        return super()._post_build_single(out_pair)
 
 
 class DropNullStage(SinglePortStage):

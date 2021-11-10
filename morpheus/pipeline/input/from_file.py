@@ -157,7 +157,6 @@ class FileSourceStage(SingleOutputSource):
         self._use_dask = c.use_dask
 
         self._filename = filename
-        self._iterative = iterative if iterative is not None else not c.use_dask
         self._file_type = file_type
         self._filter_null = filter_null
         self._cudf_kwargs = {} if cudf_kwargs is None else cudf_kwargs

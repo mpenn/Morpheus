@@ -1,3 +1,4 @@
+import asyncio
 import queue
 import threading
 import typing
@@ -97,3 +98,105 @@ class ProducerConsumerQueue(queue.Queue, typing.Generic[_T]):
     def is_closed(self):
         with self.mutex:
             return self._is_closed
+
+
+
+class AsyncIOProducerConsumerQueue(asyncio.Queue, typing.Generic[_T]):
+    """
+    Custom queue.Queue implementation which supports closing and uses recursive locks
+    """
+    def __init__(self, maxsize=0, *, loop=None) -> None:
+        super().__init__(maxsize=maxsize, loop=loop)
+
+        self._closed = asyncio.Event(loop=loop)
+        self._is_closed = False
+
+    async def join(self):
+        """Block until all items in the queue have been gotten and processed.
+
+        The count of unfinished tasks goes up whenever an item is added to the
+        queue. The count goes down whenever a consumer calls task_done() to
+        indicate that the item was retrieved and all work on it is complete.
+        When the count of unfinished tasks drops to zero, join() unblocks.
+        """
+
+        # First wait for the closed flag to be set
+        await self._closed.wait()
+
+        if self._unfinished_tasks > 0:
+            await self._finished.wait()
+
+    async def put(self, item):
+        """Put an item into the queue.
+
+        Put an item into the queue. If the queue is full, wait until a free
+        slot is available before adding item.
+        """
+        while self.full() and not self._is_closed:
+            putter = self._loop.create_future()
+            self._putters.append(putter)
+            try:
+                await putter
+            except:
+                putter.cancel()  # Just in case putter is not done yet.
+                try:
+                    # Clean self._putters from canceled putters.
+                    self._putters.remove(putter)
+                except ValueError:
+                    # The putter could be removed from self._putters by a
+                    # previous get_nowait call.
+                    pass
+                if not self.full() and not putter.cancelled():
+                    # We were woken up by get_nowait(), but can't take
+                    # the call.  Wake up the next in line.
+                    self._wakeup_next(self._putters)
+                raise
+
+        if (self._is_closed):
+            raise Closed  # @IgnoreException
+
+        return self.put_nowait(item)
+
+    async def get(self) -> _T:
+        """Remove and return an item from the queue.
+
+        If queue is empty, wait until an item is available.
+        """
+        while self.empty() and not self._is_closed:
+            getter = self._loop.create_future()
+            self._getters.append(getter)
+            try:
+                await getter
+            except:
+                getter.cancel()  # Just in case getter is not done yet.
+                try:
+                    # Clean self._getters from canceled getters.
+                    self._getters.remove(getter)
+                except ValueError:
+                    # The getter could be removed from self._getters by a
+                    # previous put_nowait call.
+                    pass
+                if not self.empty() and not getter.cancelled():
+                    # We were woken up by put_nowait(), but can't take
+                    # the call.  Wake up the next in line.
+                    self._wakeup_next(self._getters)
+                raise
+
+        if (self.empty() and self._is_closed):
+            raise Closed  # @IgnoreException
+
+        return self.get_nowait()
+
+    async def close(self):
+
+        if (not self._is_closed):
+            self._is_closed = True
+
+            # Hit the flag
+            self._closed.set()
+
+            self._wakeup_next(self._putters)
+            self._wakeup_next(self._getters)
+
+    def is_closed(self):
+        return self._is_closed

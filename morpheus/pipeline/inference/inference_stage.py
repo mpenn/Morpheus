@@ -372,7 +372,7 @@ class InferenceStage(MultiMessageStage):
             # Two scenarios:
             if (inf.mess_count == inf.count):
                 # In message and out message have same count. Just use probs as is
-                memory.probs[inf.mess_offset:inf.mess_offset + inf.mess_count, :] = res.probs
+                memory.probs[inf.offset:inf.offset + inf.count, :] = res.probs
             else:
                 assert inf.count == res.count
 
@@ -384,8 +384,7 @@ class InferenceStage(MultiMessageStage):
 
             saved_count += inf.mess_count
 
-        # For now, we assume that this is the whole group of messages so it must start at 0
-        assert saved_offset == 0
+        assert saved_count == total_mess_count, "Did not set every element in output"
 
         return MultiResponseProbsMessage(meta=saved_meta,
                                          mess_offset=saved_offset,

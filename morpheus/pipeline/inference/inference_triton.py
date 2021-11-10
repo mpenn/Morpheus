@@ -522,12 +522,13 @@ class TritonInferenceWorker(InferenceWorker):
             raise ex
 
     @abstractmethod
-    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemory:
+    def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemory:
         pass
 
     def _infer_callback(self,
                         f: asyncio.Future,
                         m: InputWrapper,
+                        b: MultiInferenceMessage,
                         result: tritonclient.InferResult,
                         error: tritonclient.InferenceServerException):
 
@@ -537,7 +538,7 @@ class TritonInferenceWorker(InferenceWorker):
             return
 
         # Build response
-        response_mem = self._build_response(result)
+        response_mem = self._build_response(b, result)
 
         def tmp(mem: ResponseMemoryProbs):
             # Set result on future
@@ -574,7 +575,7 @@ class TritonInferenceWorker(InferenceWorker):
         # Inference call
         self._triton_client.async_infer(model_name=self._model_name,
                                         inputs=inputs,
-                                        callback=partial(self._infer_callback, fut, mem),
+                                        callback=partial(self._infer_callback, fut, mem, batch),
                                         outputs=outputs)
 
 
@@ -623,7 +624,7 @@ class TritonInferenceNLP(TritonInferenceWorker):
                          use_shared_memory=use_shared_memory,
                          inout_mapping=default_mapping)
 
-    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
+    def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
@@ -673,13 +674,88 @@ class TritonInferenceFIL(TritonInferenceWorker):
                          use_shared_memory=use_shared_memory,
                          inout_mapping=inout_mapping)
 
-    def _build_response(self, result: tritonclient.InferResult) -> ResponseMemoryProbs:
+    def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
         mem = ResponseMemoryProbs(
             count=output[list(output.keys())[0]].shape[0],
             probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
+        )
+
+        return mem
+
+
+class TritonInferenceAE(TritonInferenceWorker):
+    """
+    This class extends `TritonInference` to deal with scenario-specific FIL models inference requests like
+    building response.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    model_name : str
+        Name of the model specifies which model can handle the inference requests that are sent to Triton
+        inference server.
+    server_url : str
+        Triton server gRPC URL including the port.
+    inout_mapping : typing.Dict[str, str]
+        Dictionary used to map pipeline input/output names to Triton input/output names. Use this if the
+        Morpheus names do not match the model
+
+    """
+    def __init__(self,
+                 inf_queue: ProducerConsumerQueue,
+                 c: Config,
+                 model_name: str,
+                 server_url: str,
+                 force_convert_inputs: bool,
+                 use_shared_memory: bool,
+                 inout_mapping: typing.Dict[str, str] = None):
+        super().__init__(inf_queue,
+                         c,
+                         model_name=model_name,
+                         server_url=server_url,
+                         force_convert_inputs=force_convert_inputs,
+                         use_shared_memory=use_shared_memory,
+                         inout_mapping=inout_mapping)
+
+        import dill
+
+        # Save the autoencoder path
+        with open(c.ae.autoencoder_path, 'rb') as in_strm:
+            self._autoencoder = dill.load(in_strm)
+
+            # Ensure that there is a label_smoothing property on cce. Necessary if pytorch version is different
+            if (not hasattr(self._autoencoder.cce, "label_smoothing")):
+                self._autoencoder.cce.label_smoothing = 0.0
+
+    def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemoryProbs:
+
+        import torch
+
+        output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
+
+        data = self._autoencoder.prepare_df(batch.get_meta())
+        num_target, bin_target, codes = self._autoencoder.compute_targets(data)
+        mse_loss = self._autoencoder.mse(torch.as_tensor(output["num"], device='cuda'), num_target)
+        net_loss = [mse_loss.data]
+        bce_loss = self._autoencoder.bce(torch.as_tensor(output["bin"], device='cuda'), bin_target)
+        net_loss += [bce_loss.data]
+        cce_loss = []
+        for i, ft in enumerate(self._autoencoder.categorical_fts):
+            loss = self._autoencoder.cce(torch.as_tensor(output[ft], device='cuda'), codes[i])
+            cce_loss.append(loss)
+            net_loss += [loss.data.reshape(-1, 1)]
+
+        net_loss = torch.cat(net_loss, dim=1).mean(dim=1)
+        ae_scores = cp.asarray(net_loss)
+        ae_scores = ae_scores.reshape((batch.count, 1))
+
+        mem = ResponseMemoryProbs(
+            count=batch.count,
+            probs=ae_scores,  # For now, only support one output
         )
 
         return mem
@@ -726,5 +802,7 @@ class TritonInferenceStage(InferenceStage):
             return TritonInferenceNLP(inf_queue, Config.get(), **self._kwargs)
         elif (Config.get().mode == PipelineModes.FIL):
             return TritonInferenceFIL(inf_queue, Config.get(), **self._kwargs)
+        elif (Config.get().mode == PipelineModes.AE):
+            return TritonInferenceAE(inf_queue, Config.get(), **self._kwargs)
         else:
             raise NotImplementedError("Unknown config mode")
