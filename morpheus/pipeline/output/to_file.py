@@ -97,6 +97,10 @@ class WriteToFileStage(SinglePortStage):
         else:
             raise NotImplementedError("Unknown file type: {}".format(self._file_type))
 
+        # Remove any trailing whitespace
+        if (len(output_strs[-1].strip()) == 0):
+            output_strs = output_strs[:-1]
+
         return output_strs
 
     def _write_str_to_file(self, x: typing.List[str]):
