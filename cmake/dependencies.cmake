@@ -40,7 +40,7 @@ set(RAPIDS_VERSION "21.10" CACHE STRING "Global default version for all Rapids p
 
 # Should find Neo First
 set(NEO_VERSION "0.1" CACHE STRING "Which version of Neo to use")
-set(NEO_BRANCH "mdd_morpheus-cleaned" CACHE STRING "Which branch of Neo to use")
+set(NEO_BRANCH "morpheus-0.2.1-EA" CACHE STRING "Which branch of Neo to use")
 include(deps/Configure_neo)
 
 set(CUDF_VERSION "${RAPIDS_VERSION}" CACHE STRING "Which version of cuDF to use")
