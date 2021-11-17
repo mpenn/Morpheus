@@ -51,7 +51,8 @@ COPY --from=vcpkg_build /opt/vcpkg/ /opt/vcpkg/
 ENV VCPKG_ROOT=/opt/vcpkg
 
 # Run the install and bash integrate scripts. Also add VCPKG_BUILD_TYPE
-RUN /opt/vcpkg/vcpkg integrate install && \
+RUN mkdir -p $HOME/.vcpkg && \
+    /opt/vcpkg/vcpkg integrate install && \
     /opt/vcpkg/vcpkg integrate bash && \
     echo 'export PATH=$PATH:/opt/vcpkg' >>~/.bashrc &&\
     echo 'export VCPKG_ROOT="/opt/vcpkg/"' >>~/.bashrc
@@ -111,12 +112,13 @@ FROM base as cudf_build
 
 # Recapture args again
 ARG RAPIDS_VER
+ARG CUDF_DIR=/opt/cudf
 
 COPY cmake/deps/patches/cudf.patch /workspace/cmake/deps/patches/
 
 # Clone to .cache/cudf to make it easy to rebuild
-RUN git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf /workspace/.cache/cudf &&\
-    cd /workspace/.cache/cudf &&\
+RUN git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf ${CUDF_DIR} &&\
+    cd ${CUDF_DIR} &&\
     git apply --whitespace=fix /workspace/cmake/deps/patches/cudf.patch &&\
     source activate morpheus &&\
     ./build.sh --ptds libcudf cudf &&\

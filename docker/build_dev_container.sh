@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MORPHEUS_TAG=${MORPHEUS_TAG:-$(date +'%y%m%d')}
-BUILD_TARGET=${BUILD_TARGET:-base}
+BUILD_TARGET=${BUILD_TARGET:-cudf_build}
 DOCKER_BUILDKIT=${DOCKER_BUILDKIT:-1}
 
 # Build args
