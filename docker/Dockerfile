@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Args used in FROM commands must come first
 ARG FROM_IMAGE="gpuci/miniconda-cuda"
 ARG CUDA_VER=11.4
@@ -31,7 +33,7 @@ ARG RAPIDS_VER=21.10
 ARG PYTHON_VER=3.8
 
 # The TensorRT Version must be the full version (i.e. 7.2.2.3) and match Triton EXACTLY
-ARG TENSORRT_VERSION=7.2.2.3
+ARG TENSORRT_VERSION=8.2.1.3
 
 # Capture argument used for FROM
 ARG CUDA_VER
@@ -41,10 +43,6 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y \
       build-essential pkg-config curl unzip tar zip openssh-client \
     && rm -rf /var/lib/apt/lists/*
-
-# Accept all gitlab-master.nvidia.com hosts
-# TODO(MDD): Do we need/want this?
-# RUN ssh-keyscan gitlab-master.nvidia.com >> ~/.ssh/known_hosts
 
 # Vcpkg Install
 COPY --from=vcpkg_build /opt/vcpkg/ /opt/vcpkg/
@@ -63,20 +61,25 @@ ENV VCPKG_DEFAULT_BINARY_CACHE=/workspace/.cache/vcpkg
 # Enables "source activate conda"
 SHELL ["/bin/bash", "-c"]
 
+# Accept all gitlab-master.nvidia.com hosts
+RUN mkdir -p $HOME/.ssh && ssh-keyscan -t rsa -p 12051 gitlab-master.nvidia.com > ~/.ssh/known_hosts
+
 # All code will be under /workspace
 WORKDIR /workspace
 
+# Install mamba to speed the solve up
 RUN conda config --set ssl_verify false \
     && /opt/conda/bin/conda install -y -n base -c conda-forge mamba && conda clean -afy
 
+# Conda dependencies install
 COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environments/
 
 RUN /opt/conda/bin/mamba env create -n morpheus --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
-  # Install only the dependencies for cudf. Need to build cudf manually
-  /opt/conda/bin/mamba install -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER} &&\
-  # Clean and activate
-  conda clean -afy && \
-  sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
+    # Install only the dependencies for cudf. Need to build cudf manually
+    /opt/conda/bin/mamba install -y -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER} &&\
+    # Clean and activate
+    conda clean -afy && \
+    sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
 
 # Enables all RUN commands to use the conda env
 SHELL ["/opt/conda/bin/conda", "run", "-n", "morpheus", "/bin/bash", "-c"]
@@ -92,7 +95,8 @@ RUN conda config --env --add channels conda-forge &&\
 # --no-deps --force-reinstall` are required to force reinstalling just streamz
 # without all its dependencies
 RUN pip install nvidia-pyindex && \
-  pip install nvidia-tensorrt==${TENSORRT_VERSION} && \
+  # Removing the tensorrt install for 0.2-EA
+  # pip install nvidia-tensorrt==${TENSORRT_VERSION} && \
   pip install --upgrade --no-deps --force-reinstall git+https://github.com/mdemoret-nv/streamz.git@on_completed#egg=streamz &&\
   pip install git+https://github.com/efajardo-nv/dfencoder.git@nv-updates#egg=dfencoder &&\
   pip install dill
@@ -116,7 +120,7 @@ ARG CUDF_DIR=/opt/cudf
 
 COPY cmake/deps/patches/cudf.patch /workspace/cmake/deps/patches/
 
-# Clone to .cache/cudf to make it easy to rebuild
+# Clone cudf, patch and build
 RUN git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf ${CUDF_DIR} &&\
     cd ${CUDF_DIR} &&\
     git apply --whitespace=fix /workspace/cmake/deps/patches/cudf.patch &&\
@@ -129,8 +133,8 @@ FROM cudf_build as build
 # Copy the source
 COPY . ./
 
-# Build/Install neo/morpheus C++ libraries
-RUN source activate morpheus && ./scripts/compile.sh
+# Build/Install neo/morpheus C++ libraries. Need buildkit and ssh auth to get private repos
+RUN --mount=type=ssh source activate morpheus && ./scripts/compile.sh
 
 # Build/Install morpheus CLI and put on PATH
 RUN source activate morpheus && pip install .
