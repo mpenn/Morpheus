@@ -105,6 +105,7 @@ RUN pip install nvidia-pyindex && \
 ENV CUDAToolkit_ROOT=/usr/local/cuda-${CUDA_VER}
 
 # Set the entrypoint to use the entrypoint.sh script which sets the conda env
+COPY docker/entrypoint.sh ./docker/
 ENTRYPOINT [ "/opt/conda/bin/tini", "--", "docker/entrypoint.sh" ]
 
 # Reset the shell back to normal
