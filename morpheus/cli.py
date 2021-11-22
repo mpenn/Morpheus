@@ -823,6 +823,18 @@ def inf_pytorch(ctx: click.Context, **kwargs):
 
 @click.command(short_help="Add detected classifications to each message", **command_kwargs)
 @click.option('--threshold', type=float, default=0.5, required=True, help="Level to consider True/False")
+@click.option('--label',
+              type=str,
+              default=None,
+              multiple=True,
+              show_default="[Config.class_labels]",
+              help=("Converts probability indexes into classification labels. If no labels are specified, "
+                    "all labels from Config.class_labels will be added."))
+@click.option('--prefix',
+              type=str,
+              default="",
+              help=("Prefix to add to each label. Allows adding labels different from the "
+                    "Config.class_labels property"))
 @prepare_command(False)
 def add_class(ctx: click.Context, **kwargs):
 
@@ -830,14 +842,48 @@ def add_class(ctx: click.Context, **kwargs):
 
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
+    if ("label" in kwargs):
+        # Convert to list named labels
+        kwargs["labels"] = list(kwargs["label"])
+        del kwargs["label"]
+
     from morpheus.pipeline.general_stages import AddClassificationsStage
 
-    if (Config.get().mode == PipelineModes.NLP):
-        # Add the si_prefix to the classes
-        if ("prefix" not in kwargs):
-            kwargs["prefix"] = "si_"
-
     stage = AddClassificationsStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(short_help="Add probability scores to each message", **command_kwargs)
+@click.option('--label',
+              type=str,
+              default=None,
+              multiple=True,
+              show_default="[Config.class_labels]",
+              help=("Converts probability indexes into scores. If no labels are specified, "
+                    "all labels from Config.class_labels will be added."))
+@click.option('--prefix',
+              type=str,
+              default="",
+              help=("Prefix to add to each label. Allows adding labels different from the "
+                    "Config.class_labels property"))
+@prepare_command(False)
+def add_scores(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    if ("label" in kwargs):
+        # Convert to list named labels
+        kwargs["labels"] = list(kwargs["label"])
+        del kwargs["label"]
+
+    from morpheus.pipeline.general_stages import AddScoresStage
+
+    stage = AddScoresStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -1074,6 +1120,7 @@ dask.add_command(pipeline_ae)
 
 # NLP Pipeline
 pipeline_nlp.add_command(add_class)
+pipeline_nlp.add_command(add_scores)
 pipeline_nlp.add_command(buffer)
 pipeline_nlp.add_command(delay)
 pipeline_nlp.add_command(deserialize)
@@ -1094,6 +1141,7 @@ pipeline_nlp.add_command(to_kafka)
 
 # FIL Pipeline
 pipeline_fil.add_command(add_class)
+pipeline_fil.add_command(add_scores)
 pipeline_fil.add_command(buffer)
 pipeline_fil.add_command(delay)
 pipeline_fil.add_command(deserialize)
@@ -1113,6 +1161,7 @@ pipeline_fil.add_command(to_kafka)
 
 # AE Pipeline
 pipeline_ae.add_command(add_class)
+pipeline_ae.add_command(add_scores)
 pipeline_ae.add_command(buffer)
 pipeline_ae.add_command(delay)
 pipeline_ae.add_command(deserialize)
