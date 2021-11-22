@@ -6,6 +6,7 @@ channels:
 - conda-forge
 dependencies:
 - automake
+- boost=1.76
 - ccache
 - cmake>=3.21
 - cudatoolkit=11.4
@@ -13,7 +14,11 @@ dependencies:
 - docker-compose
 - docker-py
 - faker
+- flatbuffers=2.0
+- gflags=2.2
+- grpc-cpp
 - ninja
+- nlohmann_json=3.10
 - numpy
 - numpydoc
 - pip
