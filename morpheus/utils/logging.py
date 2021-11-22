@@ -20,6 +20,7 @@ import multiprocessing
 import os
 
 import appdirs
+import click
 from tqdm import tqdm
 
 
@@ -27,15 +28,40 @@ class TqdmLoggingHandler(logging.Handler):
     def __init__(self, level=logging.NOTSET):
         super().__init__(level)
 
-    def emit(self, record):
+        self._stdout = click.get_text_stream('stdout')
+        self._stderr = click.get_text_stream('stderr')
+
+    def emit(self, record: logging.LogRecord):
         try:
             msg = self.format(record)
-            tqdm.write(msg)
-            self.flush()
+
+            is_error = record.levelno >= logging.ERROR
+
+            file = self._stderr if is_error else self._stdout
+
+            color_kwargs = self._determine_color(record.levelno)
+
+            with tqdm.external_write_mode(file=file, nolock=False):
+                # Write the message
+                click.echo(click.style(msg, **color_kwargs), file=file, err=is_error)
+                self.flush()
+
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception:
             self.handleError(record)
+
+    def _determine_color(self, levelno: int):
+        if (levelno >= logging.CRITICAL):
+            return {"fg": "red", "bold": True}
+        elif (levelno >= logging.ERROR):
+            return {"fg": "red"}
+        elif (levelno >= logging.WARNING):
+            return {"fg": "yellow"}
+        elif (levelno >= logging.INFO):
+            return {}
+        else:
+            return {"dim": True}
 
 
 def _configure_from_log_file(log_config_file: str):
@@ -141,3 +167,8 @@ def configure_logging(log_level: int, log_config_file: str = None):
         _configure_from_log_file(log_config_file=log_config_file)
     else:
         _configure_from_log_level(log_level=log_level)
+
+
+def deprecated_stage_warning(logger, cls, name):
+    logger.warning(("The '%s' stage ('%s') is no longer required to manage backpressure and has been deprecated. "
+                    "It has no effect and acts as a pass through stage."), cls.__name__, name)

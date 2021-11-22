@@ -139,7 +139,7 @@ morpheus --debug --log_level=DEBUG \
    `# 8th Stage: Add results from inference to the messages` \
    add-class \
    `# 9th Stage: Convert from objects back into strings. Ignore verbose input data` \
-   serialize --exclude '^nvidia_smi_log' --exclude '^ts_' \
+   serialize --exclude '^nvidia_smi_log' --exclude '^_ts_' \
    `# 10th Stage: Write out the JSON lines to the detections.jsonlines file` \
    to-file --filename=detections.jsonlines --overwrite
 ```
@@ -184,7 +184,7 @@ Added stage: <monitor-6; MonitorStage(description=Inference Rate, smoothing=0.00
   └─ morpheus.MultiResponseProbsMessage -> morpheus.MultiResponseProbsMessage
 Added stage: <add-class-7; AddClassificationsStage(threshold=0.5, labels_file=None, labels=['mining'], prefix=)>
   └─ morpheus.MultiResponseProbsMessage -> morpheus.MultiResponseProbsMessage
-Added stage: <serialize-8; SerializeStage(include=[], exclude=['^nvidia_smi_log', '^ts_'], as_cudf_df=False)>
+Added stage: <serialize-8; SerializeStage(include=[], exclude=['^nvidia_smi_log', '^_ts_'], as_cudf_df=False)>
   └─ morpheus.MultiResponseProbsMessage -> List[str]
 Added stage: <to-file-9; WriteToFileStage(filename=detections.jsonlines, overwrite=True)>
   └─ List[str] -> List[str]

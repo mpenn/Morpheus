@@ -18,6 +18,8 @@ import typing
 import cupy as cp
 import pandas as pd
 
+from morpheus.config import Config
+
 
 @dataclasses.dataclass
 class MessageData:
@@ -37,13 +39,10 @@ class MessageMeta:
     ----------
     df : pd.DataFrame
         Input rows in dataframe.
-    input_json : typing.List[str]
-        Deserialized input messages.
 
     """
 
     df: pd.DataFrame
-    input_json: typing.List[str]
 
     @property
     def count(self) -> int:
@@ -58,6 +57,12 @@ class MessageMeta:
         """
 
         return len(self.df)
+
+
+@dataclasses.dataclass
+class UserMessageMeta(MessageMeta):
+
+    user_id: str
 
 
 @dataclasses.dataclass
@@ -80,20 +85,6 @@ class MultiMessage(MessageData):
     meta: MessageMeta = dataclasses.field(repr=False)
     mess_offset: int
     mess_count: int
-
-    @property
-    def input_json(self):
-        """
-        Returns deserialized input rows as a list.
-
-        Returns
-        -------
-        List[str]
-            Input rows
-
-        """
-
-        return self.meta.input_json[self.mess_offset:self.mess_offset + self.mess_count]
 
     @property
     def id_col(self):
@@ -174,7 +165,7 @@ class MultiMessage(MessageData):
 
         """
 
-        return self.get_meta(col_name=col_name).to_list()
+        return self.get_meta(col_name).to_list()
 
     def set_meta(self, columns: typing.Union[None, str, typing.List[str]], value):
         """
@@ -194,26 +185,6 @@ class MultiMessage(MessageData):
         else:
             # If its a single column or list of columns, this is the same
             self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns] = value
-
-    def get_slice(self, start, stop):
-        """
-        Returns sliced batches based on offsets supplied. Automatically calculates the correct `mess_offset`
-        and `mess_count`.
-
-        Parameters
-        ----------
-        start : int
-            Start offset address.
-        stop : int
-            Stop offset address.
-
-        Returns
-        -------
-        morpheus.messages.MultiInferenceMessage
-            A new `MultiInferenceMessage` with sliced offset and count.
-
-        """
-        return MultiMessage(meta=self.meta, mess_offset=start, mess_count=stop - start)
 
     def get_slice(self, start, stop):
         """
@@ -590,41 +561,6 @@ def set_output(instance: "ResponseMemory", name: str, value):
 
 
 @dataclasses.dataclass
-class MultiInferenceAEMessage(MultiInferenceMessage):
-    """
-    A stronger typed version of `MultiInferenceMessage` that is used for NLP workloads. Helps ensure the
-    proper inputs are set and eases debugging.
-    """
-    @property
-    def input(self):
-        """
-        Returns autoecoder input tensor
-
-        Returns
-        -------
-        cupy.ndarray
-            The autoencoder input tensor
-
-        """
-
-        return self.get_input("input")
-
-    @property
-    def seq_ids(self):
-        """
-        Returns sequence ids, which are used to keep track of messages in a multi-threaded environment.
-
-        Returns
-        -------
-        cupy.ndarray
-            seq_ids
-
-        """
-
-        return self.get_input("seq_ids")
-
-
-@dataclasses.dataclass
 class ResponseMemory(MessageData):
     """
     Output memory block holding the results of inference.
@@ -632,6 +568,12 @@ class ResponseMemory(MessageData):
     count: int
 
     outputs: typing.Dict[str, cp.ndarray] = dataclasses.field(default_factory=dict, init=False)
+
+    def get_output(self, name: str):
+        if (name not in self.outputs):
+            raise KeyError
+
+        return self.outputs[name]
 
 
 @dataclasses.dataclass
@@ -644,82 +586,9 @@ class ResponseMemoryProbs(ResponseMemory):
 
 
 @dataclasses.dataclass
-class ResponseMemoryAE(ResponseMemory):
+class ResponseMemoryAE(ResponseMemoryProbs):
 
-    num: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    bin: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    eventSource: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    eventName: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    sourceIPAddress: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    userAgent: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    requestParametersroleArn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    requestParametersroleSessionName: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    responseElementsassumedRoleUserassumedRoleId: dataclasses.InitVar[cp.ndarray] = DataClassProp(
-        get_output, set_output)
-    responseElementsassumedRoleUserarn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    apiVersion: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    userIdentityprincipalId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    userIdentityarn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    userIdentityaccessKeyId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    userIdentitysessionContextsessionIssuerprincipalId: dataclasses.InitVar[cp.ndarray] = DataClassProp(
-        get_output, set_output)
-    userIdentitysessionContextsessionIssuerarn: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    userIdentitysessionContextsessionIssueruserName: dataclasses.InitVar[cp.ndarray] = DataClassProp(
-        get_output, set_output)
-    requestParametersinstancesSetitems: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    errorCode: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    errorMessage: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    responseElementsrequestId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    responseElementsinstancesSetitems: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-    responseElementsreservationId: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
-
-    def __post_init__(self,
-                      num,
-                      bin,
-                      eventSource,
-                      eventName,
-                      sourceIPAddress,
-                      userAgent,
-                      requestParametersroleArn,
-                      requestParametersroleSessionName,
-                      responseElementsassumedRoleUserassumedRoleId,
-                      responseElementsassumedRoleUserarn,
-                      apiVersion,
-                      userIdentityprincipalId,
-                      userIdentityarn,
-                      userIdentityaccessKeyId,
-                      userIdentitysessionContextsessionIssuerprincipalId,
-                      userIdentitysessionContextsessionIssuerarn,
-                      userIdentitysessionContextsessionIssueruserName,
-                      requestParametersinstancesSetitems,
-                      errorCode,
-                      errorMessage,
-                      responseElementsrequestId,
-                      responseElementsinstancesSetitems,
-                      responseElementsreservationId):
-        self.num = num
-        self.bin = bin
-        self.eventSource = eventSource
-        self.eventName = eventName
-        self.userAgent = userAgent
-        self.sourceIPAddress = sourceIPAddress
-        self.requestParametersroleArn = requestParametersroleArn
-        self.requestParametersroleSessionName = requestParametersroleSessionName
-        self.responseElementsassumedRoleUserassumedRoleId = responseElementsassumedRoleUserassumedRoleId
-        self.responseElementsassumedRoleUserarn = responseElementsassumedRoleUserarn
-        self.apiVersion = apiVersion
-        self.userIdentityprincipalId = userIdentityprincipalId
-        self.userIdentityarn = userIdentityarn
-        self.userIdentityaccessKeyId = userIdentityaccessKeyId
-        self.userIdentitysessionContextsessionIssuerprincipalId = userIdentitysessionContextsessionIssuerprincipalId
-        self.userIdentitysessionContextsessionIssuerarn = userIdentitysessionContextsessionIssuerarn
-        self.userIdentitysessionContextsessionIssueruserName = userIdentitysessionContextsessionIssueruserName
-        self.requestParametersinstancesSetitems = requestParametersinstancesSetitems
-        self.errorCode = errorCode
-        self.errorMessage = errorMessage
-        self.responseElementsrequestId = responseElementsrequestId
-        self.responseElementsinstancesSetitems = responseElementsinstancesSetitems
-        self.responseElementsreservationId = responseElementsreservationId
+    user_id: str = ""
 
 
 @dataclasses.dataclass
@@ -830,3 +699,30 @@ class MultiResponseProbsMessage(MultiResponseMessage):
         """
 
         return self.get_output("probs")
+
+
+@dataclasses.dataclass
+class MultiResponseAEMessage(MultiResponseProbsMessage):
+    """
+    A stronger typed version of `MultiResponseMessage` that is used for inference workloads that return a probability
+    array. Helps ensure the proper outputs are set and eases debugging.
+    """
+    user_id: str
+
+
+if (Config.get().use_cpp):
+
+    import morpheus._lib.messages as neom
+
+    MessageMeta = neom.MessageMeta
+    MultiMessage = neom.MultiMessage
+    InferenceMemory = neom.InferenceMemory
+    InferenceMemoryNLP = neom.InferenceMemoryNLP
+    InferenceMemoryFIL = neom.InferenceMemoryFIL
+    MultiInferenceMessage = neom.MultiInferenceMessage
+    MultiInferenceNLPMessage = neom.MultiInferenceNLPMessage
+    MultiInferenceFILMessage = neom.MultiInferenceFILMessage
+    ResponseMemory = neom.ResponseMemory
+    ResponseMemoryProbs = neom.ResponseMemoryProbs
+    MultiResponseMessage = neom.MultiResponseMessage
+    MultiResponseProbsMessage = neom.MultiResponseProbsMessage

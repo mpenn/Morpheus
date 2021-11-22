@@ -26,9 +26,9 @@ copyright = '2021, NVIDIA'
 author = 'NVIDIA'
 
 # The short X.Y version
-version = '0.1'
+version = '0.2'
 # The full version, including alpha/beta/rc tags
-release = '0.1.0'
+release = '0.2.1'
 
 # -- General configuration ---------------------------------------------------
 
@@ -72,7 +72,7 @@ autodoc_typehints_description_target = "documented"  # Dont double up on type hi
 add_module_names = False  # Remove namespaces from class/method signatures
 autodoc_mock_imports = [
     "streamz",
-    "morpheus.cli", # Dont document the CLI in Sphinx
+    "morpheus.cli",  # Dont document the CLI in Sphinx
 ]
 
 # Config numpydoc
@@ -184,7 +184,13 @@ man_pages = [(master_doc, 'morpheus', 'Morpheus Documentation', [author], 1)]
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'morpheus', 'Morpheus Documentation', author, 'morpheus', 'One line description of project.', 'Miscellaneous'),
+    (master_doc,
+     'morpheus',
+     'Morpheus Documentation',
+     author,
+     'morpheus',
+     'One line description of project.',
+     'Miscellaneous'),
 ]
 
 # -- Extension configuration -------------------------------------------------

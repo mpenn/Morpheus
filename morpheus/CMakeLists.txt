@@ -50,7 +50,7 @@ macro(morpheus_add_python_module source_file)
   set(prefix PYMOD)
   set(flags IS_PYBIND11 IS_CYTHON)
   set(singleValues MODULE_NAME OUTPUT_TARGET)
-  set(multiValues LINK_TARGETS)
+  set(multiValues LINK_TARGETS EXTRA_SOURCES)
 
   include(CMakeParseArguments)
   cmake_parse_arguments(${prefix}
@@ -81,10 +81,13 @@ macro(morpheus_add_python_module source_file)
 
   # Actually create the target
   if (PYMOD_IS_PYBIND11)
-    pybind11_add_module(${TARGET_NAME} MODULE ${cpp_file})
+    pybind11_add_module(${TARGET_NAME} MODULE ${cpp_file} ${PYMOD_EXTRA_SOURCES})
   elseif(PYMOD_IS_CYTHON)
     add_cython_target(${MODULE_NAME} "${cpp_file}" CXX PY3)
-    add_library(${TARGET_NAME} SHARED ${MODULE_NAME})
+    add_library(${TARGET_NAME} SHARED ${${MODULE_NAME}} ${PYMOD_EXTRA_SOURCES})
+
+    # # Need to set -fvisibility=hidden for cython according to https://pybind11.readthedocs.io/en/stable/faq.html
+    # set_target_properties(${TARGET_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
   else()
     message(FATAL_ERROR "Must specify either IS_PYBIND11 or IS_CYTHON")
   endif()
@@ -96,7 +99,7 @@ macro(morpheus_add_python_module source_file)
 
   # Cython targets need the current dir for generated files
   if(PYMOD_IS_CYTHON)
-    target_include_directories(${TARGET_NAME} INTERFACE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_include_directories(${TARGET_NAME} PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
 
   if(MORPHEUS_PYTHON_INPLACE_BUILD)

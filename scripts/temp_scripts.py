@@ -7,7 +7,7 @@ import numpy as np
 df = cudf.read_csv("models/training-tuning-scripts/sid-models/resources/sid_sample_training_data.csv")
 
 df.rename(columns={"text": "data"}, inplace=True)
-df.rename(columns={  
+df.rename(columns={
     "address": "si_address",
     "bank_acct": "si_bank_acct",
     "credit_card": "si_credit_card",
@@ -18,20 +18,27 @@ df.rename(columns={
     "phone_num": "si_phone_num",
     "secret_keys": "si_secret_keys",
     "user": "si_user"
-    }, inplace=True)
+},
+          inplace=True)
 
 df = df.to_pandas()
+
+df.to_csv("data/sid_training_data_truth.csv", index_label="ID")
+
 
 def remove_bars(y: str):
     return y[1:-1]
 
+
 df["data"] = df["data"].apply(remove_bars)
+
 
 def double_serialize(y: str):
     try:
         return json.dumps(json.dumps(json.loads(y)))
     except:
         return y
+
 
 df["data"] = df["data"].apply(double_serialize)
 
@@ -52,7 +59,6 @@ with open("data/pcap_training_data.jsonlines", "w") as f:
 
 cp.set_printoptions(threshold=cp.inf)
 
-
 # Converting from Rachels data
 df = cudf.read_json("data/merged_file-sorted.jsonlines", lines=True)
 
@@ -62,14 +68,36 @@ df = df.sort_values(by=['timestamp', "data_len"])
 
 df.data_len.value_counts(dropna=False)
 
-df = df.drop(["any_pii"],axis=1)
+df = df.drop(["any_pii"], axis=1)
 
-si_cols = ["si_address", "si_bank_acct", "si_credit_card", "si_email", "si_govt_id", "si_name", "si_password", "si_phone_num", "si_secret_keys", "si_user"]
+si_cols = [
+    "si_address",
+    "si_bank_acct",
+    "si_credit_card",
+    "si_email",
+    "si_govt_id",
+    "si_name",
+    "si_password",
+    "si_phone_num",
+    "si_secret_keys",
+    "si_user"
+]
 
 df[si_cols] = df[si_cols].fillna(0.0)
 
 df = df.astype({"data_len": "str", "protocol": "str", "src_port": "str", "dest_port": "str", "flags": "str"})
-df = df.astype({"si_address": "bool", "si_bank_acct": "bool", "si_credit_card": "bool", "si_email": "bool", "si_govt_id": "bool", "si_name": "bool", "si_password": "bool", "si_phone_num": "bool", "si_secret_keys": "bool", "si_user": "bool", })
+df = df.astype({
+    "si_address": "bool",
+    "si_bank_acct": "bool",
+    "si_credit_card": "bool",
+    "si_email": "bool",
+    "si_govt_id": "bool",
+    "si_name": "bool",
+    "si_password": "bool",
+    "si_phone_num": "bool",
+    "si_secret_keys": "bool",
+    "si_user": "bool",
+})
 
 
 def double_serialize(y: str):
@@ -77,6 +105,7 @@ def double_serialize(y: str):
         return json.dumps(json.dumps(json.loads(y[1:-1])))
     except:
         return y
+
 
 df["data"] = df["data"].str.replace('\\n', '\n', regex=False)
 df["data"] = df["data"].str.replace('\/', '/', regex=False)
@@ -99,13 +128,28 @@ df = cudf.read_json(".tmp/pcap_training_data-truth-bert-base.jsonlines", lines=T
 
 df = df.to_pandas()
 
-df = df.drop(["timestamp", "host_ip", "data_len", "src_mac", "dest_mac", "protocol", "src_ip", "dest_ip", "src_port", "dest_port", "flags"],axis=1)
+df = df.drop([
+    "timestamp",
+    "host_ip",
+    "data_len",
+    "src_mac",
+    "dest_mac",
+    "protocol",
+    "src_ip",
+    "dest_ip",
+    "src_port",
+    "dest_port",
+    "flags"
+],
+             axis=1)
+
 
 def double_serialize(y: str):
     try:
         return json.dumps(json.dumps(json.loads(y)))
     except:
         return y
+
 
 # df["data"] = df["data"].apply(double_serialize)
 

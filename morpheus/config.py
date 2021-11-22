@@ -83,20 +83,6 @@ class ConfigOnnxToTRT(ConfigBase):
 
 
 @dataclasses.dataclass
-class ConfigDask(ConfigBase):
-    """
-    Pipeline Dask configuration class.
-
-    Parameters
-    ----------
-    use_processes : bool
-        Not currently used.
-
-    """
-    use_processes: bool = False
-
-
-@dataclasses.dataclass
 class ConfigAutoEncoder(ConfigBase):
     """
     Pipeline Dask configuration class.
@@ -107,7 +93,9 @@ class ConfigAutoEncoder(ConfigBase):
         Not currently used.
 
     """
-    autoencoder_path: str = None
+    feature_columns: typing.List[str] = None
+    userid_column_name: str = "userIdentityaccountId"
+    userid_filter: str = None
 
 
 class PipelineModes(str, Enum):
@@ -141,8 +129,13 @@ class Config(ConfigBase):
     model_max_batch_size : 8
         In a single batch, the maximum number of messages to send to the model for inference. Default value is
         8
-    use_dask : bool
-        Determines if the pipeline should be executed using the Dask scheduler. Default value is False
+    edge_buffer_size : int, default = 128
+        The size of buffered channels to use between nodes in a pipeline. Larger values reduce backpressure at the cost
+        of memory. Smaller values will push messages through the pipeline quicker. Must be greater than 1 and a power of
+        2 (i.e. 2, 4, 8, 16, etc.)
+    use_cpp : bool, default = True
+        Whether or not to use C++ node and message types or to prefer python. Only use as a last resort if bugs are
+        encountered
 
     """
     # Flag to indicate we are creating a static instance. Prevents raising an error on creation
@@ -164,12 +157,13 @@ class Config(ConfigBase):
     pipeline_batch_size: int = 256
     num_threads: int = 1
     model_max_batch_size: int = 8
+    edge_buffer_size: int = 128
 
     # Class labels to convert class index to label.
     class_labels: typing.List[str] = dataclasses.field(default_factory=list)
 
-    use_dask: bool = False
-    dask: ConfigDask = dataclasses.field(default_factory=ConfigDask)
+    # Whether or not to use C++ node and message types or to prefer python
+    use_cpp: bool = True
 
     ae: ConfigAutoEncoder = dataclasses.field(default=None)
 

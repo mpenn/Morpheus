@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 import inspect
 import json
 import time
@@ -28,6 +29,7 @@ import typing_utils
 import cudf
 from cudf.core.subword_tokenizer import SubwordTokenizer
 
+import morpheus._lib.stages as neos
 from morpheus.config import Config
 from morpheus.pipeline.messages import InferenceMemoryFIL
 from morpheus.pipeline.messages import InferenceMemoryNLP
@@ -38,7 +40,6 @@ from morpheus.pipeline.messages import MultiInferenceNLPMessage
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.pipeline import MultiMessageStage
 from morpheus.pipeline.pipeline import SinglePortStage
-from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
 from morpheus.pipeline.pipeline import get_time_ms
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
@@ -58,7 +59,6 @@ class DeserializeStage(MultiMessageStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        self._use_dask = c.use_dask
         self._batch_size = c.pipeline_batch_size
 
         self._max_concurrent = c.num_threads
@@ -74,16 +74,11 @@ class DeserializeStage(MultiMessageStage):
         """
         Returns accepted input types for this stage.
 
-        Returns
-        -------
-        typing.Tuple[cudf.DataFrame, morpheus.pipeline.StreamFuture[cudf.DataFrame]]
-            Accepted input types
-
         """
-        return (cudf.DataFrame, StreamFuture[cudf.DataFrame], pd.DataFrame, StreamFuture[pd.DataFrame])
+        return (MessageMeta)
 
     @staticmethod
-    def process_dataframe(x: typing.Union[cudf.DataFrame, pd.DataFrame], batch_size: int) -> typing.List[MultiMessage]:
+    def process_dataframe(x: MessageMeta, batch_size: int) -> typing.List[MultiMessage]:
         """
         The deserialization of the cudf is implemented in this function.
 
@@ -94,33 +89,7 @@ class DeserializeStage(MultiMessageStage):
 
         """
 
-        # Convert here to pandas since this will persist after the message is done
-        if (isinstance(x, cudf.DataFrame)):
-            x_pd = x.to_pandas()
-        else:
-            x_pd = x
-
-        # if ("_orig" in x.columns):
-        #     input_json = x_pd["_orig"].to_list()
-        # else:
-        #     # Now determine the list of input strings before modification
-        #     input_json = [json.dumps(y) for y in x_pd.loc[:, x_pd.columns != 'ID'].to_dict(orient="records")]
-        input_json = [""] * len(x_pd)
-
-        # # Try to double deserialize
-        # def deserialize_data(y: str):
-        #     try:
-        #         return str(json.loads(y))
-        #     except:  # noqa: E722
-        #         return y
-
-        # if ("data" in x_pd):
-        #     x_pd["data"] = x_pd["data"].apply(deserialize_data)
-
-        # Build the message data
-        meta = MessageMeta(df=x_pd, input_json=input_json)
-
-        full_message = MultiMessage(meta=meta, mess_offset=0, mess_count=len(x_pd))
+        full_message = MultiMessage(meta=x, mess_offset=0, mess_count=x.count)
 
         # Now break it up by batches
         output = []
@@ -144,33 +113,31 @@ class DeserializeStage(MultiMessageStage):
         stream = input_stream[0]
         out_type = MultiMessage
 
-        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
+        def deserialize_fn(input: neo.Observable, output: neo.Subscriber):
+            def obs_on_next(x: MessageMeta):
 
-            stream = stream.map(DeserializeStage.process_dataframe)
-            out_type = StreamFuture[MultiMessage]
+                message_list: typing.List[MultiMessage] = DeserializeStage.process_dataframe(x, self._batch_size)
+
+                for y in message_list:
+
+                    output.on_next(y)
+
+            def obs_on_error(x):
+                output.on_error(x)
+
+            def obs_on_completed():
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+        if (Config.get().use_cpp):
+            stream = neos.DeserializeStage(seg, self.unique_name, self._batch_size)
         else:
-            # stream = stream.async_map(DeserializeStage.process_dataframe, executor=self._pipeline.thread_pool)
-            def deserialize_fn(input: neo.Observable, output: neo.Subscriber):
-                def obs_on_next(x: pd.DataFrame):
-
-                    message_list: typing.List[MultiMessage] = DeserializeStage.process_dataframe(x, self._batch_size)
-
-                    for y in message_list:
-
-                        output.on_next(y)
-
-                def obs_on_error(x):
-                    output.on_error(x)
-
-                def obs_on_completed():
-                    output.on_completed()
-
-                obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-                input.subscribe(obs)
-
             stream = seg.make_node_full(self.unique_name + "-flatten", deserialize_fn)
-            seg.make_edge(input_stream[0], stream)
+
+        seg.make_edge(input_stream[0], stream)
 
         return stream, out_type
 
@@ -202,7 +169,6 @@ class DropNullStage(SinglePortStage):
     def __init__(self, c: Config, column: str):
         super().__init__(c)
 
-        self._use_dask = c.use_dask
         self._column = column
 
         # Mark these stages to log timestamps if requested
@@ -222,7 +188,7 @@ class DropNullStage(SinglePortStage):
             Accepted input types
 
         """
-        return (cudf.DataFrame, StreamFuture[cudf.DataFrame])
+        return (cudf.DataFrame, )
 
     @staticmethod
     def filter(x: cudf.DataFrame, column: str):
@@ -230,16 +196,31 @@ class DropNullStage(SinglePortStage):
 
         return x
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
         stream = input_stream[0]
 
-        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-            stream = stream.map(DropNullStage.filter, column=self._column)
-        else:
-            stream = stream.async_map(DropNullStage.filter, executor=self._pipeline.thread_pool, column=self._column)
+        # Finally, flatten to a single stream
+        def node_fn(input: neo.Observable, output: neo.Subscriber):
+            def obs_on_next(x: cudf.DataFrame):
 
-        # Filter out empty message groups
-        stream = stream.filter(lambda x: not x.empty)
+                x = x[~x[self._column].isna()]
+
+                if (not x.empty):
+                    output.on_next(x)
+
+            def obs_on_error(x):
+                output.on_error(x)
+
+            def obs_on_completed():
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+        node = seg.make_node_full(self.unique_name, node_fn)
+        seg.make_edge(stream, node)
+        stream = node
 
         return stream, input_stream[1]
 
@@ -263,16 +244,15 @@ class PreprocessBaseStage(MultiMessageStage):
         """
         Returns accepted input types for this stage.
 
-        Returns
-        -------
-        typing.Tuple[morpheus.messages.MultiMessage, morpheus.pipeline.StreamFuture[morpheus.messages.MultiMessage]]
-            Accepted input types
-
         """
-        return (MultiMessage, StreamFuture[MultiMessage])
+        return (MultiMessage, )
 
     @abstractmethod
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
+        pass
+
+    @abstractmethod
+    def _get_preprocess_node(self, seg: neo.Segment):
         pass
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
@@ -288,13 +268,12 @@ class PreprocessBaseStage(MultiMessageStage):
         if (preproc_sig.return_annotation and typing_utils.issubtype(preproc_sig.return_annotation, out_type)):
             out_type = preproc_sig.return_annotation
 
-        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-            stream = stream.map(preprocess_fn)
-            out_type = StreamFuture[out_type]
+        if (Config.get().use_cpp):
+            stream = self._get_preprocess_node(seg)
         else:
-            # stream = stream.async_map(preprocess_fn, executor=self._pipeline.thread_pool)
             stream = seg.make_node(self.unique_name, preprocess_fn)
-            seg.make_edge(input_stream[0], stream)
+
+        seg.make_edge(input_stream[0], stream)
 
         return stream, out_type
 
@@ -375,9 +354,6 @@ class PreprocessNLPStage(PreprocessBaseStage):
         """
         text_ser = cudf.Series(x.get_meta("data"))
 
-        # handles special characters tokenization
-        text_ser = "[CLS] " + text_ser
-
         tokenized = tokenize_text_series(vocab_hash_file=vocab_hash_file,
                                          do_lower_case=do_lower_case,
                                          text_ser=text_ser,
@@ -404,8 +380,6 @@ class PreprocessNLPStage(PreprocessBaseStage):
 
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
 
-        # Build the tokenizer first
-
         return partial(PreprocessNLPStage.pre_process_batch,
                        vocab_hash_file=self._vocab_hash_file,
                        do_lower_case=self._do_lower_case,
@@ -413,6 +387,16 @@ class PreprocessNLPStage(PreprocessBaseStage):
                        seq_len=self._seq_length,
                        truncation=self._truncation,
                        add_special_tokens=self._add_special_tokens)
+
+    def _get_preprocess_node(self, seg: neo.Segment):
+        return neos.PreprocessNLPStage(seg,
+                                       self.unique_name,
+                                       self._vocab_hash_file,
+                                       self._seq_length,
+                                       self._truncation,
+                                       self._do_lower_case,
+                                       self._add_special_tokens,
+                                       self._stride)
 
 
 class PreprocessFILStage(PreprocessBaseStage):
@@ -490,18 +474,23 @@ class PreprocessFILStage(PreprocessBaseStage):
 
         """
 
+        df = x.get_meta(fea_cols)
+
         # Extract just the numbers from each feature col. Not great to operate on x.meta.df here but the operations will
         # only happen once.
         for col in fea_cols:
-            if (x.meta.df[col].dtype == np.dtype(str) or x.meta.df[col].dtype == np.dtype(object)):
+            if (df[col].dtype == np.dtype(str) or df[col].dtype == np.dtype(object)):
                 # If the column is a string, parse the number
-                x.meta.df[col] = x.meta.df[col].str.extract(r"(\d+)", expand=False).astype("float32")
-            elif (x.meta.df[col].dtype != np.float32):
+                df[col] = df[col].str.extract(r"(\d+)", expand=False).astype("float32")
+            elif (df[col].dtype != np.float32):
                 # Convert to float32
-                x.meta.df[col] = x.meta.df[col].astype("float32")
+                df[col] = df[col].astype("float32")
+
+        if (isinstance(df, pd.DataFrame)):
+            df = cudf.from_pandas(df)
 
         # Convert the dataframe to cupy the same way cuml does
-        data = cp.asarray(cudf.from_pandas(x.get_meta(fea_cols)).as_gpu_matrix(order='C'))
+        data = cp.asarray(df.as_gpu_matrix(order='C'))
 
         count = data.shape[0]
 
@@ -523,3 +512,6 @@ class PreprocessFILStage(PreprocessBaseStage):
 
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         return partial(PreprocessFILStage.pre_process_batch, fea_len=self._fea_length, fea_cols=self.features)
+
+    def _get_preprocess_node(self, seg: neo.Segment):
+        return neos.PreprocessFILStage(seg, self.unique_name)

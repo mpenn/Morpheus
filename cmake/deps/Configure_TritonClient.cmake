@@ -32,7 +32,7 @@ function(find_and_configure_tritonclient version)
       GIT_TAG         r${TRITONCLIENT_VERSION}
       GIT_SHALLOW     TRUE
       SOURCE_SUBDIR   src/c++
-      PATCH_COMMAND   git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/TritonClient.patch
+      PATCH_COMMAND   git checkout -- . && git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/TritonClient.patch
       OPTIONS         "TRITON_VERSION r${version}"
                       "TRITON_ENABLE_CC_HTTP ON"
                       "TRITON_ENABLE_CC_GRPC OFF"

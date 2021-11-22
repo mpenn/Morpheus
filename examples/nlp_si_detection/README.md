@@ -143,7 +143,7 @@ morpheus --debug --log_level=DEBUG \
    `# 9th Stage: Filtering removes any messages that did not detect SI` \
    filter \
    `# 10th Stage: Convert from objects back into strings` \
-   serialize --exclude '^ts_' \
+   serialize --exclude '^_ts_' \
    `# 11th Stage: Write out the JSON lines to the detections.jsonlines file` \
    to-file --filename=detections.jsonlines --overwrite
 ```
@@ -190,7 +190,7 @@ Added stage: <add-class-7; AddClassificationsStage(threshold=0.5, labels_file=No
   └─ morpheus.MultiResponseProbsMessage -> morpheus.MultiResponseProbsMessage
 Added stage: <filter-8; FilterDetectionsStage(threshold=0.5)>
   └─ morpheus.MultiResponseProbsMessage -> morpheus.MultiResponseProbsMessage
-Added stage: <serialize-9; SerializeStage(include=[], exclude=['^ts_'], as_cudf_df=False)>
+Added stage: <serialize-9; SerializeStage(include=[], exclude=['^_ts_'], as_cudf_df=False)>
   └─ morpheus.MultiResponseProbsMessage -> List[str]
 Added stage: <to-file-10; WriteToFileStage(filename=detections.jsonlines, overwrite=True)>
   └─ List[str] -> List[str]

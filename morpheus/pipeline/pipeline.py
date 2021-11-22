@@ -18,7 +18,6 @@ import concurrent.futures
 import inspect
 import logging
 import os
-import queue
 import signal
 import time
 import typing
@@ -28,7 +27,6 @@ from abc import abstractmethod
 import neo
 import networkx
 import typing_utils
-from tornado.ioloop import IOLoop
 from tqdm import tqdm
 
 import distributed
@@ -436,16 +434,16 @@ class StreamWrapper(ABC, collections.abc.Hashable):
     def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
         return out_ports_pair
 
-    async def start(self):
+    def start(self):
 
         assert self.is_built, "Must build before starting!"
 
-        await self._start()
+        self._start()
 
-    async def _start(self):
+    def _start(self):
         pass
 
-    async def stop(self):
+    def stop(self):
         pass
 
     async def join(self):
@@ -490,36 +488,6 @@ class SourceStage(StreamWrapper):
         """
         return None
 
-    def add_start_callback(self, cb):
-        """
-        Appends callbacks when input starts.
-
-        Parameters
-        ----------
-        cb : function
-            func
-        """
-
-        if (self._source_stream is not None):
-            self._source_stream.add_on_start_callback(cb)
-
-        self._start_callbacks.append(cb)
-
-    def add_done_callback(self, cb):
-        """
-        Appends callbacks when input is completed.
-
-        Parameters
-        ----------
-        cb : function
-            func
-        """
-
-        if (self._source_stream is not None):
-            self._source_stream.add_on_stop_callback(cb)
-
-        self._stop_callbacks.append(cb)
-
     @abstractmethod
     def _build_source(self, seg: neo.Segment) -> StreamPair:
         """
@@ -547,32 +515,10 @@ class SourceStage(StreamWrapper):
 
         curr_source = source_pair[0]
 
-        # while (curr_source is not None and not isinstance(curr_source, Source)):
-
-        #     try:
-        #         curr_source = curr_source.upstream
-        #     except ValueError:
-        #         logging.warning("Detected multiple upstream objects for source {}".format(curr_source))
-        #         curr_source = None
-
-        # assert curr_source is not None, \
-        #     ("Output of `_build_source` must be downstream of a `streamz.Source` object. "
-        #      "Ensure the returned streams only have a single `upstream` object and can find a "
-        #      "`Source` object from by traversing the upstream object. If necessary, return a source "
-        #      "object in `_build_source` and perform additional operators in the `_post_build` "
-        #      "function")
-
         self._source_stream = curr_source
 
         # Now setup the output ports
         self._output_ports[0]._out_stream_pair = source_pair
-
-        # # Add any existing start/done callbacks
-        # for cb in self._start_callbacks:
-        #     self._source_stream.add_on_start_callback(cb)
-
-        # for cb in self._stop_callbacks:
-        #     self._source_stream.add_on_stop_callback(cb)
 
         return [source_pair]
 
@@ -580,15 +526,14 @@ class SourceStage(StreamWrapper):
 
         return out_ports_pair
 
-    async def _start(self):
+    def _start(self):
         self._source_stream.start()
 
-    async def stop(self):
+    def stop(self):
         self._source_stream.stop()
 
     async def join(self):
-        # await self._source_stream.join()
-        pass
+        self._source_stream.join()
 
 
 class SingleOutputSource(SourceStage):
@@ -623,11 +568,26 @@ class Stage(StreamWrapper):
     def __init__(self, c: Config):
         super().__init__(c)
 
+    def supports_cpp_node(self):
+        """
+        Specifies whether this Stage is even capable of creating C++ nodes. During the build phase, this value will be
+        combined with Config.get().use_cpp to determine whether or not a C++ node is created. This is an instance method
+        to allow runtime decisions and derived classes to override base implementations
+        """
+        # By default, return False unless otherwise specified
+        return False
+
+    def _build_cpp_node(self):
+        """
+        Specifies whether or not to build a C++ node. Only should be called during the build phase
+        """
+        return Config.get().use_cpp and self.supports_cpp_node()
+
     def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
         return out_ports_pair
 
-    async def _start(self):
+    def _start(self):
         pass
 
     def on_start(self):
@@ -725,10 +685,14 @@ class MultiMessageStage(SinglePortStage):
 
                 curr_time = get_time_ms()
 
-                x.set_meta("ts_" + cached_name, curr_time)
+                x.set_meta("_ts_" + cached_name, curr_time)
 
             # Only have one port
-            out_pair[0].gather().sink(post_timestamps)
+            post_ts = seg.make_node(self.unique_name + "-ts", post_timestamps)
+            seg.make_edge(out_pair[0], post_ts)
+
+            # Keep the type unchanged
+            out_pair = (post_ts, out_pair[1])
 
         return super()._post_build_single(seg, out_pair)
 
@@ -757,6 +721,9 @@ class Pipeline():
         self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=c.num_threads)
         self._exec_options = neo.Options()
         self._exec_options.topology.user_cpuset = "0-{}".format(c.num_threads - 1)
+
+        # Set the default channel size
+        neo.Config.default_channel_size = c.edge_buffer_size
 
         self.batch_size = c.pipeline_batch_size
 
@@ -847,11 +814,15 @@ class Pipeline():
         assert not self._is_built, "Pipeline can only be built once!"
         assert len(self._sources) > 0, "Pipeline must have a source stage"
 
-        logger.info("====Building Pipeline====")
+        logger.info("====Registering Pipeline====")
+
+        self._neo_executor = neo.Executor(self._exec_options)
 
         self._neo_pipeline = neo.Pipeline()
 
         def inner_build(seg: neo.Segment):
+            logger.info("====Building Pipeline====")
+
             # Get the list of stages and source
             source_and_stages: typing.List[StreamWrapper] = list(self._sources) + list(self._stages)
 
@@ -879,39 +850,42 @@ class Pipeline():
                 for p in s.input_ports:
                     p.link()
 
+            logger.info("====Building Pipeline Complete!====")
+
+            # Finally call _on_start
+            self._on_start()
+
         self._neo_pipeline.make_segment("main", inner_build)
+
+        self._neo_executor.register_pipeline(self._neo_pipeline)
 
         self._is_built = True
 
-        logger.info("====Building Pipeline Complete!====")
+        logger.info("====Registering Pipeline Complete!====")
 
-    async def start(self):
-        if (self._use_dask):
-            logger.info("====Launching Dask====")
-            from distributed import Client
-            self._client: Client = await Client(loop=IOLoop.current(), processes=True, asynchronous=True)
-
-        # Add start callback
-        for s in self._sources:
-            s.add_start_callback(self._on_start)
-            s.add_done_callback(self._on_input_complete)
+    def start(self):
+        assert self._is_built, "Pipeline must be built before starting"
 
         logger.info("====Starting Pipeline====")
-        source_and_stages = list(self._sources) + list(self._stages)
 
-        # Now loop over stages to start
-        for s in source_and_stages:
-
-            await s.start()
+        self._neo_executor.start()
 
         logger.info("====Pipeline Started====")
 
-    async def stop(self):
+    def stop(self):
 
+        logger.info("====Stopping Pipeline====")
         for s in list(self._sources) + list(self._stages):
-            await s.stop()
+            s.stop()
+
+        self._neo_executor.stop()
+
+        logger.info("====Pipeline Stopped====")
 
     async def join(self):
+
+        await self._neo_executor.join()
+
         # First wait for all sources to stop. This only occurs after all messages have been processed fully
         for s in list(self._sources):
             await s.join()
@@ -919,13 +893,13 @@ class Pipeline():
         # Now that there is no more data, call stop on all stages to ensure shutdown (i.e. for stages that have their
         # own worker loop thread)
         for s in list(self._stages):
-            await s.stop()
+            s.stop()
 
         # Now call join on all stages
         for s in list(self._stages):
             await s.join()
 
-    async def build_and_start(self):
+    def build_and_start(self):
 
         if (not self.is_built):
             try:
@@ -934,7 +908,7 @@ class Pipeline():
                 logger.exception("Error occurred during Pipeline.build(). Exiting.", exc_info=True)
                 return
 
-        await self.start()
+        self.start()
 
     def _on_start(self):
 
@@ -950,9 +924,6 @@ class Pipeline():
         # Loop over all stages and call on_start if it exists
         for s in self._stages:
             s.on_start()
-
-    def _on_input_complete(self):
-        logger.debug("All Input Complete")
 
     def visualize(self, filename: str = None, **graph_kwargs):
 
@@ -1104,7 +1075,7 @@ class Pipeline():
 
             if (exit_count == 1):
                 tqdm.write("Stopping pipeline. Please wait... Press Ctrl+C again to kill.")
-                loop.create_task(self.stop())
+                self.stop()
             else:
                 tqdm.write("Killing")
                 exit(1)
@@ -1114,17 +1085,17 @@ class Pipeline():
 
         try:
 
-            self._neo_executor = neo.Executor(self._exec_options)
+            # self._neo_executor = neo.Executor(self._exec_options)
 
-            self.build()
+            # self.build()
 
-            self._neo_executor.register_pipeline(self._neo_pipeline)
+            # self._neo_executor.register_pipeline(self._neo_pipeline)
 
-            self._neo_executor.start()
+            # self._neo_executor.start()
 
-            self._neo_executor.join()
+            # self._neo_executor.join()
 
-            # loop.run_until_complete(self.build_and_start())
+            self.build_and_start()
 
             # Wait for completion
             loop.run_until_complete(self.join())
@@ -1136,7 +1107,7 @@ class Pipeline():
             loop.run_until_complete(self.join())
         finally:
             # Shutdown the async generator sources and exit
-            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.shutdown_asyncgens()
             loop.close()
             logger.info("====Pipeline Complete====")
 

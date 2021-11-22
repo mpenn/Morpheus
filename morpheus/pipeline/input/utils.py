@@ -1,0 +1,105 @@
+import typing
+
+import pandas as pd
+from pandas.core.frame import DataFrame
+
+import cudf
+
+from morpheus.pipeline.file_types import FileTypes
+from morpheus.pipeline.file_types import determine_file_type
+
+
+def filter_null_data(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
+    """
+    Filters out null row in a dataframe's 'data' column if it exists
+
+    Parameters
+    ----------
+    x : typing.Union[cudf.DataFrame, pd.DataFrame]
+        The dataframe to fix
+    """
+
+    if ("data" not in x):
+        return x
+
+    return x[~x['data'].isna()]
+
+
+def cudf_json_onread_cleanup(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
+    """
+    Fixes parsing issues when reading from a file. When loading a JSON file, cuDF converts ``\\n`` to
+    ``\\\\n`` for some reason
+    """
+    if ("data" in x and not x.empty):
+        x["data"] = x["data"].str.replace('\\n', '\n', regex=False)
+
+    return x
+
+
+def read_file_to_df(file_name: str,
+                    file_type: FileTypes,
+                    parser_kwargs: dict = {},
+                    filter_nulls: bool = True,
+                    df_type: typing.Literal["cudf", "pandas"] = "pandas") -> typing.Union[cudf.DataFrame, pd.DataFrame]:
+    """
+    Reads a file into a dataframe and performs any of the necessary cleanup.
+
+    Parameters
+    ----------
+    file_name : str
+        File to read
+    file_type : FileTypes
+        Type of file. Leave as Auto to determine from the extension
+    parser_kwargs : dict, optional
+        Any argument to pass onto the parse, by default {}
+    filter_nulls : bool, optional
+        Whether to filter null rows after loading, by default True
+    df_type : typing.Literal[, optional
+        What type of parser to use. Options are 'cudf' and 'pandas', by default "pandas"
+
+    Returns
+    -------
+    typing.Union[cudf.DataFrame, pd.DataFrame]
+        A parsed DataFrame
+    """
+
+    mode = file_type
+
+    if (mode == FileTypes.Auto):
+        mode = determine_file_type(file_name)
+
+    # Special args for JSON
+    if (mode == FileTypes.Json):
+        kwargs = {"lines": True}
+
+    elif (mode == FileTypes.Csv):
+        kwargs = {}
+
+    # Update with any args set by the user. User values overwrite defaults
+    parser_kwargs.update(kwargs)
+
+    df_class = cudf if df_type == "cudf" else pd
+
+    if (mode == FileTypes.Json):
+        df = df_class.read_json(file_name, **parser_kwargs)
+
+        if (filter_nulls):
+            df = filter_null_data(df)
+
+        df = cudf_json_onread_cleanup(df)
+
+        return df
+    elif (mode == FileTypes.Csv):
+        df: pd.DataFrame = df_class.read_csv(file_name, **parser_kwargs)
+
+        if (len(df.columns) > 1 and df.columns[0] == "Unnamed: 0" and df.iloc[:, 0].dtype == cudf.dtype(int)):
+            df.set_index("Unnamed: 0", drop=True, inplace=True)
+            df.index.name = ""
+            df.sort_index(inplace=True)
+
+        if (filter_nulls):
+            df = filter_null_data(df)
+
+        return df
+    else:
+        assert False, "Unsupported file type mode: {}".format(mode)

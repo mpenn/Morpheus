@@ -12,70 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import glob
 import logging
 import os
+import queue
 import typing
+from functools import partial
 
+import neo
 import numpy as np
 import pandas as pd
-import typing_utils
-from streamz import Source
-from streamz.core import Stream
-from tornado.ioloop import IOLoop
 
+from morpheus._lib.common import FiberQueue
 from morpheus.config import Config
-from morpheus.pipeline.input.from_file import FileSourceTypes
+from morpheus.pipeline.file_types import FileTypes
+from morpheus.pipeline.input.utils import read_file_to_df
+from morpheus.pipeline.messages import UserMessageMeta
 from morpheus.pipeline.pipeline import SingleOutputSource
-from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
-from morpheus.utils.producer_consumer_queue import AsyncIOProducerConsumerQueue
 from morpheus.utils.producer_consumer_queue import Closed
 
 logger = logging.getLogger(__name__)
-
-LIST_OF_COLUMNS = [
-    'eventSource',
-    'eventName',
-    'sourceIPAddress',
-    'userAgent',
-    'userIdentitytype',
-    'requestParametersroleArn',
-    'requestParametersroleSessionName',
-    'requestParametersdurationSeconds',
-    'responseElementsassumedRoleUserassumedRoleId',
-    'responseElementsassumedRoleUserarn',
-    'apiVersion',
-    'userIdentityprincipalId',
-    'userIdentityarn',
-    'userIdentityaccountId',
-    'userIdentityaccessKeyId',
-    'userIdentitysessionContextsessionIssuerprincipalId',
-    'userIdentitysessionContextsessionIssuerarn',
-    'userIdentitysessionContextsessionIssueruserName',
-    'tlsDetailsclientProvidedHostHeader',
-    'requestParametersownersSetitems',
-    'requestParametersmaxResults',
-    'requestParametersinstancesSetitems',
-    'errorCode',
-    'errorMessage',
-    'requestParametersmaxItems',
-    'responseElementsrequestId',
-    'responseElementsinstancesSetitems',
-    'requestParametersgroupSetitems',
-    'requestParametersinstanceType',
-    'requestParametersmonitoringenabled',
-    'requestParametersdisableApiTermination',
-    'requestParametersebsOptimized',
-    'responseElementsreservationId',
-    'requestParametersgroupName',
-    'eventTime',
-    'recipientAccountId',
-    'awsRegion'
-]
-
-EXTRA_KEEP_COLS = ["event_dt"]
 
 
 class CloudTrailSourceStage(SingleOutputSource):
@@ -94,46 +51,39 @@ class CloudTrailSourceStage(SingleOutputSource):
         The watch directory option instructs this stage to not close down once all files have been read. Instead it will
         read all files that match the 'input_glob' pattern, and then continue to watch the directory for additional
         files. Any new files that are added that match the glob will then be processed.
-    iterative: boolean
-        Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode is
-        good for interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
     max_files: int, default = -1
         Max number of files to read. Useful for debugging to limit startup time. Default value of -1 is unlimited.
     file_type : FileSourceTypes, default = 'auto'
         Indicates what type of file to read. Specifying 'auto' will determine the file type from the extension.
         Supported extensions: 'json', 'csv'
-    pandas_kwargs: dict, default=None
-        keyword args passed to underlying Pandas I/O function. See the Pandas documentation for `pandas.read_csv()` and
-        `pandas.read_json()` for the available options. With `file_type` == 'json', this defaults to ``{ "lines": True }``
-        and with `file_type` == 'csv', this defaults to ``{}``
+    repeat: int, default = 1
+        How many times to repeat the dataset. Useful for extending small datasets in debugging.
     """
     def __init__(self,
                  c: Config,
                  input_glob: str,
                  watch_directory: bool = False,
-                 iterative: bool = None,
                  max_files: int = -1,
-                 file_type: FileSourceTypes = FileSourceTypes.Auto,
+                 file_type: FileTypes = FileTypes.Auto,
                  repeat: int = 1):
 
         super().__init__(c)
-
-        self._batch_size = c.pipeline_batch_size
-        self._use_dask = c.use_dask
 
         self._input_glob = input_glob
         self._file_type = file_type
         self._max_files = max_files
 
+        self._feature_columns = c.ae.feature_columns
+        self._user_column_name = c.ae.userid_column_name
+        self._userid_filter = c.ae.userid_filter
+
         self._input_count = None
-        self._max_concurrent = c.num_threads
 
         # Hold the max index we have seen to ensure sequential and increasing indexes
-        self._max_index = 0
+        self._rows_per_user: typing.Dict[str, int] = {}
 
         # Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. Iterative mode
         # is good for interleaving source stages. Non-iterative is better for dask (uploads entire dataset in one call)
-        self._iterative = iterative if iterative is not None else not c.use_dask
         self._repeat_count = repeat
         self._watch_directory = watch_directory
 
@@ -149,12 +99,12 @@ class CloudTrailSourceStage(SingleOutputSource):
         """Return None for no max intput count"""
         return self._input_count
 
-    async def stop(self):
+    def stop(self):
 
         if (self._watcher is not None):
             self._watcher.stop()
 
-        return await super().stop()
+        return super().stop()
 
     async def join(self):
 
@@ -163,12 +113,33 @@ class CloudTrailSourceStage(SingleOutputSource):
 
         return await super().join()
 
-    def _read_file(self, filename: str) -> pd.DataFrame:
+    @staticmethod
+    def read_file(filename: str, file_type: FileTypes) -> pd.DataFrame:
+        """
+        Reads a file into a dataframe
 
-        mode = self._file_type
+        Parameters
+        ----------
+        filename : str
+            Path to a file to read
+        file_type : FileTypes
+            What type of file to read. Leave as Auto to auto detect based on the file extension
+
+        Returns
+        -------
+        pd.DataFrame
+            The parsed dataframe
+
+        Raises
+        ------
+        RuntimeError
+            If an unsupported file type is detected
+        """
+
+        mode = file_type
         kwargs = {}
 
-        if (mode == FileSourceTypes.Auto):
+        if (mode == FileTypes.Auto):
             # Determine from the file extension
             ext = os.path.splitext(filename)
 
@@ -177,98 +148,26 @@ class CloudTrailSourceStage(SingleOutputSource):
 
             # Check against supported options
             if (ext == "json" or ext == "jsonlines"):
-                mode = FileSourceTypes.Json
+                mode = FileTypes.Json
             elif (ext == "csv"):
-                mode = FileSourceTypes.Csv
+                mode = FileTypes.Csv
             else:
                 raise RuntimeError(
                     "Unsupported extension '{}' with 'auto' type. 'auto' only works with: csv, json".format(ext))
 
-        if (mode == FileSourceTypes.Json):
+        if (mode == FileTypes.Json):
             df = pd.read_json(filename, **kwargs)
             df = pd.json_normalize(df['Records'])
             return df
-        elif (mode == FileSourceTypes.Csv):
+        elif (mode == FileTypes.Csv):
             df = pd.read_csv(filename, **kwargs)
             return df
         else:
             assert False, "Unsupported file type mode: {}".format(mode)
 
-    def _read_files(self, file_list: typing.List[str]) -> pd.DataFrame:
-
-        # Using pandas to parse nested JSON until cuDF adds support
-        # https://github.com/rapidsai/cudf/issues/8827
-        dfs = []
-        for file in file_list:
-            df = self._read_file(file)
-            dfs.append(df)
-
-        src_df = pd.concat(dfs)
-
-        # Replace all the dots in column names
-        src_df.columns = src_df.columns.str.replace('.', '', regex=False)
-
-        # Now sort the dataframe by the event time.
-        src_df["event_dt"] = pd.to_datetime(src_df["eventTime"])
-        # Sort by time and reset the index to give all unique index values
-        src_df = src_df.sort_values(by="event_dt")
-
-        # Set up the sequential index
-        src_df = src_df.set_index(pd.RangeIndex(self._max_index, self._max_index + len(src_df), 1))
-
-        self._max_index += len(src_df)
-
-        def remove_null(x):
-            """
-            Util function that cleans up data
-            :param x:
-            :return:
-            """
-            if isinstance(x, list):
-                if isinstance(x[0], dict):
-                    key = list(x[0].keys())
-                    return x[0][key[0]]
-            return x
-
-        def filter_columns(cloudtrail_df):
-            """
-            Filter columns based on a list of columns
-            :param cloudtrail_df:
-            :return:
-            """
-            col_not_exists = [col for col in LIST_OF_COLUMNS if col not in cloudtrail_df.columns]
-            for col in col_not_exists:
-                cloudtrail_df[col] = np.nan
-            cloudtrail_df = cloudtrail_df[LIST_OF_COLUMNS + EXTRA_KEEP_COLS]
-            return cloudtrail_df
-
-        def clean_column(cloudtrail_df):
-            """
-            Clean a certain column based on lists inside
-            :param cloudtrail_df:
-            :return:
-            """
-            col_name = 'requestParametersownersSetitems'
-            cloudtrail_df[col_name] = cloudtrail_df[col_name].apply(lambda x: remove_null(x))
-            return cloudtrail_df
-
-        # Clean up the dataframe
-        src_df = filter_columns(src_df)
-        src_df = clean_column(src_df)
-
-        logger.debug("CloudTrail loading complete. Total rows: %d. Timespan: %s",
-                     len(src_df),
-                     str(src_df.loc[src_df.index[-1], "event_dt"] - src_df.loc[src_df.index[0], "event_dt"]))
-
-        src_lines = [""] * len(src_df)
-
-        src_df["_orig"] = src_lines
-
-        return src_df
-
-    async def _get_dataframe_queue(self) -> AsyncIOProducerConsumerQueue[pd.DataFrame]:
+    def _get_filename_queue(self) -> FiberQueue:
         # Return an asyncio queue
-        queue = AsyncIOProducerConsumerQueue()
+        q = FiberQueue(128)
 
         if (self._watch_directory):
 
@@ -293,15 +192,9 @@ class CloudTrailSourceStage(SingleOutputSource):
 
             event_handler = PatternMatchingEventHandler(patterns=[match_pattern])
 
-            loop = asyncio.get_running_loop()
-
             def process_dir_change(event: FileSystemEvent):
-                async def process_event(e: FileSystemEvent):
-                    df = self._read_files([e.src_path])
 
-                    await queue.put(df)
-
-                asyncio.run_coroutine_threadsafe(process_event(event), loop)
+                q.put([event.src_path])
 
             event_handler.on_created = process_dir_change
 
@@ -317,88 +210,261 @@ class CloudTrailSourceStage(SingleOutputSource):
 
         logger.info("Found %d CloudTrail files in glob. Loading...", len(file_list))
 
-        df_array = []
-
-        # Only load files if there are any
-        if (len(file_list) > 0):
-            df = self._read_files(file_list)
-
-            df_array.append(df)
-
-            for _ in range(1, self._repeat_count):
-                x = df.copy()
-
-                # Increment the index
-                x.index = range(self._max_index, self._max_index + len(df))
-                self._max_index += len(df)
-
-                # Now increment the timestamps by the interval in the df
-                x["event_dt"] = x["event_dt"] + (x["event_dt"].iloc[-1] - x["event_dt"].iloc[0])
-                x["eventTime"] = x["event_dt"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-                df_array.append(x)
-
-                # Set df for next iteration
-                df = x
-
         # Push all to the queue and close it
-        for d in df_array:
-
-            await queue.put(d)
+        q.put(file_list)
 
         if (not self._watch_directory):
             # Close the queue
-            await queue.close()
+            q.close()
 
-        return queue
+        return q
 
-    def _build_source(self) -> typing.Tuple[Source, typing.Type]:
+    def _generate_filenames(self):
 
-        out_stream: Source = Stream.from_iterable_done(self._generate_frames(),
-                                                       max_concurrent=self._max_concurrent,
-                                                       asynchronous=True,
-                                                       loop=IOLoop.current())
+        # Gets a queue of filenames as they come in. Returns list[str]
+        file_queue: FiberQueue = self._get_filename_queue()
 
-        out_type = pd.DataFrame if self._iterative else typing.List[pd.DataFrame]
+        batch_timeout = 30.0
 
-        return out_stream, out_type
-
-    def _post_build_single(self, out_pair: StreamPair) -> StreamPair:
-
-        out_stream = out_pair[0]
-        out_type = out_pair[1]
-
-        # Convert our list of dataframes into the desired type. Either scatter than flatten or just flatten if not using
-        # dask
-        if (self._use_dask):
-            if (typing_utils.issubtype(out_type, typing.List)):
-                out_stream = out_stream.scatter_batch().flatten()
-                out_type = StreamFuture[typing.get_args(out_type)[0]]
-            else:
-                out_stream = out_stream.scatter()
-                out_type = StreamFuture[out_type]
-        else:
-            if (typing_utils.issubtype(out_type, typing.List)):
-                out_stream = out_stream.flatten(max_concurrent=self._max_concurrent)
-                out_type = typing.get_args(out_type)[0]
-
-        return super()._post_build_single((out_stream, out_type))
-
-    async def _generate_frames(self):
-
-        df_queue: AsyncIOProducerConsumerQueue[pd.DataFrame] = await self._get_dataframe_queue()
+        files_to_process = []
 
         while True:
 
             try:
-                df = await df_queue.get()
+                files = file_queue.get(timeout=batch_timeout)
 
-                yield df
+                if (len(files) == 1):
+                    # We may be getting files one at a time from the folder watcher, wait a bit
+                    files_to_process = files_to_process + files
 
-                df_queue.task_done()
+                # We must have gotten a group at startup, process immediately
+                yield files
+
+                # df_queue.task_done()
+
+            except queue.Empty:
+                # We timed out, if we have any items in the queue, push those now
+                if (len(files_to_process) > 0):
+                    yield files_to_process
+                    files_to_process = []
 
             except Closed:
+                # Just in case there are any files waiting
+                if (len(files_to_process) > 0):
+                    yield files_to_process
+                    files_to_process = []
                 break
 
-        # Indicate that we are stopping (not the best way of doing this)
-        self._source_stream.stop()
+    @staticmethod
+    def cleanup_df(df: pd.DataFrame, feature_columns: typing.List[str]):
+
+        # Replace all the dots in column names
+        df.columns = df.columns.str.replace('.', '', regex=False)
+
+        def remove_null(x):
+            """
+            Util function that cleans up data
+            :param x:
+            :return:
+            """
+            if isinstance(x, list):
+                if isinstance(x[0], dict):
+                    key = list(x[0].keys())
+                    return x[0][key[0]]
+            return x
+
+        def clean_column(cloudtrail_df):
+            """
+            Clean a certain column based on lists inside
+            :param cloudtrail_df:
+            :return:
+            """
+            col_name = 'requestParametersownersSetitems'
+            if (col_name in cloudtrail_df):
+                cloudtrail_df[col_name] = cloudtrail_df[col_name].apply(lambda x: remove_null(x))
+            return cloudtrail_df
+
+        # Drop any unneeded columns
+        df.drop(columns=df.columns.difference(feature_columns), inplace=True)
+
+        # Reorder columns to be the same
+        # df = df[pd.Index(feature_columns).intersection(df.columns)]
+
+        # Convert a numerical account ID into a string
+        if ("userIdentityaccountId" in df and df["userIdentityaccountId"].dtype != np.dtype('O')):
+            df['userIdentityaccountId'] = 'Account-' + df['userIdentityaccountId'].astype(str)
+
+        df = clean_column(df)
+
+        return df
+
+    @staticmethod
+    def repeat_df(df: pd.DataFrame, repeat_count: int) -> typing.List[pd.DataFrame]:
+
+        df_array = []
+
+        df_array.append(df)
+
+        for _ in range(1, repeat_count):
+            x = df.copy()
+
+            # Now increment the timestamps by the interval in the df
+            x["event_dt"] = x["event_dt"] + (x["event_dt"].iloc[-1] - x["event_dt"].iloc[0])
+            x["eventTime"] = x["event_dt"].dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            df_array.append(x)
+
+            # Set df for next iteration
+            df = x
+
+        return df_array
+
+    @staticmethod
+    def batch_user_split(x: typing.List[pd.DataFrame],
+                         userid_column_name: str,
+                         userid_filter: str,
+                         feature_columns: typing.List[str]):
+
+        combined_df = pd.concat(x)
+
+        # # Ensure were still in the right order
+        # combined_df = combined_df[pd.Index(feature_columns).intersection(combined_df.columns)]
+
+        if ("eventTime" in combined_df):
+            # Convert to date_time column
+            combined_df["event_dt"] = pd.to_datetime(combined_df["eventTime"])
+
+            # Set the index name so we can sort first by time then by index (to keep things all in order). Then restore
+            # the name
+            saved_index_name = combined_df.index.name
+
+            combined_df.index.name = "idx"
+
+            # Sort by time
+            combined_df = combined_df.sort_values(by=["event_dt", "idx"])
+
+            combined_df.index.name = saved_index_name
+
+            logger.debug(
+                "CloudTrail loading complete. Total rows: %d. Timespan: %s",
+                len(combined_df),
+                str(combined_df.loc[combined_df.index[-1], "event_dt"] -
+                    combined_df.loc[combined_df.index[0], "event_dt"]))
+
+        # Get the users in this DF
+        unique_users = combined_df[userid_column_name].unique()
+
+        user_dfs = {}
+
+        for user_name in unique_users:
+
+            if (userid_filter is not None and user_name != userid_filter):
+                continue
+
+            # Get just this users data and make a copy to remove link to grouped DF
+            user_df = combined_df[combined_df[userid_column_name] == user_name].copy()
+
+            user_dfs[user_name] = user_df
+
+        return user_dfs
+
+    @staticmethod
+    def files_to_dfs_per_user(x: typing.List[str],
+                              file_type: FileTypes,
+                              userid_column_name: str,
+                              feature_columns: typing.List[str],
+                              userid_filter: str = None,
+                              repeat_count: int = 1) -> typing.Dict[str, pd.DataFrame]:
+
+        # Using pandas to parse nested JSON until cuDF adds support
+        # https://github.com/rapidsai/cudf/issues/8827
+        dfs = []
+        for file in x:
+            df = read_file_to_df(file, file_type, df_type="pandas")
+            df = CloudTrailSourceStage.cleanup_df(df, feature_columns)
+            dfs = dfs + CloudTrailSourceStage.repeat_df(df, repeat_count)
+
+        df_per_user = CloudTrailSourceStage.batch_user_split(dfs, userid_column_name, userid_filter, feature_columns)
+
+        return df_per_user
+
+    def _build_user_metadata(self, x: typing.Dict[str, pd.DataFrame]):
+
+        user_metas = []
+
+        for user_name, user_df in x.items():
+
+            # See if we have seen this user before
+            if (user_name not in self._rows_per_user):
+                self._rows_per_user[user_name] = 0
+
+            # Combine the original index with itself so it shows up as a named column
+            user_df.index.name = "_index_" + user_df.index.name
+            user_df = user_df.reset_index()
+
+            # Now ensure the index for this user is correct
+            user_df.index = range(self._rows_per_user[user_name], self._rows_per_user[user_name] + len(user_df))
+            self._rows_per_user[user_name] += len(user_df)
+
+            # Now make a UserMessageMeta with the user name
+            meta = UserMessageMeta(user_df, user_name)
+
+            user_metas.append(meta)
+
+        return user_metas
+
+    def _build_source(self, seg: neo.Segment) -> StreamPair:
+
+        # The first source just produces filenames
+        filename_source = seg.make_source(self.unique_name, self._generate_filenames())
+
+        out_type = typing.List[str]
+
+        # Supposed to just return a source here
+        return filename_source, out_type
+
+    def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
+
+        out_stream = out_pair[0]
+        out_type = out_pair[1]
+
+        # At this point, we have batches of filenames to process. Make a node for processing batches of filenames into
+        # batches of dataframes
+        filenames_to_df = seg.make_node(
+            self.unique_name + "-filetodf",
+            partial(self.files_to_dfs_per_user,
+                    file_type=self._file_type,
+                    userid_column_name=self._user_column_name,
+                    feature_columns=self._feature_columns,
+                    userid_filter=self._userid_filter,
+                    repeat_count=self._repeat_count))
+        seg.make_edge(out_stream, filenames_to_df)
+
+        # Now group the batch of dataframes into a single df, split by user, and send a single UserMessageMeta per user
+        df_to_meta = seg.make_node(self.unique_name + "-usersplit", self._build_user_metadata)
+        seg.make_edge(filenames_to_df, df_to_meta)
+
+        # Finally, flatten to a single stream
+        def flatten_fn(input: neo.Observable, output: neo.Subscriber):
+            def obs_on_next(x: typing.List):
+
+                for y in x:
+                    output.on_next(y)
+
+            def obs_on_error(x):
+                output.on_error(x)
+
+            def obs_on_completed():
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+        flattened = seg.make_node_full(self.unique_name + "-post", flatten_fn)
+        seg.make_edge(df_to_meta, flattened)
+
+        out_stream = flattened
+        out_type = UserMessageMeta
+
+        return super()._post_build_single(seg, (out_stream, out_type))

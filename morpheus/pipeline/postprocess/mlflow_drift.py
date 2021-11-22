@@ -3,6 +3,7 @@ import typing
 
 import cupy as cp
 import mlflow
+import neo
 
 from morpheus.config import Config
 from morpheus.pipeline.messages import MultiResponseMessage
@@ -19,9 +20,25 @@ class MLFlowDriftStage(SinglePortStage):
 
     Parameters
     ----------
-    c : morpheus.config.Config
-        Pipeline configuration instance
-
+    c : Config
+        The global config.
+    tracking_uri : str, optional
+        The ML Flow tracking URI to connect to the tracking backend. If not speficied, MF Flow will use 'file:///mlruns'
+        relative to the current directory, by default None
+    experiment_name : str, optional
+        The experiement name to use in ML Flow, by default "Morpheus"
+    run_id : str, optional
+        The ML Flow Run ID to report metrics to. If unspecified, Morpheus will attempt to reuse any previously created
+        runs that are still active. Otherwise, a new run will be created. By default, runs are left in an active state.
+    labels : typing.List[str], optional
+        Converts probability indexes into labels for the ML Flow UI. If no labels are specified, the probability labels
+        are determined by the pipeline mode., by default None
+    batch_size : int, optional
+        The batch size to calculate model drift statistics. Allows for increasing or decreasing how much data is
+        reported to MLFlow. Default is -1 which will use the pipeline batch_size., by default -1
+    force_new_run : bool, optional
+        Whether or not to reuse the most recent run ID in ML Flow or create a new one each time the pipeline is run, by
+        default False
     """
     def __init__(self,
                  c: Config,
@@ -110,12 +127,14 @@ class MLFlowDriftStage(SinglePortStage):
 
         return x
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
 
         # Convert the messages to rows of strings
-        stream = stream.async_map(self._calc_drift, executor=self._pipeline.thread_pool)
+        node = seg.make_node(self.unique_name, self._calc_drift)
+        seg.make_edge(input_stream[0], node)
+        stream = node
 
         # Return input unchanged
         return stream, MultiResponseMessage

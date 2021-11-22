@@ -4,27 +4,11 @@ set -e +o pipefail
 # set -x
 # set -v
 
-# Color variables
-b="\033[0;36m"
-g="\033[0;32m"
-r="\033[0;31m"
-e="\033[0;90m"
-y="\033[0;33m"
-x="\033[0m"
-
-# RUN OPTIONS
-RUN_PYTORCH=${RUN_PYTORCH:-1}
-RUN_TRITON_ONNX=${RUN_TRITON_ONNX:-1}
-RUN_TRITON_TRT=${RUN_TRITON_TRT:-1}
-RUN_TENSORRT=${RUN_TENSORRT:-0}
-
-TRITON_IMAGE=${TRITON_IMAGE:-"nvcr.io/nvidia/tritonserver:21.10-py3"}
-
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-MORPHEUS_ROOT=$(realpath ${MORPHEUS_ROOT:-"${SCRIPT_DIR}/../.."})
+MORPHEUS_ROOT=$(realpath ${MORPHEUS_ROOT:-"${SCRIPT_DIR}/../../.."})
 
-INPUT_FILE=${INPUT_FILE:-"${MORPHEUS_ROOT}/data/sid_training_data_truth.csv"}
-TRUTH_FILE=${TRUTH_FILE:-"${MORPHEUS_ROOT}/data/sid_training_data_truth.csv"}
+SID_INPUT_FILE=${SID_INPUT_FILE:-"${MORPHEUS_ROOT}/models/datasets/validation-data/sid-validation-data.csv"}
+SID_TRUTH_FILE=${SID_TRUTH_FILE:-"${MORPHEUS_ROOT}/models/datasets/validation-data/sid-validation-data.csv"}
 
 # Get the SID_MODEL from the argument. Must be 'bert' or 'minibert'
 SID_TYPE=${SID_MODEL:-$1}
@@ -38,19 +22,21 @@ MODEL_NAME="${MODEL_FILENAME%.*}"
 OUTPUT_FILE_BASE="${MORPHEUS_ROOT}/.tmp/val_${MODEL_NAME}-"
 
 # Load the utility scripts
-source ${SCRIPT_DIR}/val-utils.sh
-source ${SCRIPT_DIR}/val-run-pipeline.sh
+source ${SCRIPT_DIR}/../val-run-pipeline.sh
 
 if [[ "${RUN_PYTORCH}" = "1" ]]; then
    OUTPUT_FILE="${OUTPUT_FILE_BASE}pytorch.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}pytorch-results.json"
 
-   run_pipeline_nlp_${SID_TYPE} \
-      "${INPUT_FILE}" \
+   run_pipeline_sid_${SID_TYPE} \
+      "${SID_INPUT_FILE}" \
       "inf-pytorch --model_filename=${MODEL_FILE}" \
-      "${OUTPUT_FILE}"
+      "${OUTPUT_FILE}" \
+      "${SID_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   PYTORCH_ERROR="${b}$(calc_error ${TRUTH_FILE} ${OUTPUT_FILE})"
+   PYTORCH_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 else
    PYTORCH_ERROR="${y}Skipped"
 fi
@@ -60,14 +46,17 @@ if [[ "${RUN_TRITON_ONNX}" = "1" ]]; then
    load_triton_model "sid-${SID_TYPE}-onnx"
 
    OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-onnx.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-onnx-results.json"
 
-   run_pipeline_nlp_${SID_TYPE} \
-      "${INPUT_FILE}" \
-      "inf-triton --model_name=sid-${SID_TYPE}-onnx --server_url=localhost:8001 --force_convert_inputs=True" \
-      "${OUTPUT_FILE}"
+   run_pipeline_sid_${SID_TYPE} \
+      "${SID_INPUT_FILE}" \
+      "inf-triton --model_name=sid-${SID_TYPE}-onnx --server_url=${TRITON_URL} --force_convert_inputs=True" \
+      "${OUTPUT_FILE}" \
+      "${SID_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   TRITON_ONNX_ERROR="${b}$(calc_error ${TRUTH_FILE} ${OUTPUT_FILE})"
+   TRITON_ONNX_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 else
    TRITON_ONNX_ERROR="${y}Skipped"
 fi
@@ -76,14 +65,17 @@ if [[ "${RUN_TRITON_TRT}" = "1" ]]; then
    load_triton_model "sid-${SID_TYPE}-trt"
 
    OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-trt.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-trt-results.json"
 
-   run_pipeline_nlp_${SID_TYPE} \
-      "${INPUT_FILE}" \
-      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=localhost:8001 --force_convert_inputs=True" \
-      "${OUTPUT_FILE}"
+   run_pipeline_sid_${SID_TYPE} \
+      "${SID_INPUT_FILE}" \
+      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=${TRITON_URL} --force_convert_inputs=True" \
+      "${OUTPUT_FILE}" \
+      "${SID_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   TRITON_TRT_ERROR="${b}$(calc_error ${TRUTH_FILE} ${OUTPUT_FILE})"
+   TRITON_TRT_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 else
    TRITON_TRT_ERROR="${y}Skipped"
 fi
@@ -100,14 +92,17 @@ if [[ "${RUN_TENSORRT}" = "1" ]]; then
    load_triton_model "sid-${SID_TYPE}-trt"
 
    OUTPUT_FILE="${OUTPUT_FILE_BASE}tensorrt.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}tensorrt-results.json"
 
-   run_pipeline_nlp_${SID_TYPE} \
-      "${INPUT_FILE}" \
-      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=localhost:8001 --force_convert_inputs=True" \
-      "${OUTPUT_FILE}"
+   run_pipeline_sid_${SID_TYPE} \
+      "${SID_INPUT_FILE}" \
+      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=${TRITON_URL} --force_convert_inputs=True" \
+      "${OUTPUT_FILE}" \
+      "${SID_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   TRITON_TRT_ERROR="${b}$(calc_error ${TRUTH_FILE} ${OUTPUT_FILE})"
+   TRITON_TRT_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 
 else
    TENSORRT_ERROR="${y}Skipped"

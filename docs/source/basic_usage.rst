@@ -2,7 +2,7 @@ Basic Usage (via CLI)
 =====================
 
 This section focuses on the Morpheus CLI and illustrates how the CLI can be used to configure and run a Morpheus
-Pipeline. 
+Pipeline.
 
 Organization
 ------------
@@ -258,11 +258,9 @@ This example shows an NLP Pipeline which uses most stages available in Morpheus.
       monitor --description "Inference Rate" --smoothing=0.001 --unit "inf" \
       add-class \
       filter --threshold=0.8 \
-      serialize --include 'timestamp' --exclude '^ts_' \
+      serialize --include 'timestamp' --exclude '^_ts_' \
       to-kafka --output_topic "inference_output"
    Configuring Pipeline via CLI
    Starting pipeline via CLI... Ctrl+C to Quit
    Pipeline visualization saved to basic_usage_img/nlp_kitchen_sink.png
-   Inference Rate: 16384inf [19:50, 13.83inf/s] 
-   
-   
+   Inference Rate: 16384inf [19:50, 13.83inf/s]

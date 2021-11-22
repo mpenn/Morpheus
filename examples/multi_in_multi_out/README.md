@@ -38,7 +38,7 @@ We can see that the `sample-3` stage forks its input into two paths. This is a c
 
 This has the effect of ensuring the `data_len` field is available. To create messages where some have `data_len` missing, two datasets have been created: `with_data_len.json` and `without_data_len.json`. These datasets both contain 1000 lines and are very similar except for the missing field. Both datasets are loaded and piped into the `deserialze-2` stage where they will be interleaved.
 
-Finally, we illustrate how to use multiple outputs by forking the `monitor-7` stage into two serialization stages. One serialization stage will exclude timestamp information (any field starting with `ts_*`) and the other will not exclude any fields. This results in two output files that only differ by the fields that were serialized.
+Finally, we illustrate how to use multiple outputs by forking the `monitor-7` stage into two serialization stages. One serialization stage will exclude timestamp information (any field starting with `_ts_*`) and the other will not exclude any fields. This results in two output files that only differ by the fields that were serialized.
 
 ## Setup
 

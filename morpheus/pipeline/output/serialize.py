@@ -46,7 +46,7 @@ class SerializeStage(SinglePortStage):
     def __init__(self,
                  c: Config,
                  include: typing.List[str] = None,
-                 exclude: typing.List[str] = [r'^ID$', r'^ts_'],
+                 exclude: typing.List[str] = [r'^ID$', r'^_ts_'],
                  output_type: typing.Literal["pandas", "cudf", "json", "csv"] = "pandas"):
         super().__init__(c)
 
@@ -151,13 +151,6 @@ class SerializeStage(SinglePortStage):
 
         exclude_columns = [re.compile(x) for x in self._exclude_columns]
 
-        # Convert the messages to rows of strings
-        # stream = input_stream[0].async_map(
-        #     SerializeStage.convert_to_cudf if self._as_cudf_df else SerializeStage.convert_to_json,
-        #     executor=self._pipeline.thread_pool,
-        #     include_columns=include_columns,
-        #     exclude_columns=exclude_columns)
-
         fn = None
         out_type = None
 
@@ -181,5 +174,4 @@ class SerializeStage(SinglePortStage):
 
         seg.make_edge(input_stream[0], stream)
 
-        # Return input unchanged
         return stream, out_type

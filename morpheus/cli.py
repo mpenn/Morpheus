@@ -241,6 +241,17 @@ def install(append, case_insensitive, shell, path):
               default=DEFAULT_CONFIG.model_max_batch_size,
               type=click.IntRange(min=1),
               help="Max batch size to use for the model")
+@click.option('--edge_buffer_size',
+              default=DEFAULT_CONFIG.edge_buffer_size,
+              type=click.IntRange(min=2),
+              help=("The size of buffered channels to use between nodes in a pipeline. Larger values reduce "
+                    "backpressure at the cost of memory. Smaller values will push messages through the "
+                    "pipeline quicker. Must be greater than 1 and a power of 2 (i.e. 2, 4, 8, 16, etc.)"))
+@click.option('--use_cpp',
+              default=DEFAULT_CONFIG.use_cpp,
+              type=bool,
+              help=("Whether or not to use C++ node and message types or to prefer python. "
+                    "Only use as a last resort if bugs are encountered"))
 @prepare_command(Config.get())
 def run(ctx: click.Context, **kwargs):
 
@@ -254,9 +265,9 @@ def run(ctx: click.Context, **kwargs):
 @prepare_command(Config.get().dask)
 def dask(ctx: click.Context, **kwargs):
 
-    click.echo(click.style("Using Dask", fg="yellow"))
+    click.echo(click.style("Dask support has been deprecated and is no longer supported", fg="red"))
 
-    Config.get().use_dask = True
+    exit()
 
 
 @click.group(chain=True, short_help="Run the inference pipeline with a NLP model", cls=AliasedGroup, **command_kwargs)
@@ -307,7 +318,7 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
     if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
         with open(kwargs["labels_file"], "r") as lf:
             config.class_labels = [x.strip() for x in lf.readlines()]
-            logger.info("Loaded labels file. Current labels: [%s]", str(config.class_labels))
+            logger.debug("Loaded labels file. Current labels: [%s]", str(config.class_labels))
 
     from morpheus.pipeline import LinearPipeline
 
@@ -361,8 +372,8 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
         with open(kwargs["labels_file"], "r") as lf:
-            config.class_labels = lf.readlines()
-            logger.info("Loaded labels file. Current labels: [%s]", str(config.class_labels))
+            config.class_labels = [x.strip() for x in lf.readlines()]
+            logger.debug("Loaded labels file. Current labels: [%s]", str(config.class_labels))
     else:
         # Use a default single label
         config.class_labels = ["mining"]
@@ -378,14 +389,18 @@ def pipeline_fil(ctx: click.Context, **kwargs):
              short_help="Run the inference pipeline with an AutoEncoder model",
              cls=AliasedGroup,
              **command_kwargs)
-@click.option('--model_fea_length',
-              default=296,
-              type=click.IntRange(min=1),
-              help="Number of features trained in the model")
-@click.option('--ae_path',
-              required=True,
-              type=click.Path(dir_okay=False, exists=True),
-              help="The autoencoder file to use in the pipeline")
+@click.option('--columns_file',
+              default="data/columns_ae.txt",
+              type=click.Path(dir_okay=False, exists=True, file_okay=True),
+              help=(""))
+@click.option('--labels_file',
+              default=None,
+              type=click.Path(dir_okay=False, exists=True, file_okay=True),
+              help=("Specifies a file to read labels from in order to convert class IDs into labels. "
+                    "A label file is a simple text file where each line corresponds to a label. "
+                    "If unspecified, only a single output label is created for FIL"))
+@click.option('--userid_column_name', type=str, default="userIdentityaccountId", required=True, help=(""))
+@click.option('--userid_filter', type=str, default=None, required=True, help=(""))
 @click.option('--viz_file',
               default=None,
               type=click.Path(dir_okay=False, writable=True),
@@ -416,9 +431,30 @@ def pipeline_ae(ctx: click.Context, **kwargs):
 
     config.mode = PipelineModes.AE
 
-    config.ae = ConfigAutoEncoder(autoencoder_path=kwargs["ae_path"])
+    if (config.use_cpp):
+        logger.warning("C++ is disabled for AutoEncoder pipelines at this time.")
+        config.use_cpp = False
 
-    config.feature_length = kwargs["model_fea_length"]
+    config.ae = ConfigAutoEncoder()
+
+    config.ae.userid_column_name = kwargs["userid_column_name"]
+    config.ae.userid_filter = kwargs["userid_filter"]
+
+    if ("columns_file" in kwargs and kwargs["columns_file"] is not None):
+        with open(kwargs["columns_file"], "r") as lf:
+            config.ae.feature_columns = [x.strip() for x in lf.readlines()]
+            logger.debug("Loaded columns. Current columns: [%s]", str(config.ae.feature_columns))
+    else:
+        # Use a default single label
+        config.class_labels = ["ae_anomaly_score"]
+
+    if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
+        with open(kwargs["labels_file"], "r") as lf:
+            config.class_labels = [x.strip() for x in lf.readlines()]
+            logger.debug("Loaded labels file. Current labels: [%s]", str(config.class_labels))
+    else:
+        # Use a default single label
+        config.class_labels = ["ae_anomaly_score"]
 
     from morpheus.pipeline import LinearPipeline
 
@@ -427,8 +463,11 @@ def pipeline_ae(ctx: click.Context, **kwargs):
     return ctx.obj
 
 
+@pipeline_nlp.result_callback()
+@pipeline_fil.result_callback()
+@pipeline_ae.result_callback()
 @click.pass_context
-def post_pipeline(ctx: click.Context, stages, **kwargs):
+def post_pipeline(ctx: click.Context, *args, **kwargs):
 
     logger.info("Config: \n{}".format(Config.get().to_string()))
 
@@ -446,11 +485,6 @@ def post_pipeline(ctx: click.Context, stages, **kwargs):
 
     # Run the pipeline
     pipeline.run()
-
-
-pipeline_nlp.result_callback = post_pipeline
-pipeline_fil.result_callback = post_pipeline
-pipeline_ae.result_callback = post_pipeline
 
 
 @click.command(short_help="Load messages from a file", **command_kwargs)
@@ -534,7 +568,7 @@ def from_kafka(ctx: click.Context, **kwargs):
               type=str,
               required=True,
               help=("Input glob pattern to match files to read. For example, './input_dir/*.json' would read all "
-                    "files with the 'json' extension in the directory input_dir."))
+                    "files with the 'json' extension in the directory 'input_dir'."))
 @click.option('--watch_directory',
               type=bool,
               default=False,
@@ -542,12 +576,6 @@ def from_kafka(ctx: click.Context, **kwargs):
                     "Instead it will read all files that match the 'input_glob' pattern, and then continue to watch "
                     "the directory for additional files. Any new files that are added that match the glob will then "
                     "be processed."))
-@click.option('--iterative',
-              is_flag=True,
-              default=False,
-              help=("Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. "
-                    "Iterative mode is good for interleaving source stages. Non-iterative is better for dask "
-                    "(uploads entire dataset in one call)"))
 @click.option('--max_files',
               type=click.IntRange(min=1),
               help=("Max number of files to read. Useful for debugging to limit startup time. "
@@ -673,7 +701,7 @@ def trigger(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Deserialize source data from JSON", **command_kwargs)
+@click.command(short_help="Deserialize source data from JSON.", **command_kwargs)
 @prepare_command(False)
 def deserialize(ctx: click.Context, **kwargs):
 
@@ -690,6 +718,39 @@ def deserialize(ctx: click.Context, **kwargs):
     return stage
 
 
+@click.command(short_help="Deserialize source data from JSON", **command_kwargs)
+@click.option('--pretrained_filename',
+              type=click.Path(exists=True, dir_okay=False),
+              help=("Loads a single pre-trained model for all users."))
+@click.option('--train_data_glob',
+              type=str,
+              help=("On startup, all files matching this glob pattern will be loaded and used "
+                    "to train a model for each unique user ID."))
+@click.option('--train_epochs',
+              type=click.IntRange(min=1),
+              default=25,
+              help="The number of epochs to train user models for.")
+@click.option('--train_max_history',
+              type=click.IntRange(min=1),
+              default=1000,
+              help=("Maximum amount of rows that will be retained in history. As new data arrives, models will be "
+                    "retrained with a maximum number of rows specified by this value."))
+@prepare_command(False)
+def train_ae(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
+
+    stage = TrainAEStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
 @click.option('--vocab_hash_file',
               default="data/bert-base-cased-hash.txt",
@@ -697,10 +758,23 @@ def deserialize(ctx: click.Context, **kwargs):
               help=("Path to hash file containing vocabulary of words with token-ids. "
                     "This can be created from the raw vocabulary using the cudf.utils.hash_vocab_utils.hash_vocab "
                     "function. Default value is 'data/bert-base-cased-hash.txt'"))
-@click.option('--truncation', default=False, type=bool)
-@click.option('--do_lower_case', default=False, type=bool)
-@click.option('--add_special_tokens', default=False, type=bool)
-@click.option('--stride', type=int, default=-1, help="")
+@click.option('--truncation',
+              default=False,
+              type=bool,
+              help=("When set to True, any tokens extending past the max sequence length will be truncated."))
+@click.option('--do_lower_case', default=False, type=bool, help=("Converts all strings to lowercase."))
+@click.option('--add_special_tokens',
+              default=False,
+              type=bool,
+              help=("Adds special tokens '[CLS]' to the beginning and '[SEP]' to the end of each string. ."))
+@click.option('--stride',
+              type=int,
+              default=-1,
+              help=("If a string extends beyond max sequence length, it will be broken up into multiple sections. "
+                    "This option specifies how far each to increment the head of each string when broken into "
+                    "multiple segments. Lower numbers will reult in more overlap. Setting this to -1 will auto "
+                    "calculate the stride to be 75% of the max sequence length. If truncation=True, "
+                    "this option has no effect."))
 @prepare_command(False)
 def preprocess_nlp(ctx: click.Context, **kwargs):
 
@@ -800,7 +874,7 @@ def inf_identity(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Perform inference with PyTorch", **command_kwargs)
+@click.command(name="inf-pytorch", short_help="Perform inference with PyTorch", **command_kwargs)
 @click.option('--model_filename',
               type=click.Path(exists=True, dir_okay=False),
               required=True,
@@ -815,6 +889,23 @@ def inf_pytorch(ctx: click.Context, **kwargs):
     from morpheus.pipeline.inference.inference_pytorch import PyTorchInferenceStage
 
     stage = PyTorchInferenceStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(name="inf-pytorch", short_help="Perform inference with PyTorch", **command_kwargs)
+@prepare_command(False)
+def inf_pytorch_ae(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.inference.inference_ae import AutoEncoderInferenceStage
+
+    stage = AutoEncoderInferenceStage(Config.get(), **kwargs)
 
     p.add_stage(stage)
 
@@ -843,8 +934,10 @@ def add_class(ctx: click.Context, **kwargs):
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     if ("label" in kwargs):
-        # Convert to list named labels
-        kwargs["labels"] = list(kwargs["label"])
+        if (kwargs["label"] is not None):
+            # Convert to list named labels
+            kwargs["labels"] = list(kwargs["label"])
+
         del kwargs["label"]
 
     from morpheus.pipeline.general_stages import AddClassificationsStage
@@ -877,8 +970,10 @@ def add_scores(ctx: click.Context, **kwargs):
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     if ("label" in kwargs):
-        # Convert to list named labels
-        kwargs["labels"] = list(kwargs["label"])
+        if (kwargs["label"] is not None):
+            # Convert to list named labels
+            kwargs["labels"] = list(kwargs["label"])
+
         del kwargs["label"]
 
     from morpheus.pipeline.general_stages import AddScoresStage
@@ -891,7 +986,11 @@ def add_scores(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Filter message by a classification threshold", **command_kwargs)
-@click.option('--threshold', type=float, default=0.5, required=True, help="")
+@click.option('--threshold',
+              type=float,
+              default=0.5,
+              required=True,
+              help=("All messages without a probability above this threshold will be filtered away"))
 @prepare_command(False)
 def filter(ctx: click.Context, **kwargs):
 
@@ -908,7 +1007,7 @@ def filter(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Deserialize source data from JSON", **command_kwargs)
+@click.command(short_help="Serializes messages into a text format", **command_kwargs)
 @click.option('--include',
               type=str,
               default=tuple(),
@@ -918,7 +1017,7 @@ def filter(ctx: click.Context, **kwargs):
                     "Resulting columns is the intersection of all regex. Include applied before exclude"))
 @click.option('--exclude',
               type=str,
-              default=[r'^ID$', r'^ts_'],
+              default=[r'^ID$', r'^_ts_'],
               multiple=True,
               required=True,
               help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
@@ -1038,9 +1137,44 @@ def timeseries(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Write all messages to a file", **command_kwargs)
-@click.option('--filename', type=click.Path(writable=True), required=True, help="")
+@click.command(short_help="", **command_kwargs)
+@click.option('--val_file_name', type=click.Path(exists=True, dir_okay=False), required=True, help="")
+@click.option('--results_file_name', type=click.Path(dir_okay=False), required=True, help="")
 @click.option('--overwrite', is_flag=True, help="")
+@click.option('--include',
+              type=str,
+              default=tuple(),
+              multiple=True,
+              show_default="All Columns",
+              help=("Which columns to include from MultiMessage into JSON. Can be specified multiple times. "
+                    "Resulting columns is the intersection of all regex. Include applied before exclude"))
+@click.option('--exclude',
+              type=str,
+              default=[r'^ID$', r'^_ts_'],
+              multiple=True,
+              required=True,
+              help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
+                    "Resulting ignored columns is the intersection of all regex. Include applied before exclude"))
+@click.option('--index_col', type=str, help=(""))
+@prepare_command(False)
+def validate(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.output.validation import ValidationStage
+
+    stage = ValidationStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
+@click.command(short_help="Write all messages to a file", **command_kwargs)
+@click.option('--filename', type=click.Path(writable=True), required=True, help="The file to write to")
+@click.option('--overwrite', is_flag=True, help="Whether or not to overwrite the target file")
 @prepare_command(False)
 def to_file(ctx: click.Context, **kwargs):
 
@@ -1138,6 +1272,7 @@ pipeline_nlp.add_command(preprocess_nlp)
 pipeline_nlp.add_command(serialize)
 pipeline_nlp.add_command(to_file)
 pipeline_nlp.add_command(to_kafka)
+pipeline_nlp.add_command(validate)
 
 # FIL Pipeline
 pipeline_fil.add_command(add_class)
@@ -1158,20 +1293,17 @@ pipeline_fil.add_command(preprocess_fil)
 pipeline_fil.add_command(serialize)
 pipeline_fil.add_command(to_file)
 pipeline_fil.add_command(to_kafka)
+pipeline_fil.add_command(validate)
 
 # AE Pipeline
 pipeline_ae.add_command(add_class)
 pipeline_ae.add_command(add_scores)
 pipeline_ae.add_command(buffer)
 pipeline_ae.add_command(delay)
-pipeline_ae.add_command(deserialize)
 pipeline_ae.add_command(filter)
 pipeline_ae.add_command(from_cloudtrail)
-pipeline_ae.add_command(from_file)
-pipeline_ae.add_command(from_kafka)
 pipeline_ae.add_command(gen_viz)
-pipeline_ae.add_command(inf_identity)
-pipeline_ae.add_command(inf_pytorch)
+pipeline_ae.add_command(inf_pytorch_ae)
 pipeline_ae.add_command(inf_triton)
 pipeline_ae.add_command(monitor)
 pipeline_ae.add_command(preprocess_ae)
@@ -1179,6 +1311,8 @@ pipeline_ae.add_command(serialize)
 pipeline_ae.add_command(timeseries)
 pipeline_ae.add_command(to_file)
 pipeline_ae.add_command(to_kafka)
+pipeline_ae.add_command(train_ae)
+pipeline_ae.add_command(validate)
 
 
 def run_cli():

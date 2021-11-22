@@ -84,3 +84,10 @@ function calc_error() {
    ERROR=$(printf "%.2f\n" $(echo "${DIFF}/${TOTAL}*100.0" | bc -l))
    echo -e "${DIFF}/${TOTAL} (${ERROR} %)"
 }
+
+function calc_error_val() {
+   DIFF=$(cat "${1}" | jq ".diff_rows")
+   TOTAL=$(cat "${1}" | jq ".total_rows")
+   ERROR=$(printf "%.2f\n" $(echo "${DIFF}/${TOTAL}*100.0" | bc -l))
+   echo -e "${DIFF}/${TOTAL} (${ERROR} %)"
+}

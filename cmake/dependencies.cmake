@@ -36,6 +36,9 @@ message(VERBOSE "CMAKE_FIND_ROOT_PATH: " ${CMAKE_FIND_ROOT_PATH})
 message(VERBOSE "CMAKE_LIBRARY_ARCHITECTURE: " ${CMAKE_LIBRARY_ARCHITECTURE})
 message(VERBOSE "FIND_LIBRARY_USE_LIB64_PATHS: " ${FIND_LIBRARY_USE_LIB64_PATHS})
 
+# Before loading neo, load protobuf via config
+find_package(Protobuf REQUIRED)
+
 set(RAPIDS_VERSION "21.10" CACHE STRING "Global default version for all Rapids project dependencies")
 
 # Should find Neo First
