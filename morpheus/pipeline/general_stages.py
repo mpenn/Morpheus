@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import typing
 from functools import partial
 from functools import reduce
@@ -31,6 +32,8 @@ from morpheus.pipeline.pipeline import StreamPair
 from morpheus.utils.type_utils import greatest_ancestor
 from morpheus.utils.type_utils import unpack_tuple
 from morpheus.utils.type_utils import unpack_union
+
+logger = logging.getLogger(__name__)
 
 
 class BufferStage(SinglePortStage):
@@ -291,8 +294,8 @@ class MonitorStage(SinglePortStage):
 
 class AddClassificationsStage(SinglePortStage):
     """
-    Add classification labels based on probabilities calculated in inference stage. Uses default threshold of
-    0.5 for predictions.
+    Add classification labels based on probabilities calculated in inference stage. Label indexes will be looked up in
+    the Config.class_labels property. Uses default threshold of 0.5 for predictions.
 
     Parameters
     ----------
@@ -300,6 +303,10 @@ class AddClassificationsStage(SinglePortStage):
         Pipeline configuration instance
     threshold : float
         Threshold to classify, default is 0.5
+    labels: list, default = None
+        The list of labels to add classifications for. Each item in the list will determine its index from the
+        Config.class_labels property and must be one of the available class labels. Leave as None to add all labels in
+        the Config.class_labels property
 
     """
     def __init__(self, c: Config, threshold: float = 0.5, labels: typing.List[str] = None, prefix: str = ""):
@@ -308,10 +315,21 @@ class AddClassificationsStage(SinglePortStage):
         self._feature_length = c.feature_length
         self._threshold = threshold
         self._prefix = prefix
+        self._class_labels = c.class_labels
         self._labels = labels if labels is not None else c.class_labels
 
-        # combine any prefix
-        self._idx2label = {i: self._prefix + l for i, l in enumerate(self._labels)}
+        # Build the Index to Label map.
+        self._idx2label = {}
+
+        for l in self._labels:
+            # All labels must be in class_labels in order to get their position
+            if (l not in self._class_labels):
+                logger.warning("The label '%s' is not in Config.class_labels and will be ignored", l)
+                continue
+
+            self._idx2label[self._class_labels.index(l)] = self._prefix + l
+
+        assert len(self._idx2label) > 0, "No labels were added to the stage"
 
     @property
     def name(self) -> str:
@@ -329,27 +347,24 @@ class AddClassificationsStage(SinglePortStage):
         """
         return (MultiResponseProbsMessage, )
 
-    def _add_labels(self, x: MultiResponseProbsMessage, idx2label: typing.Mapping[int, str]):
+    def _add_labels(self, x: MultiResponseProbsMessage):
 
-        if (x.probs.shape[1] != len(idx2label)):
+        if (x.probs.shape[1] != len(self._class_labels)):
             raise RuntimeError("Label count does not match output of model. Label count: {}, Model output: {}".format(
-                len(idx2label), x.probs.shape[1]))
+                len(self._class_labels), x.probs.shape[1]))
 
         probs_np = (x.probs > self._threshold).astype(cp.bool).get()
 
-        for i, label in idx2label.items():
+        for i, label in self._idx2label.items():
             x.set_meta(label, probs_np[:, i].tolist())
 
-        # Return list of strs to write out
+        # Return passthrough
         return x
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        assert len(self._labels) > 0, "Labels must be non-zero array"
-
         # Convert the messages to rows of strings
-        # stream = stream.async_map(self._add_labels, executor=self._pipeline.thread_pool, idx2label=self._idx2label)
-        stream = seg.make_node(self.unique_name, partial(self._add_labels, idx2label=self._idx2label))
+        stream = seg.make_node(self.unique_name, self._add_labels)
 
         seg.make_edge(input_stream[0], stream)
 
@@ -567,3 +582,79 @@ class SwitchStage(Stage):
             out_pairs.append((Stream(upstream=switch_stream), input_stream[1]))
 
         return out_pairs
+
+
+class AddScoresStage(SinglePortStage):
+    """
+    Add score labels based on probabilities calculated in inference stage. Label indexes will be looked up in
+    the Config.class_labels property.
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    labels: list, default = None
+        The list of labels to add classifications for. Each item in the list will determine its index from the
+        Config.class_labels property and must be one of the available class labels. Leave as None to add all labels in
+        the Config.class_labels property
+
+    """
+    def __init__(self, c: Config, threshold: float = 0.5, labels: typing.List[str] = None, prefix: str = ""):
+        super().__init__(c)
+
+        self._feature_length = c.feature_length
+        self._prefix = prefix
+        self._class_labels = c.class_labels
+        self._labels = labels if labels is not None else c.class_labels
+
+        # Build the Index to Label map.
+        self._idx2label = {}
+
+        for l in self._labels:
+            # All labels must be in class_labels in order to get their position
+            if (l not in self._class_labels):
+                logger.warning("The label '%s' is not in Config.class_labels and will be ignored", l)
+                continue
+
+            self._idx2label[self._class_labels.index(l)] = self._prefix + l
+
+        assert len(self._idx2label) > 0, "No labels were added to the stage"
+
+    @property
+    def name(self) -> str:
+        return "add-class"
+
+    def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple[MultiResponseProbsMessage, ]
+            Accepted input types
+
+        """
+        return (MultiResponseProbsMessage, )
+
+    def _add_labels(self, x: MultiResponseProbsMessage):
+
+        if (x.probs.shape[1] != len(self._class_labels)):
+            raise RuntimeError("Label count does not match output of model. Label count: {}, Model output: {}".format(
+                len(self._class_labels), x.probs.shape[1]))
+
+        probs_np = x.probs.get()
+
+        for i, label in self._idx2label.items():
+            x.set_meta(label, probs_np[:, i].tolist())
+
+        # Return passthrough
+        return x
+
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
+
+        # Convert the messages to rows of strings
+        stream = seg.make_node(self.unique_name, self._add_labels)
+        seg.make_edge(input_stream[0], stream)
+
+        # Return input unchanged
+        return stream, input_stream[1]
