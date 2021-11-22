@@ -28,6 +28,9 @@
     "-DMORPHEUS_USE_CLANG_TIDY=OFF", // If we are using clangd extension, disable clang-tidy in VS Code to prevent double errors
     "-DMORPHEUS_PYTHON_INPLACE_BUILD=ON", // Allow inplace build for python. Use `pip install -e .` from the python folder to install
     "-DMORPHEUS_USE_CCACHE=ON", // Enable ccache when building in vscode
+    "-DCPM_trtlab_SOURCE=/home/mdemoret/Repos/morpheus/trtlab-dev2",
+    // "--log-level=VERBOSE",
+    // "--debug-find",
   ],
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,

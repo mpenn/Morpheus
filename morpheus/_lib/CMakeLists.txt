@@ -12,15 +12,31 @@
 # the License.
 # =============================================================================
 
+# Create the utils library first
+add_library(utils SHARED
+  src/matx_functions.cu
+  src/type_utils.cu
+)
+
+target_include_directories(utils
+  PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
+target_link_libraries(utils
+  PUBLIC
+    trtlab::pyneo matx::matx cudf::cudf Python3::NumPy
+)
+
 # Cudf_helpers needs to come first
 morpheus_add_cython_libraries(./cudf_helpers.pyx
-  LINK_TARGETS cudf::cudf Python3::NumPy
+  LINK_TARGETS utils
   OUTPUT_TARGET cudf_helpers_target
 )
 
 morpheus_add_pybind11_module(./common.cpp
-  LINK_TARGETS ${cudf_helpers_target}
+  LINK_TARGETS ${cudf_helpers_target} utils
 )
 
-morpheus_add_pybind11_module(./messages.cpp LINK_TARGETS ${cudf_helpers_target})
-morpheus_add_pybind11_module(./stages.cpp LINK_TARGETS ${cudf_helpers_target} TritonClient::httpclient)
+morpheus_add_pybind11_module(./messages.cpp LINK_TARGETS ${cudf_helpers_target} utils)
+morpheus_add_pybind11_module(./stages.cpp LINK_TARGETS ${cudf_helpers_target} TritonClient::httpclient utils)

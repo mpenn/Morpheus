@@ -24,11 +24,13 @@ from functools import lru_cache
 from functools import partial
 
 import cupy as cp
+import neo
 import numpy as np
 import tritonclient.grpc as tritonclient
 from tritonclient.utils import InferenceServerException
 from tritonclient.utils import triton_to_np_dtype
 
+import morpheus._lib.stages as neos
 from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.pipeline.inference.inference_stage import InferenceStage
@@ -397,9 +399,14 @@ class TritonInferenceWorker(InferenceWorker):
                  use_shared_memory: bool = False):
         super().__init__(inf_queue)
 
+        # Combine the class defaults with any user supplied ones
+        default_mapping = type(self).default_inout_mapping()
+
+        default_mapping.update(inout_mapping if inout_mapping is not None else {})
+
         self._model_name = model_name
         self._server_url = server_url
-        self._inout_mapping = inout_mapping if inout_mapping is not None else {}
+        self._inout_mapping = default_mapping
         self._use_shared_memory = use_shared_memory
 
         self._requires_seg_ids = False
@@ -409,13 +416,26 @@ class TritonInferenceWorker(InferenceWorker):
         self._force_convert_inputs = force_convert_inputs
 
         # Whether or not the returned value needs a logits calc for the response
-        self._needs_logits = c.mode == PipelineModes.NLP
+        self._needs_logits = type(self).needs_logits()
 
         self._inputs: typing.Dict[str, TritonInOut] = {}
         self._outputs: typing.Dict[str, TritonInOut] = {}
 
         self._triton_client: tritonclient.InferenceServerClient = None
         self._mem_pool: ResourcePool = None
+
+    @classmethod
+    def supports_cpp_node(cls):
+        # Enable support by default
+        return True
+
+    @classmethod
+    def needs_logits(cls):
+        return False
+
+    @classmethod
+    def default_inout_mapping(cls) -> typing.Dict[str, str]:
+        return {}
 
     def init(self):
         """
@@ -546,16 +566,6 @@ class TritonInferenceWorker(InferenceWorker):
 
         self._mem_pool.return_obj(m)
 
-        # def tmp(mem: ResponseMemoryProbs):
-        #     # Set result on future
-        #     f.set_result(mem)
-
-        #     # Return mempool obj
-        #     self._mem_pool.return_obj(m)
-
-        # # We have to schedule a callback here to set the future result on the asyncio thread
-        # self._loop.add_callback(tmp, response_mem)
-
     def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemory], None]):
         """
         This function sends batch of events as a requests to Triton inference server using triton client API.
@@ -618,20 +628,25 @@ class TritonInferenceNLP(TritonInferenceWorker):
                  force_convert_inputs: bool,
                  use_shared_memory: bool,
                  inout_mapping: typing.Dict[str, str] = None):
-        # Some models use different names for the same thing. Set that here but allow user customization
-        default_mapping = {
-            "attention_mask": "input_mask",
-        }
-
-        default_mapping.update(inout_mapping if inout_mapping is not None else {})
-
         super().__init__(inf_queue,
                          c,
                          model_name=model_name,
                          server_url=server_url,
                          force_convert_inputs=force_convert_inputs,
                          use_shared_memory=use_shared_memory,
-                         inout_mapping=default_mapping)
+                         inout_mapping=inout_mapping)
+
+    @classmethod
+    def needs_logits(cls):
+        return True
+
+    @classmethod
+    def default_inout_mapping(cls) -> typing.Dict[str, str]:
+        # Some models use different names for the same thing. Set that here but allow user customization
+        return {
+            "attention_mask": "input_mask",
+            "output": "probs",
+        }
 
     def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
@@ -641,8 +656,8 @@ class TritonInferenceNLP(TritonInferenceWorker):
             output = {key: 1.0 / (1.0 + np.exp(-val)) for key, val in output.items()}
 
         mem = ResponseMemoryProbs(
-            count=output[list(output.keys())[0]].shape[0],
-            probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
+            count=output["probs"].shape[0],
+            probs=cp.array(output["probs"]),  # For now, only support one output
         )
 
         return mem
@@ -683,13 +698,24 @@ class TritonInferenceFIL(TritonInferenceWorker):
                          use_shared_memory=use_shared_memory,
                          inout_mapping=inout_mapping)
 
+    @classmethod
+    def default_inout_mapping(cls) -> typing.Dict[str, str]:
+        # Some models use different names for the same thing. Set that here but allow user customization
+        return {
+            "output__0": "probs",
+        }
+
     def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
         output = {output.mapped_name: result.as_numpy(output.name) for output in self._outputs.values()}
 
+        for key, val in output.items():
+            if (len(val.shape) == 1):
+                output[key] = np.expand_dims(val, 1)
+
         mem = ResponseMemoryProbs(
-            count=output[list(output.keys())[0]].shape[0],
-            probs=cp.array(output[list(output.keys())[0]]),  # For now, only support one output
+            count=output["probs"].shape[0],
+            probs=cp.array(output["probs"]),  # For now, only support one output
         )
 
         return mem
@@ -730,15 +756,22 @@ class TritonInferenceAE(TritonInferenceWorker):
                          use_shared_memory=use_shared_memory,
                          inout_mapping=inout_mapping)
 
-        import dill
+        import torch
+        from dfencoder import AutoEncoder
 
         # Save the autoencoder path
         with open(c.ae.autoencoder_path, 'rb') as in_strm:
-            self._autoencoder = dill.load(in_strm)
+            self._autoencoder = AutoEncoder()
+            self._autoencoder.load_state_dict(torch.load(in_strm))
 
             # Ensure that there is a label_smoothing property on cce. Necessary if pytorch version is different
             if (not hasattr(self._autoencoder.cce, "label_smoothing")):
                 self._autoencoder.cce.label_smoothing = 0.0
+
+    @classmethod
+    def supports_cpp_node(cls):
+        # Enable support by default
+        return False
 
     def _build_response(self, batch: MultiInferenceMessage, result: tritonclient.InferResult) -> ResponseMemoryProbs:
 
@@ -783,10 +816,12 @@ class TritonInferenceStage(InferenceStage):
         server.
     server_url : str
         Triton server URL
+    force_convert_inputs : bool
+        Instructs the stage to convert the incoming data to the same format that Triton is expecting. If set to False,
+        data will only be converted if it would not result in the loss of data.
     use_shared_memory: bool, default = False
         Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. Using CUDA IPC reduces network
         transfer time but requires that Morpheus and Triton are located on the same machine
-
     """
     def __init__(self,
                  c: Config,
@@ -805,13 +840,30 @@ class TritonInferenceStage(InferenceStage):
 
         self._requires_seg_ids = False
 
-    def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
+    def supports_cpp_node(self):
+        # Get the value from the worker class
+        return self._get_worker_class().supports_cpp_node()
 
+    def _get_worker_class(self):
         if (Config.get().mode == PipelineModes.NLP):
-            return TritonInferenceNLP(inf_queue, Config.get(), **self._kwargs)
+            return TritonInferenceNLP
         elif (Config.get().mode == PipelineModes.FIL):
-            return TritonInferenceFIL(inf_queue, Config.get(), **self._kwargs)
+            return TritonInferenceFIL
         elif (Config.get().mode == PipelineModes.AE):
-            return TritonInferenceAE(inf_queue, Config.get(), **self._kwargs)
+            return TritonInferenceAE
         else:
             raise NotImplementedError("Unknown config mode")
+
+    def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
+
+        worker_cls = self._get_worker_class()
+
+        return worker_cls(inf_queue=inf_queue, c=Config.get(), **self._kwargs)
+
+    def _get_cpp_inference_node(self, seg: neo.Segment):
+
+        return neos.InferenceClientStage(seg,
+                                         name=self.unique_name,
+                                         needs_logits=self._get_worker_class().needs_logits(),
+                                         inout_mapping=self._get_worker_class().default_inout_mapping(),
+                                         **self._kwargs)

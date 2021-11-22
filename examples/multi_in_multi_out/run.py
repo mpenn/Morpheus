@@ -28,7 +28,6 @@ from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.output.serialize import SerializeStage
 from morpheus.pipeline.output.to_file import WriteToFileStage
 from morpheus.pipeline.pipeline import SinglePortStage
-from morpheus.pipeline.pipeline import StreamFuture
 from morpheus.pipeline.pipeline import StreamPair
 from morpheus.pipeline.preprocessing import DeserializeStage
 from morpheus.pipeline.preprocessing import PreprocessNLPStage
@@ -41,14 +40,12 @@ class AddDataLenStage(SinglePortStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
-        self._use_dask = c.use_dask
-
     @property
     def name(self) -> str:
         return "add-data_len"
 
     def accepted_types(self) -> typing.Tuple:
-        return (cudf.DataFrame, StreamFuture[cudf.DataFrame])
+        return (cudf.DataFrame, )
 
     @staticmethod
     def process_dataframe(x: cudf.DataFrame):
@@ -62,12 +59,7 @@ class AddDataLenStage(SinglePortStage):
         stream = input_stream[0]
         out_type = cudf.DataFrame
 
-        if (typing_utils.issubtype(input_stream[1], StreamFuture)):
-
-            stream = stream.map(AddDataLenStage.process_dataframe)
-            out_type = StreamFuture[cudf.DataFrame]
-        else:
-            stream = stream.async_map(AddDataLenStage.process_dataframe, executor=self._pipeline.thread_pool)
+        stream = stream.async_map(AddDataLenStage.process_dataframe, executor=self._pipeline.thread_pool)
 
         return stream, out_type
 
@@ -136,7 +128,7 @@ def run():
 
     # Fork the pipeline to do two different serializations
     serial_withtime_stage = SerializeStage(c, exclude=[r'^ID$'])
-    serial_notime_stage = SerializeStage(c, exclude=[r'^ID$', r'^ts_'])
+    serial_notime_stage = SerializeStage(c, exclude=[r'^ID$', r'^_ts_'])
 
     pipeline.add_edge(monitor_stage, serial_withtime_stage)
     pipeline.add_edge(monitor_stage, serial_notime_stage)

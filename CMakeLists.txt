@@ -31,7 +31,11 @@ list(APPEND CMAKE_MESSAGE_CONTEXT "morpheus")
 
 # Use Vcpkg if variable is set. Must be done before first call to project()!
 # This will automatically install all dependencies in vcpkg.json
-if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+if(DEFINED CMAKE_TOOLCHAIN_FILE)
+  message(STATUS "Using custom toolchain file: ${CMAKE_TOOLCHAIN_FILE}")
+elseif (DEFINED ENV{CONDA_PREFIX})
+  message(STATUS "Skipping Vcpkg toolchain. Conda environment detected which takes precidence.")
+elseif(DEFINED ENV{VCPKG_ROOT})
   if(NOT EXISTS "$ENV{VCPKG_ROOT}")
     message(FATAL_ERROR "Vcpkg env 'VCPKG_ROOT' set to '$ENV{VCPKG_ROOT}' but file does not exist! Exiting...")
     return()
@@ -39,8 +43,6 @@ if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
   set(USING_VCPKG True)
   message(STATUS "Vcpkg detected, CMAKE_TOOLCHAIN_FILE set to: ${CMAKE_TOOLCHAIN_FILE}")
-else()
-  message(STATUS "Using custom toolchain file: ${CMAKE_TOOLCHAIN_FILE}")
 endif()
 enable_testing()
 
@@ -114,6 +116,10 @@ if(DEFINED ENV{CONDA_PREFIX})
     message(STATUS "No CMAKE_INSTALL_PREFIX argument detected, setting to: $ENV{CONDA_PREFIX}")
     set(CMAKE_INSTALL_PREFIX "$ENV{CONDA_PREFIX}" CACHE STRING "" FORCE)
   endif()
+
+  message(STATUS "Conda environment detected, prepending CONDA_PREFIX to CMAKE_FIND_ROOT_PATH")
+  list(PREPEND CMAKE_FIND_ROOT_PATH "$ENV{CONDA_PREFIX}")
+  list(REMOVE_DUPLICATES CMAKE_FIND_ROOT_PATH)
 endif()
 
 # Configure all dependencies

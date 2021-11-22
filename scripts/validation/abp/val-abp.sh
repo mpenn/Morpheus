@@ -4,28 +4,11 @@ set -e +o pipefail
 # set -x
 # set -v
 
-# Color variables
-b="\033[0;36m"
-g="\033[0;32m"
-r="\033[0;31m"
-e="\033[0;90m"
-y="\033[0;33m"
-x="\033[0m"
-
-# RUN OPTIONS
-# RUN_DOCKER=${RUN_DOCKER:-1}
-RUN_PYTORCH=${RUN_PYTORCH:-0}
-RUN_TRITON_XGB=${RUN_TRITON_XGB:-1}
-RUN_TRITON_TRT=${RUN_TRITON_TRT:-0}
-RUN_TENSORRT=${RUN_TENSORRT:-0}
-
-TRITON_IMAGE=${TRITON_IMAGE:-"nvcr.io/nvidia/tritonserver:21.10-py3"}
-
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-MORPHEUS_ROOT=$(realpath ${MORPHEUS_ROOT:-"${SCRIPT_DIR}/../.."})
+MORPHEUS_ROOT=$(realpath ${MORPHEUS_ROOT:-"${SCRIPT_DIR}/../../.."})
 
-INPUT_FILE=${INPUT_FILE:-"${MORPHEUS_ROOT}/data/nvsmi.jsonlines"}
-TRUTH_FILE=${TRUTH_FILE:-"${MORPHEUS_ROOT}/data/nvsmi.jsonlines"}
+ABP_INPUT_FILE=${ABP_INPUT_FILE:-"${MORPHEUS_ROOT}/models/datasets/validation-data/abp-validation-data.jsonlines"}
+ABP_TRUTH_FILE=${ABP_TRUTH_FILE:-"${MORPHEUS_ROOT}/models/datasets/validation-data/abp-validation-data.jsonlines"}
 
 # Get the ABP_MODEL from the argument. Must be 'nvsmi' for now
 ABP_TYPE=${ABP_TYPE:-$1}
@@ -39,19 +22,21 @@ MODEL_NAME="${MODEL_FILENAME%.*}"
 OUTPUT_FILE_BASE="${MORPHEUS_ROOT}/.tmp/val_${MODEL_NAME}-"
 
 # Load the utility scripts
-source ${SCRIPT_DIR}/val-utils.sh
-source ${SCRIPT_DIR}/val-run-pipeline.sh
+source ${SCRIPT_DIR}/../val-run-pipeline.sh
 
 if [[ "${RUN_PYTORCH}" = "1" ]]; then
    OUTPUT_FILE="${OUTPUT_FILE_BASE}pytorch.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}pytorch-results.json"
 
    run_pipeline_nlp_${SID_TYPE} \
       "${PCAP_INPUT_FILE}" \
       "inf-pytorch --model_filename=${MODEL_PYTORCH_FILE}" \
-      "${OUTPUT_FILE}"
+      "${OUTPUT_FILE}" \
+      "${ABP_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   PYTORCH_ERROR="${b}$(calc_error ${PCAP_TRUTH_FILE} ${OUTPUT_FILE})"
+   PYTORCH_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 else
    PYTORCH_ERROR="${y}Skipped"
 fi
@@ -61,14 +46,17 @@ if [[ "${RUN_TRITON_XGB}" = "1" ]]; then
    load_triton_model "abp-${ABP_TYPE}-xgb"
 
    OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-xgb.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-onnx-results.json"
 
    run_pipeline_abp_${ABP_TYPE} \
-      "${INPUT_FILE}" \
+      "${ABP_INPUT_FILE}" \
       "inf-triton --model_name=abp-${ABP_TYPE}-xgb --server_url=localhost:8001 --force_convert_inputs=True" \
-      "${OUTPUT_FILE}"
+      "${OUTPUT_FILE}" \
+      "${ABP_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   TRITON_XGB_ERROR="${b}$(calc_error ${TRUTH_FILE} ${OUTPUT_FILE})"
+   TRITON_XGB_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 else
    TRITON_XGB_ERROR="${y}Skipped"
 fi
@@ -77,14 +65,17 @@ if [[ "${RUN_TRITON_TRT}" = "1" ]]; then
    load_triton_model "sid-${SID_TYPE}-trt"
 
    OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-trt.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-trt-results.json"
 
-   run_pipeline_nlp_${SID_TYPE} \
+   run_pipeline_abp_${SID_TYPE} \
       "${PCAP_INPUT_FILE}" \
       "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=localhost:8001 --force_convert_inputs=True" \
-      "${OUTPUT_FILE}"
+      "${OUTPUT_FILE}" \
+      "${ABP_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   TRITON_TRT_ERROR="${b}$(calc_error ${PCAP_TRUTH_FILE} ${OUTPUT_FILE})"
+   TRITON_TRT_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 else
    TRITON_TRT_ERROR="${y}Skipped"
 fi
@@ -101,14 +92,17 @@ if [[ "${RUN_TENSORRT}" = "1" ]]; then
    load_triton_model "sid-${SID_TYPE}-trt"
 
    OUTPUT_FILE="${OUTPUT_FILE_BASE}tensorrt.csv"
+   VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}tensorrt-results.json"
 
-   run_pipeline_nlp_${SID_TYPE} \
+   run_pipeline_abp_${SID_TYPE} \
       "${PCAP_INPUT_FILE}" \
       "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=localhost:8001 --force_convert_inputs=True" \
-      "${OUTPUT_FILE}"
+      "${OUTPUT_FILE}" \
+      "${ABP_TRUTH_FILE}" \
+      "${VAL_OUTPUT_FILE}"
 
    # Get the diff
-   TRITON_TRT_ERROR="${b}$(calc_error ${PCAP_TRUTH_FILE} ${OUTPUT_FILE})"
+   TRITON_TRT_ERROR="${b}$(calc_error_val ${VAL_OUTPUT_FILE})"
 
 else
    TENSORRT_ERROR="${y}Skipped"

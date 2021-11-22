@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
+#include <cudf/types.hpp>
 #include <memory>
+#include <rmm/device_uvector.hpp>
 #include <string>
 #include <vector>
 
@@ -10,24 +13,26 @@
 #include <trtlab/neo/core/tensor.hpp>
 #include "pyneo/node.hpp"
 
+#include "morpheus/matx_functions.hpp"
+#include "morpheus/type_utils.hpp"
+
 namespace morpheus {
 
-namespace neo = trtlab::neo;
-namespace py  = pybind11;
+namespace neo   = trtlab::neo;
+namespace py    = pybind11;
+namespace pyneo = trtlab::neo::pyneo;
 
 class RMMTensor : public neo::ITensor
 {
   public:
     RMMTensor(std::shared_ptr<rmm::device_buffer> device_buffer,
               size_t offset,
-              std::string typestr,
-              size_t dtype_size,
+              DType dtype,
               std::vector<neo::TensorIndex> shape,
               std::vector<neo::TensorIndex> stride = {}) :
       m_md(std::move(device_buffer)),
       m_offset(offset),
-      m_typestr(std::move(typestr)),
-      m_dtype_size(dtype_size),
+      m_dtype(std::move(dtype)),
       m_shape(std::move(shape)),
       m_stride(std::move(stride))
     {
@@ -35,6 +40,9 @@ class RMMTensor : public neo::ITensor
         {
             trtlab::neo::detail::validate_stride(this->m_shape, this->m_stride);
         }
+
+        DCHECK(m_offset + this->bytes() <= m_md->size())
+            << "Inconsistent tensor. Tensor values would extend past the end of the device_buffer";
     }
     ~RMMTensor() = default;
 
@@ -45,7 +53,7 @@ class RMMTensor : public neo::ITensor
 
     void* data() const override
     {
-        return static_cast<uint8_t*>(m_md->data()) + m_offset;
+        return static_cast<uint8_t*>(m_md->data()) + this->offset_bytes();
     }
 
     neo::RankType rank() const final
@@ -53,14 +61,9 @@ class RMMTensor : public neo::ITensor
         return m_shape.size();
     }
 
-    std::size_t dtype_size() const final
+    trtlab::neo::DataType dtype() const override
     {
-        return m_dtype_size;
-    }
-
-    std::string typestr() const override
-    {
-        return m_typestr;
+        return m_dtype;
     }
 
     std::size_t count() const final
@@ -70,7 +73,7 @@ class RMMTensor : public neo::ITensor
 
     std::size_t bytes() const final
     {
-        return count() * dtype_size();
+        return count() * m_dtype.item_size();
     }
 
     neo::TensorIndex shape(std::uint32_t idx) const final
@@ -125,12 +128,12 @@ class RMMTensor : public neo::ITensor
 
         // Stride remains the same
 
-        return std::make_shared<RMMTensor>(m_md, offset, m_typestr, m_dtype_size, shape, m_stride);
+        return std::make_shared<RMMTensor>(m_md, offset, m_dtype, shape, m_stride);
     }
 
     std::shared_ptr<neo::ITensor> reshape(const std::vector<neo::TensorIndex>& dims) const override
     {
-        return std::make_shared<RMMTensor>(m_md, 0, m_typestr, m_dtype_size, dims, m_stride);
+        return std::make_shared<RMMTensor>(m_md, 0, m_dtype, dims, m_stride);
     }
 
     std::shared_ptr<neo::ITensor> deep_copy() const override
@@ -139,7 +142,7 @@ class RMMTensor : public neo::ITensor
         std::shared_ptr<rmm::device_buffer> copied_buffer =
             std::make_shared<rmm::device_buffer>(*m_md, m_md->stream(), m_md->memory_resource());
 
-        return std::make_shared<RMMTensor>(copied_buffer, m_offset, m_typestr, m_dtype_size, m_shape, m_stride);
+        return std::make_shared<RMMTensor>(copied_buffer, m_offset, m_dtype, m_shape, m_stride);
     }
 
     // Tensor reshape(std::vector<neo::TensorIndex> shape)
@@ -148,15 +151,35 @@ class RMMTensor : public neo::ITensor
     //     return Tensor(descriptor_shared(), dtype_size(), shape);
     // }
 
+    std::shared_ptr<ITensor> as_type(neo::DataType dtype) const override
+    {
+        DType new_dtype(dtype.type_id());
+
+        auto input_type  = m_dtype.type_id();
+        auto output_type = new_dtype.type_id();
+
+        // Now do the conversion
+        auto new_data_buffer = cast(DevMemInfo{this->count(), input_type, m_md, this->offset_bytes()}, output_type);
+
+        // Return the new type
+        return std::make_shared<RMMTensor>(new_data_buffer, 0, new_dtype, m_shape, m_stride);
+    }
+
   protected:
   private:
+    size_t offset_bytes() const
+    {
+        return m_offset * m_dtype.item_size();
+    }
+
     // Memory info
     std::shared_ptr<rmm::device_buffer> m_md;
     size_t m_offset;
 
-    // Type info
-    std::string m_typestr;
-    std::size_t m_dtype_size;
+    // // Type info
+    // std::string m_typestr;
+    // std::size_t m_dtype_size;
+    DType m_dtype;
 
     // Shape info
     std::vector<neo::TensorIndex> m_shape;
@@ -199,7 +222,7 @@ class Tensor
 
         out_data.resize(this->bytes_count());
 
-        cudaMemcpy(&out_data[0], this->data(), this->bytes_count(), cudaMemcpyDeviceToHost);
+        NEO_CHECK_CUDA(cudaMemcpy(&out_data[0], this->data(), this->bytes_count(), cudaMemcpyDeviceToHost));
 
         return out_data;
     }
@@ -210,19 +233,14 @@ class Tensor
     }
 
     static neo::TensorObject create(std::shared_ptr<rmm::device_buffer> buffer,
-                                    std::string init_typestr,
-                                    std::vector<neo::TensorIndex> init_shape,
-                                    std::vector<neo::TensorIndex> init_strides,
-                                    size_t init_offset = 0)
+                                    DType dtype,
+                                    std::vector<neo::TensorIndex> shape,
+                                    std::vector<neo::TensorIndex> strides,
+                                    size_t offset = 0)
     {
         auto md = nullptr;
 
-        auto tensor = std::make_shared<RMMTensor>(buffer,
-                                                  init_offset,
-                                                  std::string(1, init_typestr[1]),
-                                                  std::stoi(std::string(1, init_typestr[2])),
-                                                  init_shape,
-                                                  init_strides);
+        auto tensor = std::make_shared<RMMTensor>(buffer, offset, dtype, shape, strides);
 
         return neo::TensorObject(md, tensor);
     }
@@ -235,12 +253,39 @@ class Tensor
 // Before using this, cupy must be loaded into the module with `pyneo::import(m, "cupy")`
 py::object tensor_to_cupy(const neo::TensorObject& tensor, const py::module_& mod)
 {
-    // Get the cupy creation function
-    auto array = mod.attr("cupy").attr("array");
-    // Cast to a py::object
+    // These steps follow the cupy._convert_object_with_cuda_array_interface function shown here:
+    // https://github.com/cupy/cupy/blob/a5b24f91d4d77fa03e6a4dd2ac954ff9a04e21f4/cupy/core/core.pyx#L2478-L2514
+    auto cp      = mod.attr("cupy");
+    auto cuda    = cp.attr("cuda");
+    auto ndarray = cp.attr("ndarray");
+
     auto py_tensor = py::cast(tensor);
 
-    return array(py_tensor);
+    auto ptr    = (uintptr_t)tensor.data();
+    auto nbytes = tensor.bytes();
+    auto owner  = py_tensor;
+    int dev_id  = -1;
+
+    py::list shape_list;
+    py::list stride_list;
+
+    for (auto& idx : tensor.get_shape())
+    {
+        shape_list.append(idx);
+    }
+
+    for (auto& idx : tensor.get_stride())
+    {
+        stride_list.append(idx * tensor.dtype_size());
+    }
+
+    py::object mem    = cuda.attr("UnownedMemory")(ptr, nbytes, owner, dev_id);
+    py::object dtype  = cp.attr("dtype")(tensor.get_numpy_typestr());
+    py::object memptr = cuda.attr("MemoryPointer")(mem, 0);
+
+    // TODO(MDD): Sync on stream
+
+    return ndarray(py::cast<py::tuple>(shape_list), dtype, memptr, py::cast<py::tuple>(stride_list));
 }
 
 neo::TensorObject cupy_to_tensor(py::object cupy_array)
@@ -272,7 +317,7 @@ neo::TensorObject cupy_to_tensor(py::object cupy_array)
 
     auto tensor =
         Tensor::create(std::make_shared<rmm::device_buffer>((void const*)data_ptr, size, rmm::cuda_stream_per_thread),
-                       typestr,
+                       DType::from_numpy(typestr),
                        shape,
                        strides,
                        0);

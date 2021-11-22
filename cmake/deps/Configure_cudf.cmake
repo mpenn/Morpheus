@@ -33,7 +33,7 @@ function(find_and_configure_cudf version)
       GIT_TAG         branch-${CUDF_VERSION}
       GIT_SHALLOW     TRUE
       SOURCE_SUBDIR   cpp
-      PATCH_COMMAND   git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/cudf.patch
+      PATCH_COMMAND   git checkout -- . && git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/cudf.patch
       OPTIONS         "CUDF_ENABLE_ARROW_S3 OFF"
                       "PER_THREAD_DEFAULT_STREAM ON"
                       "BUILD_TESTS OFF"

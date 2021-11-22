@@ -5,11 +5,13 @@ import typing
 from collections import deque
 
 import cupy as cp
+import neo
 import pandas as pd
 from streamz.core import Stream
 from streamz.core import sync
 
 from morpheus.config import Config
+from morpheus.pipeline.messages import MultiResponseAEMessage
 from morpheus.pipeline.messages import MultiResponseMessage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
@@ -240,42 +242,17 @@ class TimeSeriesAction:
     message: MultiResponseMessage = None
 
 
-class TimeSeriesStage(SinglePortStage):
-    """
-    Perform time series anomaly detection and add prediction. Uses default resolution of
-    "hour".
-
-    Parameters
-    ----------
-    c : morpheus.config.Config
-        Pipeline configuration instance
-    resolution : str
-        Time series resolution. Logs will be binned into groups of this size. Uses the pandas time delta format, i.e.
-        '10m' for 10 minutes
-    min_window : str
-        Minimum window on either side of a log necessary for calculation. Logs will be skipped during a warmup phase
-        while this window is filled. Uses the pandas time delta format, i.e. '10m' for 10 minutes
-    hot_start : bool, default = False
-        This flag prevents the stage from ignoring messages during a warm up phase while the min_window is filled.
-        Enabling 'hot_start' will run calculations on all messages even if the min_window is not satisfied on both
-        sides, i.e. during startup or teardown. This is likely to increase the number of false positives but can be
-        helpful for debugging and testing on small datasets.
-    filter_percent : float, default = 90
-        The percent of timeseries samples to remove from the inverse FFT for spectral density filtering.
-    zscore_threshold : float, default = 8.0
-        The z-score threshold required to flag datapoints. The value indicates the number of standard deviations from
-        the mean that is required to be flagged. Increasing this value will decrease the number of detections.
-    """
+class UserTimeSeries(object):
     def __init__(self,
-                 c: Config,
+                 user_id: str,
                  resolution: str,
                  min_window: str,
                  hot_start: bool,
                  filter_percent: float,
-                 zscore_threshold: float):
-        super().__init__(c)
+                 zscore_threshold: float) -> None:
+        super().__init__()
 
-        self._feature_length = c.feature_length
+        self._user_id = user_id
 
         # Size of bins
         self._resolution_sec = pd.Timedelta(resolution).total_seconds()
@@ -296,22 +273,6 @@ class TimeSeriesStage(SinglePortStage):
         # Stateful members
         self._pending_messages: deque[MultiResponseMessage] = deque()  # Holds the existing messages pending
         self._timeseries_data: pd.DataFrame = pd.DataFrame(columns=["event_dt"])  # Holds all available timeseries data
-
-    @property
-    def name(self) -> str:
-        return "timeseries"
-
-    def accepted_types(self) -> typing.Tuple:
-        """
-        Accepted input types for this stage are returned.
-
-        Returns
-        -------
-        typing.Tuple[MultiResponseMessage, ]
-            Accepted input types
-
-        """
-        return (MultiResponseMessage, )
 
     def _calc_outliers(self, action: TimeSeriesAction):
 
@@ -334,13 +295,10 @@ class TimeSeriesStage(SinglePortStage):
 
         is_anomaly = fftAD(signal_cp, p=self._filter_percent, zt=self._zscore_threshold)
 
-        # Start by setting them all to false
-        action.message.set_meta("is_anomaly", False)
-
         if (len(is_anomaly) > 0):
             anomalies = (elapsed_seconds // self._resolution_sec).astype(int).isin(is_anomaly.get())
 
-            action.message.set_meta("is_anomaly", anomalies)
+            action.message.set_meta("ts_anomaly", anomalies)
 
             logger.debug("Found anomalies: %s",
                          window_start + pd.to_timedelta((cp.choose(is_anomaly, signal_bins)).get(), unit='s'))
@@ -438,6 +396,9 @@ class TimeSeriesStage(SinglePortStage):
             # Save the new max index
             self._processed_index = self._timeseries_data.index[-1] + 1
 
+            # Ensure that we have the meta column set for all messages
+            x.set_meta("ts_anomaly", False)
+
         # At this point there are 3 things that can happen
         # 1. We are warming up to build a front buffer. Save the current message times and send the message on
         # 2. We are warmed up and building a back buffer, Save the current message, and message times. Hold the message
@@ -458,12 +419,115 @@ class TimeSeriesStage(SinglePortStage):
 
         return output_messages
 
-    def _build_single(self, input_stream: StreamPair) -> StreamPair:
+
+class TimeSeriesStage(SinglePortStage):
+    """
+    Perform time series anomaly detection and add prediction. Uses default resolution of
+    "hour".
+
+    Parameters
+    ----------
+    c : morpheus.config.Config
+        Pipeline configuration instance
+    resolution : str
+        Time series resolution. Logs will be binned into groups of this size. Uses the pandas time delta format, i.e.
+        '10m' for 10 minutes
+    min_window : str
+        Minimum window on either side of a log necessary for calculation. Logs will be skipped during a warmup phase
+        while this window is filled. Uses the pandas time delta format, i.e. '10m' for 10 minutes
+    hot_start : bool, default = False
+        This flag prevents the stage from ignoring messages during a warm up phase while the min_window is filled.
+        Enabling 'hot_start' will run calculations on all messages even if the min_window is not satisfied on both
+        sides, i.e. during startup or teardown. This is likely to increase the number of false positives but can be
+        helpful for debugging and testing on small datasets.
+    filter_percent : float, default = 90
+        The percent of timeseries samples to remove from the inverse FFT for spectral density filtering.
+    zscore_threshold : float, default = 8.0
+        The z-score threshold required to flag datapoints. The value indicates the number of standard deviations from
+        the mean that is required to be flagged. Increasing this value will decrease the number of detections.
+    """
+    def __init__(self,
+                 c: Config,
+                 resolution: str,
+                 min_window: str,
+                 hot_start: bool,
+                 filter_percent: float,
+                 zscore_threshold: float):
+        super().__init__(c)
+
+        self._feature_length = c.feature_length
+
+        self._resolution = resolution
+        self._min_window = min_window
+        self._hot_start = hot_start
+        self._filter_percent = filter_percent
+        self._zscore_threshold = zscore_threshold
+
+        self._timeseries_per_user: typing.Dict[str, UserTimeSeries] = {}
+
+    @property
+    def name(self) -> str:
+        return "timeseries"
+
+    def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple[MultiResponseMessage, ]
+            Accepted input types
+
+        """
+        return (MultiResponseMessage, )
+
+    def _call_timeseries_user(self, x: MultiResponseAEMessage):
+
+        if (x.user_id not in self._timeseries_per_user):
+            self._timeseries_per_user[x.user_id] = UserTimeSeries(user_id=x.user_id,
+                                                                  resolution=self._resolution,
+                                                                  min_window=self._min_window,
+                                                                  hot_start=self._hot_start,
+                                                                  filter_percent=self._filter_percent,
+                                                                  zscore_threshold=self._zscore_threshold)
+
+        return self._timeseries_per_user[x.user_id]._calc_timeseries(x, False)
+
+    def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
+        out_type = input_stream[1]
 
-        # Perform the time series calculation only on a single thread since we have state
-        stream = stream.variable_send(self._calc_timeseries)
+        def node_fn(input: neo.Observable, output: neo.Subscriber):
+            def obs_on_next(x: MultiResponseAEMessage):
 
-        # Return input unchanged
-        return stream, MultiResponseMessage
+                message_list: typing.List[MultiResponseMessage] = self._call_timeseries_user(x)
+
+                for y in message_list:
+
+                    output.on_next(y)
+
+            def obs_on_error(x):
+                output.on_error(x)
+
+            def obs_on_completed():
+
+                for ts in self._timeseries_per_user.values():
+                    message_list: typing.List[MultiResponseMessage] = ts._calc_timeseries(None, True)
+
+                    for y in message_list:
+
+                        output.on_next(y)
+
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+        stream = seg.make_node_full(self.unique_name, node_fn)
+
+        seg.make_edge(input_stream[0], stream)
+
+        stream = input_stream[0]
+        return stream, out_type

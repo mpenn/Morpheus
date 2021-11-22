@@ -14,7 +14,6 @@
 
 import logging
 import typing
-from functools import partial
 from functools import reduce
 
 import cupy as cp
@@ -29,9 +28,7 @@ from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.messages import MultiResponseProbsMessage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
-from morpheus.utils.type_utils import greatest_ancestor
-from morpheus.utils.type_utils import unpack_tuple
-from morpheus.utils.type_utils import unpack_union
+from morpheus.utils.logging import deprecated_stage_warning
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +67,10 @@ class BufferStage(SinglePortStage):
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        return input_stream[0].buffer(self._buffer_count), input_stream[1]
+        # This stage is no longer needed and is just a pass thru stage
+        deprecated_stage_warning(logger, type(self), self.unique_name)
+
+        return input_stream
 
 
 class DelayStage(SinglePortStage):
@@ -107,7 +107,10 @@ class DelayStage(SinglePortStage):
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        return input_stream[0].time_delay(self._duration), input_stream[1]
+        # This stage is no longer needed and is just a pass thru stage
+        deprecated_stage_warning(logger, type(self), self.unique_name)
+
+        return input_stream
 
 
 class TriggerStage(SinglePortStage):
@@ -142,18 +145,34 @@ class TriggerStage(SinglePortStage):
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        stream = input_stream[0]
+        # Store all messages until on_complete is called and then push them
+        def node_fn(input: neo.Observable, output: neo.Subscriber):
 
-        collector = stream.collect()
+            delayed_messages = []
 
-        def flush_input(_: Stream):
-            collector.flush()
+            def obs_on_next(x):
 
-        stream.add_done_callback(flush_input)
+                delayed_messages.append(x)
 
-        stream = collector.flatten()
+            def obs_on_error(x):
+                output.on_error(x)
 
-        return stream, input_stream[1]
+            def obs_on_completed():
+
+                # Now push all the messages
+                for x in delayed_messages:
+                    output.on_next(x)
+
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+        node = seg.make_node_full(self.unique_name, node_fn)
+        seg.make_edge(input_stream[0])
+
+        return node, input_stream[1]
 
 
 class MonitorStage(SinglePortStage):
@@ -225,29 +244,23 @@ class MonitorStage(SinglePortStage):
 
         self._progress.reset()
 
-    async def stop(self):
+    def stop(self):
         if (self._progress is not None):
             self._progress.refresh()
             self._progress.close()
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
-
-        # Add the progress sink to the current stream. Use a gather here just in case its a Dask stream
-        # input_stream[0].gather().sink(self._progress_sink)
-        # stream = seg.make_node(self.unique_name, self._progress_sink)
-
         def sink_on_error(x):
-            print("Got error: {}".format(x))
+            logger.error("Node: '%s' received error: %s", self.unique_name, x)
 
         def sink_on_completed():
-            print("Got completed")
+            # Refresh and close
+            self._progress.refresh()
+            self._progress.close()
 
-        stream = seg.make_sink("my_sink", self._progress_sink, sink_on_error, sink_on_completed)
+        stream = seg.make_sink(self.unique_name, self._progress_sink, sink_on_error, sink_on_completed)
 
         seg.make_edge(input_stream[0], stream)
-
-        # Call on_start because we must be creating here
-        self.on_start()
 
         return input_stream
 
@@ -307,6 +320,8 @@ class AddClassificationsStage(SinglePortStage):
         The list of labels to add classifications for. Each item in the list will determine its index from the
         Config.class_labels property and must be one of the available class labels. Leave as None to add all labels in
         the Config.class_labels property
+    prefix: str, default = ""
+        A prefix to append to each label.
 
     """
     def __init__(self, c: Config, threshold: float = 0.5, labels: typing.List[str] = None, prefix: str = ""):
@@ -316,7 +331,7 @@ class AddClassificationsStage(SinglePortStage):
         self._threshold = threshold
         self._prefix = prefix
         self._class_labels = c.class_labels
-        self._labels = labels if labels is not None else c.class_labels
+        self._labels = labels if labels is not None and len(labels) > 0 else c.class_labels
 
         # Build the Index to Label map.
         self._idx2label = {}
@@ -453,17 +468,12 @@ class FilterDetectionsStage(SinglePortStage):
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        # stream = input_stream[0]
-
         # Reduce messages to only have detections
-        # stream = stream.async_map(self.filter, executor=self._pipeline.thread_pool)
         stream = seg.make_node(self.unique_name, self.filter)
 
         seg.make_edge(input_stream[0], stream)
 
-        # # Convert list back to single MultiResponseProbsMessage
-        # stream = stream.flatten()
-        # out_stream = out_stream.flatten()
+        # Convert list back to single MultiResponseProbsMessage
         def flatten_fn(input: neo.Observable, output: neo.Subscriber):
             def obs_on_next(x: typing.List):
 
@@ -484,9 +494,6 @@ class FilterDetectionsStage(SinglePortStage):
         seg.make_edge(stream, flattened)
         stream = flattened
 
-        # # Filter out empty message groups
-        # stream = stream.filter(lambda x: x.count > 0)
-
         return stream, MultiResponseProbsMessage
 
 
@@ -503,23 +510,8 @@ class ZipStage(Stage):
 
     def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        # Check for compatible types
-        stream_types = [s_type for s, s_type in in_ports_streams[1:]]
-
-        # Find greatest_ancestor
-        out_type = greatest_ancestor(*stream_types)
-
-        if (out_type is None):
-            out_type = unpack_union(*stream_types)
-
-        # Build off first stream
-        first_pair = in_ports_streams[0]
-
-        first_stream = first_pair[0]
-
-        stream = first_stream.zip([s for s, _ in in_ports_streams[1:]])
-
-        return [(stream, out_type)]
+        raise NotImplementedError(("The ZipStage has been deprecated and is not longer supported. "
+                                   "Non-linear pipelines will be added in a future release"))
 
 
 class MergeStage(Stage):
@@ -535,19 +527,8 @@ class MergeStage(Stage):
 
     def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        # Check for compatible types
-        stream_types = [s_type for s, s_type in in_ports_streams]
-
-        # Find greatest_ancestor
-        out_type = greatest_ancestor(*stream_types)
-
-        if (out_type is None):
-            out_type = unpack_tuple(*stream_types)
-
-        # stream = streamz.union(*[s for s, _ in in_ports_streams])
-        raise NotImplementedError("Still using streamz")
-
-        return [(stream, out_type)]
+        raise NotImplementedError(("The MergeStage has been deprecated and is not longer supported. "
+                                   "Non-linear pipelines will be added in a future release"))
 
 
 class SwitchStage(Stage):
@@ -568,20 +549,8 @@ class SwitchStage(Stage):
 
     def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
-        # Since we are a SiSo stage, there will only be 1 input
-        input_stream = in_ports_streams[0]
-
-        stream = input_stream[0]
-
-        # Filter out empty message groups
-        switch_stream = stream.switch(self._predicate)
-
-        out_pairs = []
-
-        for _ in range(self._num_outputs):
-            out_pairs.append((Stream(upstream=switch_stream), input_stream[1]))
-
-        return out_pairs
+        raise NotImplementedError(("The SwitchStage has been deprecated and is not longer supported. "
+                                   "Non-linear pipelines will be added in a future release"))
 
 
 class AddScoresStage(SinglePortStage):
@@ -597,15 +566,17 @@ class AddScoresStage(SinglePortStage):
         The list of labels to add classifications for. Each item in the list will determine its index from the
         Config.class_labels property and must be one of the available class labels. Leave as None to add all labels in
         the Config.class_labels property
+    prefix: str, default = ""
+        A prefix to append to each label.
 
     """
-    def __init__(self, c: Config, threshold: float = 0.5, labels: typing.List[str] = None, prefix: str = ""):
+    def __init__(self, c: Config, labels: typing.List[str] = None, prefix: str = ""):
         super().__init__(c)
 
         self._feature_length = c.feature_length
         self._prefix = prefix
         self._class_labels = c.class_labels
-        self._labels = labels if labels is not None else c.class_labels
+        self._labels = labels if labels is not None and len(labels) > 0 else c.class_labels
 
         # Build the Index to Label map.
         self._idx2label = {}
