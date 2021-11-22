@@ -17,7 +17,7 @@ if [[ -z "${SSH_AUTH_SOCK}" ]]; then
    echo -e "${y}No ssh-agent auth socket found. Dependencies in private git repos may fail during build.${x}"
 else
    echo -e "${b}Setting up ssh-agent auth socket${x}"
-   DOCKER_ARGS="${DOCKER_ARGS} -v ${SSH_AUTH_SOCK}:/ssh-agent:ro -e SSH_AUTH_SOCK=/ssh-agent"
+   DOCKER_ARGS="${DOCKER_ARGS} -v $(readlink -f $SSH_AUTH_SOCK):/ssh-agent:ro -e SSH_AUTH_SOCK=/ssh-agent"
 fi
 
 echo -e "${g}Launching ${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_TAG}...${x}"
