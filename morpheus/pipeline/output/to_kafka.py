@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import time
 import typing
 
-import typing_utils
+import confluent_kafka as ck
 import neo
 
 from morpheus.config import Config
@@ -42,6 +43,8 @@ class WriteToKafkaStage(SinglePortStage):
         self._kafka_conf = {'bootstrap.servers': bootstrap_servers}
 
         self._output_topic = output_topic
+        self._poll_time = 0.2
+        self._max_concurrent = c.num_threads
 
     @property
     def name(self) -> str:
@@ -65,14 +68,66 @@ class WriteToKafkaStage(SinglePortStage):
         stream = input_stream[0]
         input_type = input_stream[1]
 
-        # Gather just in case we are using dask
-        stream = stream.gather()
+        def node_fn(input: neo.Observable, output: neo.Subscriber):
 
-        if (typing_utils.issubtype(input_type, typing.Iterable)):
-            stream = stream.flatten()
+            producer = ck.Producer(self._kafka_conf)
+
+            outstanding_requests = 0
+
+            def obs_on_next(x: typing.List[str]):
+                nonlocal outstanding_requests
+
+                futures = []
+
+                def cb(err, msg):
+                    if msg is not None and msg.value() is not None:
+                        # fut.set_result(None)
+                        pass
+                    else:
+                        # fut.set_exception(err or msg.error())
+                        output.on_error(msg.error())
+
+                for m in x:
+
+                    # Push all of the messages
+                    while True:
+                        try:
+                            # this runs asynchronously, in C-K's thread
+                            producer.produce(self._output_topic, m, callback=cb)
+                            break
+                        except BufferError:
+                            time.sleep(self._poll_time)
+                        except Exception as e:
+                            output.on_error(e)
+                            return
+                        finally:
+                            # Try and process some
+                            producer.poll(0)
+
+                while len(producer) > 0:
+                    producer.poll(0)
+
+                output.on_next(x)
+
+            def obs_on_error(x):
+                output.on_error(x)
+
+            def obs_on_completed():
+
+                producer.flush(-1)
+
+                output.on_completed()
+
+            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
+
+            input.subscribe(obs)
+
+            assert outstanding_requests == 0, "Not all inference requests were completed"
 
         # Write to kafka
-        stream = stream.to_kafka(self._output_topic, self._kafka_conf)
+        node = seg.make_node_full(self.unique_name, node_fn)
+        seg.make_edge(stream, node)
+        # node.concurrency = self._max_concurrent
 
         # Return input unchanged
         return input_stream

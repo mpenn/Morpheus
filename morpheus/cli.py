@@ -262,7 +262,7 @@ def run(ctx: click.Context, **kwargs):
                          "to run the pipeline with multiple processes using dask"),
              cls=AliasedGroup,
              **command_kwargs)
-@prepare_command(Config.get().dask)
+@prepare_command()
 def dask(ctx: click.Context, **kwargs):
 
     click.echo(click.style("Dask support has been deprecated and is no longer supported", fg="red"))
@@ -1022,6 +1022,11 @@ def filter(ctx: click.Context, **kwargs):
               required=True,
               help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
                     "Resulting ignored columns is the intersection of all regex. Include applied before exclude"))
+@click.option('--output_type',
+              type=click.Choice(["pandas", "cudf", "json", "csv"], case_sensitive=False),
+              default="pandas",
+              help=("Indicates the format to serialize the message in. Most output stages can handle the default type. "
+                    "Use 'json' for kafka outputs."))
 @prepare_command(False)
 def serialize(ctx: click.Context, **kwargs):
 

@@ -101,6 +101,9 @@ class SerializeStage(SinglePortStage):
         # Get metadata from columns
         df = x.get_meta(columns)
 
+        if (isinstance(df, cudf.DataFrame)):
+            df = df.to_pandas()
+
         # def double_serialize(y: str):
         #     try:
         #         return json.dumps(json.dumps(json.loads(y)))

@@ -76,7 +76,7 @@ COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environmen
 
 RUN /opt/conda/bin/mamba env create -n morpheus --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
     # Install only the dependencies for cudf. Need to build cudf manually
-  /opt/conda/bin/mamba install -y -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER} &&\
+    /opt/conda/bin/mamba install -y -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER} custreamz=${RAPIDS_VER} cudf_kafka=${RAPIDS_VER} libcudf_kafka=${RAPIDS_VER} &&\
     # Clean and activate
     conda clean -afy && \
     sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc
@@ -126,7 +126,7 @@ RUN git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf
     cd ${CUDF_DIR} &&\
     git apply --whitespace=fix /workspace/cmake/deps/patches/cudf.patch &&\
     source activate morpheus &&\
-    ./build.sh --ptds libcudf cudf &&\
+    ./build.sh --ptds libcudf cudf libcudf_kafka cudf_kafka custreamz &&\
     cd -
 
 FROM cudf_build as build
