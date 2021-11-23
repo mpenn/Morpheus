@@ -28,7 +28,7 @@ DOCKER_ARGS="${DOCKER_ARGS} --network=host"
 
 if [[ "${DOCKER_BUILDKIT}" = "1" ]]; then
    # If using BUILDKIT, add the necessary args to pull private containers
-   DOCKER_ARGS="${DOCKER_ARGS} --ssh default --add-host gitlab-master.nvidia.com:$(dig +short gitlab-master.nvidia.com | tail -1)"
+   DOCKER_ARGS="${DOCKER_ARGS} --ssh default --add-host gitlab-master.nvidia.com:$(dig +short gitlab-master.nvidia.com | tail -1) --load"
 fi
 
 # Last add any extra args (duplicates override earlier ones)
@@ -48,4 +48,4 @@ echo "   TENSORRT_VERSION: ${TENSORRT_VERSION}"
 echo ""
 echo "   COMMAND: docker build ${DOCKER_ARGS} -f docker/Dockerfile ."
 
-docker build ${DOCKER_ARGS} -f docker/Dockerfile .
+docker buildx build ${DOCKER_ARGS} -f docker/Dockerfile .
