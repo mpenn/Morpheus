@@ -18,6 +18,8 @@ import typing
 import cupy as cp
 import pandas as pd
 
+import cudf
+
 from morpheus.config import Config
 
 
@@ -143,11 +145,16 @@ class MultiMessage(MessageData):
 
         """
 
+        idx = self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count]
+
+        if (isinstance(idx, cudf.RangeIndex)):
+            idx = slice(idx.start, idx.stop, idx.step)
+
         if (columns is None):
-            return self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], :]
+            return self.meta.df.loc[idx, :]
         else:
             # If its a str or list, this is the same
-            return self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns]
+            return self.meta.df.loc[idx, columns]
 
     def get_meta_list(self, col_name: str = None):
         """

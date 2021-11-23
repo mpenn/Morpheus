@@ -727,8 +727,6 @@ class Pipeline():
 
         self.batch_size = c.pipeline_batch_size
 
-        self._use_dask = c.use_dask
-
         self._graph = networkx.DiGraph()
 
         self._is_built = False
