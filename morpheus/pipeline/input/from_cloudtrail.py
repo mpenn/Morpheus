@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class CloudTrailSourceStage(SingleOutputSource):
     """
-    Source stage ised to load messages from a file and dumping the contents into the pipeline immediately. Useful for
+    Source stage is used to load messages from a file and dumping the contents into the pipeline immediately. Useful for
     testing performance and accuracy of a pipeline.
 
     Parameters
@@ -45,7 +45,7 @@ class CloudTrailSourceStage(SingleOutputSource):
     c : morpheus.config.Config
         Pipeline configuration instance.
     input_glob : str
-        Input glob pattern to match files to read. For example, './input_dir/*.json' would read all files with the
+        Input glob pattern to match files to read. For example, `./input_dir/*.json` would read all files with the
         'json' extension in the directory input_dir.
     watch_directory : bool, default = False
         The watch directory option instructs this stage to not close down once all files have been read. Instead it will
