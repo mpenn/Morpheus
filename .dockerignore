@@ -1,9 +1,8 @@
 # Folders to ignore
 ./.git*
-models
 .vscode
-__pycache__
-.ipynb_checkpoints
+**/__pycache__
+**/*.ipynb_checkpoints
 **/*Dockerfile*
 .tmp
 
@@ -14,3 +13,5 @@ __pycache__
 
 # Ignore specific files
 docker/commands.sh
+*.egg-info/
+kafka-docker

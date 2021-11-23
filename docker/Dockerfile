@@ -135,13 +135,32 @@ FROM cudf_build as build
 COPY . ./
 
 # Build/Install neo/morpheus C++ libraries. Need buildkit and ssh auth to get private repos
-RUN --mount=type=ssh source activate morpheus && ./scripts/compile.sh
+RUN --mount=type=ssh source activate morpheus && INSTALL_PREFIX="/workspace/.cache/install" ./scripts/compile.sh
 
-# Build/Install morpheus CLI and put on PATH
-RUN source activate morpheus && pip install .
+# Build/Install morpheus CLI and put on PATH. Export wheels for installation
+RUN source activate morpheus && \
+    pip install . && \
+    python setup.py bdist_wheel --dist-dir /workspace/.cache/dist && \
+    cd build/_deps/trtlab-build/trtlab/neo/python/ && \
+    python setup.py bdist_wheel --dist-dir /workspace/.cache/dist && \
+    cd -
 
 # Setup container for runtime environment
-FROM build as runtime
+FROM cudf_build as runtime
+
+# Copy the install directory over and the pip packages
+COPY --from=build ["/workspace/.cache/install/lib/", "/opt/conda/envs/morpheus/lib/"]
+COPY --from=build ["/opt/conda/envs/morpheus/lib/python${PYTHON_VER}/site-packages/neo*", "/opt/conda/envs/morpheus/lib/python${PYTHON_VER}/site-packages/morpheus*", "/opt/conda/envs/morpheus/lib/python${PYTHON_VER}/site-packages/"]
+COPY --from=build ["/opt/conda/envs/morpheus/bin/morpheus*", "/opt/conda/envs/morpheus/bin/"]
+COPY --from=build ["/workspace/.cache/dist/*", "/tmp/"]
+
+RUN source activate morpheus && \
+    pip install /tmp/neo-* && \
+    pip install /tmp/morpheus-* && \
+    rm /tmp/neo-* && \
+    rm /tmp/morpheus-*
+
+COPY . ./
 
 # Use morpheus by default
 CMD [ "morpheus" ]

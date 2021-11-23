@@ -47,13 +47,16 @@ setup(
     ],
     author="NVIDIA Corporation",
     packages=find_packages(include=["morpheus", "morpheus.*"]),
+    package_data={"": ["*.so"]},
     include_package_data=True,
     install_requires=[
         "appdirs",
         "click-completion",
-        "click<8",
+        "click>=8",
         "configargparse",
         "dask",
+        "datacompy",
+        "distributed",
         "distributed",
         "docker",
         "grpcio-channelz",
@@ -61,9 +64,7 @@ setup(
         "tqdm",
         "tritonclient[all]",
         "typing-utils",
-        "xgboost",
-        # To Remove:
-        "distributed",
+        "xgboost",  # To Remove:
     ],
     license="Apache",
     python_requires='>=3.8, <4',
