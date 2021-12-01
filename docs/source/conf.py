@@ -218,3 +218,8 @@ linkcode_resolve = make_linkcode_resolve(
 # backticks`) to be a python object. See
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#confval-default_role
 default_role = "py:obj"
+
+# Set a flag to indicate that we are building with sphinx. See https://stackoverflow.com/a/65147676/634820
+import builtins
+
+builtins.__sphinx_build__ = True

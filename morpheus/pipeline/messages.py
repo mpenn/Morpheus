@@ -131,16 +131,17 @@ class MultiMessage(MessageData):
 
     def get_meta(self, columns: typing.Union[None, str, typing.List[str]] = None):
         """
-        Return a column values from morpheus.messages.MessageMeta.df
+        Return column values from morpheus.messages.MessageMeta.df
 
         Parameters
         ----------
-        col_name : str
-            Column name in the dataframe.
+        columns : typing.Union[None, str, typing.List[str]]
+            Input column names. Returns all columns if `None` is specified. When a string is passed, a `Series` is
+            returned. Otherwise a `Dataframe` is returned.
 
         Returns
         -------
-        pandas.Series()
+        Series or Dataframe
             Column values from the dataframe.
 
         """
@@ -180,10 +181,12 @@ class MultiMessage(MessageData):
 
         Parameters
         ----------
-        col_name : str
-            Column name in the dataframe.
-        value : List
-            Column values.
+        columns : typing.Union[None, str, typing.List[str]]
+            Input column names. Sets the value for the corresponding column names. If `None` is specified, all columns
+            will be used. If the column does not exist, a new one will be created.
+        value : Any
+            Value to apply to the specified columns. If a single value is passed, it will be broadcast to all rows. If a
+            `Series` or `Dataframe` is passed, rows will be matched by index.
 
         """
         if (columns is None):
@@ -711,13 +714,13 @@ class MultiResponseProbsMessage(MultiResponseMessage):
 @dataclasses.dataclass
 class MultiResponseAEMessage(MultiResponseProbsMessage):
     """
-    A stronger typed version of `MultiResponseMessage` that is used for inference workloads that return a probability
-    array. Helps ensure the proper outputs are set and eases debugging.
+    A stronger typed version of `MultiResponseProbsMessage` that is used for inference workloads that return a
+    probability array. Helps ensure the proper outputs are set and eases debugging.
     """
     user_id: str
 
 
-if (Config.get().use_cpp):
+if (Config.get().use_cpp and not __sphinx_build__):
 
     import morpheus._lib.messages as neom
 
