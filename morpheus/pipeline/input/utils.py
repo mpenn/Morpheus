@@ -76,21 +76,22 @@ def read_file_to_df(file_name: str,
         kwargs = {}
 
     # Update with any args set by the user. User values overwrite defaults
-    parser_kwargs.update(kwargs)
+    kwargs.update(parser_kwargs)
 
     df_class = cudf if df_type == "cudf" else pd
 
     if (mode == FileTypes.Json):
-        df = df_class.read_json(file_name, **parser_kwargs)
+        df = df_class.read_json(file_name, **kwargs)
 
         if (filter_nulls):
             df = filter_null_data(df)
 
-        df = cudf_json_onread_cleanup(df)
+        if (df_type == "cudf"):
+            df = cudf_json_onread_cleanup(df)
 
         return df
     elif (mode == FileTypes.Csv):
-        df: pd.DataFrame = df_class.read_csv(file_name, **parser_kwargs)
+        df: pd.DataFrame = df_class.read_csv(file_name, **kwargs)
 
         if (len(df.columns) > 1 and df.columns[0] == "Unnamed: 0" and df.iloc[:, 0].dtype == cudf.dtype(int)):
             df.set_index("Unnamed: 0", drop=True, inplace=True)

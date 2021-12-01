@@ -102,16 +102,16 @@ function run_pipeline_hammah_user123(){
    VAL_FILE=$4
    VAL_OUTPUT=$5
 
-   morpheus --log_level=DEBUG run --num_threads=1 --pipeline_batch_size=128 --model_max_batch_size=128 --use_cpp=${USE_CPP} \
-      pipeline-ae --userid_filter=Account-123456789 \
+   morpheus --log_level=DEBUG run --num_threads=1 --pipeline_batch_size=1024 --model_max_batch_size=1024 --use_cpp=${USE_CPP} \
+      pipeline-ae --userid_filter="user123" --userid_column_name="userIdentitysessionContextsessionIssueruserName" \
       from-cloudtrail --input_glob="${MORPHEUS_ROOT}/models/datasets/validation-data/hammah-*.csv" \
-      train-ae --train_data_glob="${MORPHEUS_ROOT}/models/datasets/training-data/hammah-*.csv" \
+      train-ae --train_data_glob="${MORPHEUS_ROOT}/models/datasets/training-data/hammah-*.csv" --seed 42 \
       preprocess \
       ${INFERENCE_STAGE} \
       add-scores \
-      timeseries --resolution=10m \
+      timeseries --resolution=1m --zscore_threshold=8.0 --hot_start \
       monitor --description "Inference Rate" --smoothing=0.001 --unit inf \
-      validate --val_file_name=${VAL_FILE} --results_file_name=${VAL_OUTPUT} --index_col="_index_" --exclude "ae_zscore" --overwrite \
+      validate --val_file_name=${VAL_FILE} --results_file_name=${VAL_OUTPUT} --index_col="_index_" --exclude "event_dt" --rel_tol=0.1 --overwrite \
       serialize \
       to-file --filename=${OUTPUT_FILE} --overwrite
 }
@@ -124,16 +124,16 @@ function run_pipeline_hammah_role-g(){
    VAL_FILE=$4
    VAL_OUTPUT=$5
 
-   morpheus --log_level=DEBUG run --num_threads=1 --pipeline_batch_size=128 --model_max_batch_size=128 --use_cpp=${USE_CPP} \
-      pipeline-ae --userid_filter=Account-223344556 \
+   morpheus --log_level=DEBUG run --num_threads=1 --pipeline_batch_size=1024 --model_max_batch_size=1024 --use_cpp=${USE_CPP} \
+      pipeline-ae --userid_filter="role-g" --userid_column_name="userIdentitysessionContextsessionIssueruserName" \
       from-cloudtrail --input_glob="${MORPHEUS_ROOT}/models/datasets/validation-data/hammah-*.csv" \
-      train-ae --train_data_glob="${MORPHEUS_ROOT}/models/datasets/training-data/hammah-*.csv" \
+      train-ae --train_data_glob="${MORPHEUS_ROOT}/models/datasets/training-data/hammah-*.csv"  --seed 42 \
       preprocess \
       ${INFERENCE_STAGE} \
       add-scores \
-      timeseries --resolution=10m \
+      timeseries --resolution=10m --zscore_threshold=8.0 \
       monitor --description "Inference Rate" --smoothing=0.001 --unit inf \
-      validate --val_file_name=${VAL_FILE} --results_file_name=${VAL_OUTPUT} --index_col="_index_" --exclude "ae_zscore" --exclude "event_dt" --overwrite \
+      validate --val_file_name=${VAL_FILE} --results_file_name=${VAL_OUTPUT} --index_col="_index_" --exclude "event_dt" --rel_tol=0.15 --overwrite \
       serialize \
       to-file --filename=${OUTPUT_FILE} --overwrite
 }

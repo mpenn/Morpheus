@@ -60,6 +60,10 @@ class ValidationStage(MultiMessageStage):
     index_col : str, optional
         Whether to convert any column in the dataset to the index. Useful when the pipeline will change the index,
         by default None
+    abs_tol : float, default = 0.001
+        Absolute tolerance to use when comparing float columns
+    rel_tol : float, default = 0.05
+        Relative tolerance to use when comparing float columns
 
     Raises
     ------
@@ -75,6 +79,8 @@ class ValidationStage(MultiMessageStage):
         include: typing.List[str] = None,
         exclude: typing.List[str] = [r'^ID$', r'^_ts_'],
         index_col: str = None,
+        abs_tol: float = 0.001,
+        rel_tol: float = 0.005,
     ):
 
         super().__init__(c)
@@ -85,6 +91,8 @@ class ValidationStage(MultiMessageStage):
         self._index_col = index_col
         self._val_file_name = val_file_name
         self._results_file_name = results_file_name
+        self._abs_tol = abs_tol
+        self._rel_tol = rel_tol
 
         if (os.path.exists(self._results_file_name)):
             if (overwrite):
@@ -173,8 +181,8 @@ class ValidationStage(MultiMessageStage):
             val_df,
             results_df,
             on_index=True,
-            abs_tol=0.001,
-            rel_tol=0.05,
+            abs_tol=self._abs_tol,
+            rel_tol=self._rel_tol,
             df1_name="val",
             df2_name="res",
             cast_column_names_lower=False,

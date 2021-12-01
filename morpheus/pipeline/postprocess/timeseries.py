@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import typing
 from collections import deque
+from math import ceil
 
 import cupy as cp
 import neo
@@ -19,10 +20,12 @@ from morpheus.pipeline.pipeline import StreamPair
 logger = logging.getLogger(__name__)
 
 
-def round_seconds(obj: dt.datetime) -> dt.datetime:
-    if obj.microsecond >= 500_000:
-        obj += dt.timedelta(seconds=1)
-    return obj.replace(microsecond=0)
+def round_seconds(obj: pd.Timestamp) -> pd.Timestamp:
+    return obj.round(freq="S")
+
+
+def calc_bin(obj: pd.Timestamp, t0: pd.Timestamp, resolution_sec: float) -> int:
+    return round((round_seconds(obj) - t0).total_seconds()) // resolution_sec
 
 
 def zscore(data):
@@ -248,6 +251,7 @@ class UserTimeSeries(object):
                  resolution: str,
                  min_window: str,
                  hot_start: bool,
+                 cold_end: bool,
                  filter_percent: float,
                  zscore_threshold: float) -> None:
         super().__init__()
@@ -255,13 +259,17 @@ class UserTimeSeries(object):
         self._user_id = user_id
 
         # Size of bins
-        self._resolution_sec = pd.Timedelta(resolution).total_seconds()
+        self._resolution_sec = int(round(pd.Timedelta(resolution).total_seconds()))
 
         # Set the min window to a week to start
         self._min_window_sec = pd.Timedelta(min_window).total_seconds()
+        self._half_window_bins = int(ceil(self._min_window_sec / self._resolution_sec))
 
         # Flag indicating if the warmup period has completed
         self._is_warm = hot_start
+
+        # Flag indicating whether to allow window violation during shutdown
+        self._cold_end = cold_end
 
         self._filter_percent = filter_percent
         self._zscore_threshold = zscore_threshold
@@ -274,21 +282,20 @@ class UserTimeSeries(object):
         self._pending_messages: deque[MultiResponseMessage] = deque()  # Holds the existing messages pending
         self._timeseries_data: pd.DataFrame = pd.DataFrame(columns=["event_dt"])  # Holds all available timeseries data
 
+        self._t0_epoch: float = None
+
+    def _calc_bin_series(self, t: pd.Series) -> pd.Series:
+
+        return round((t.dt.round(freq="S") - self._t0_epoch).dt.total_seconds()).astype(int) // self._resolution_sec
+
     def _calc_outliers(self, action: TimeSeriesAction):
 
-        bin_dt = dt.timedelta(seconds=self._resolution_sec)
-
         # Subtract one bin to add buffers on either side. This makes the calculation of the bins easier
-        window_start = action.window_start - bin_dt
-        window_end = action.window_end + bin_dt
+        window_start = action.window_start - 1
+        window_end = action.window_end
 
-        elapsed_seconds = (action.window - window_start)["event_dt"].dt.total_seconds()
-
-        # Calc duration in integral seconds
-        window_duration_sec = int((window_end - window_start).total_seconds())
-
-        signal_cp, signal_bins = cp.histogram(cp.array(elapsed_seconds),
-                                              bins=cp.arange(0, window_duration_sec, self._resolution_sec))
+        signal_cp, signal_bins = cp.histogram(cp.array(action.window["event_bin"]),
+                                              bins=cp.arange(window_start, window_end + 1, 1))
 
         # TODO(MDD): Take this out after testing
         assert cp.sum(signal_cp) == len(action.window), "All points in window are not accounted for in histogram"
@@ -296,12 +303,24 @@ class UserTimeSeries(object):
         is_anomaly = fftAD(signal_cp, p=self._filter_percent, zt=self._zscore_threshold)
 
         if (len(is_anomaly) > 0):
-            anomalies = (elapsed_seconds // self._resolution_sec).astype(int).isin(is_anomaly.get())
 
+            # Convert back to bins
+            is_anomaly = cp.choose(is_anomaly, signal_bins)
+
+            anomalies = action.window["event_bin"].isin(is_anomaly.get())
+
+            # Set the anomalies by matching indexes
             action.message.set_meta("ts_anomaly", anomalies)
 
-            logger.debug("Found anomalies: %s",
-                         window_start + pd.to_timedelta((cp.choose(is_anomaly, signal_bins)).get(), unit='s'))
+            # Find anomalies that are in the active message
+            paired_anomalies = anomalies[anomalies == True].index.intersection(action.message.get_meta().index)
+
+            # Return the anomalies for priting. But only if the current message has anomalies that will get flagged
+            if (len(paired_anomalies) > 0):
+                return self._t0_epoch + pd.to_timedelta(
+                    (action.window.loc[paired_anomalies]["event_bin"].unique() * self._resolution_sec), unit='s')
+
+        return None
 
     def _determine_action(self, is_complete: bool) -> typing.Optional[TimeSeriesAction]:
 
@@ -309,23 +328,22 @@ class UserTimeSeries(object):
         if (len(self._pending_messages) == 0):
             return None
 
-        timeseries_start = self._timeseries_data["event_dt"].iloc[0]
-        timeseries_end = self._timeseries_data["event_dt"].iloc[-1]
+        # Note: We calculate everything in bins to ensure 1) Full bins, and 2) Even binning
+        timeseries_start = self._timeseries_data["event_bin"].iloc[0]
+        timeseries_end = self._timeseries_data["event_bin"].iloc[-1]
 
         # Peek the front message
         x: MultiResponseMessage = self._pending_messages[0]
 
         # Get the first message timestamp
-        message_start = round_seconds(x.get_meta("event_dt").iloc[0])
-        message_end = round_seconds(x.get_meta("event_dt").iloc[-1])
+        message_start = calc_bin(x.get_meta("event_dt").iloc[0], self._t0_epoch, self._resolution_sec)
+        message_end = calc_bin(x.get_meta("event_dt").iloc[-1], self._t0_epoch, self._resolution_sec)
 
-        half_window_delta = dt.timedelta(seconds=self._min_window_sec)
+        window_start = message_start - self._half_window_bins
+        window_end = message_end + self._half_window_bins
 
-        window_start = message_start - half_window_delta
-        window_end = message_end + half_window_delta
-
-        if (not self._is_warm and not is_complete and timeseries_start > window_start):
-            # Need more back buffer, warming up
+        # Check left buffer
+        if (timeseries_start > window_start):
             # logger.debug("Warming up.    TS: %s, WS: %s, MS: %s, ME: %s, WE: %s, TE: %s. Delta: %s",
             #              timeseries_start._repr_base,
             #              window_start._repr_base,
@@ -335,12 +353,14 @@ class UserTimeSeries(object):
             #              timeseries_end._repr_base,
             #              timeseries_start - window_start)
 
-            return TimeSeriesAction(send_message=True, message=self._pending_messages.popleft())
+            # Not shutting down and we arent warm, send through
+            if (not self._is_warm and not is_complete):
+                return TimeSeriesAction(send_message=True, message=self._pending_messages.popleft())
 
         self._is_warm = True
 
-        if (not is_complete and timeseries_end < window_end):
-            # Have back buffer, need more front. Hold message
+        # Check the right buffer
+        if (timeseries_end < window_end):
             # logger.debug("Filling front. TS: %s, WS: %s, MS: %s, ME: %s, WE: %s, TE: %s. Delta: %s",
             #              timeseries_start._repr_base,
             #              window_start._repr_base,
@@ -350,7 +370,16 @@ class UserTimeSeries(object):
             #              timeseries_end._repr_base,
             #              window_end - timeseries_end)
 
-            return None
+            if (not is_complete):
+                # Not shutting down, so hold message
+                return None
+            elif (is_complete and self._cold_end):
+                # Shutting down and we have a cold ending, just empty the message
+                return TimeSeriesAction(send_message=True, message=self._pending_messages.popleft())
+            else:
+                # Shutting down and hot end
+                # logger.debug("Hot End. Processing. TS: %s", timeseries_start._repr_base)
+                pass
 
         # By this point we have both a front and back buffer. So get ready for a calculation
         # logger.debug("Perform Calc.  TS: %s, WS: %s, MS: %s, ME: %s, WE: %s, TE: %s.",
@@ -362,11 +391,11 @@ class UserTimeSeries(object):
         #              timeseries_end._repr_base)
 
         # First, remove elements in the front queue that are too old
-        self._timeseries_data.drop(self._timeseries_data[self._timeseries_data["event_dt"] < window_start].index,
+        self._timeseries_data.drop(self._timeseries_data[self._timeseries_data["event_bin"] < window_start].index,
                                    inplace=True)
 
         # Now grab timestamps within the window
-        window_timestamps_df = self._timeseries_data[self._timeseries_data["event_dt"] < window_end]
+        window_timestamps_df = self._timeseries_data[self._timeseries_data["event_bin"] <= window_end]
 
         # Return info to perform calc
         return TimeSeriesAction(perform_calc=True,
@@ -379,6 +408,10 @@ class UserTimeSeries(object):
     def _calc_timeseries(self, x: MultiResponseMessage, is_complete: bool):
 
         if (x is not None):
+
+            # Ensure that we have the meta column set for all messages
+            x.set_meta("ts_anomaly", False)
+
             # Save this message in the pending queue
             self._pending_messages.append(x)
 
@@ -396,8 +429,15 @@ class UserTimeSeries(object):
             # Save the new max index
             self._processed_index = self._timeseries_data.index[-1] + 1
 
-            # Ensure that we have the meta column set for all messages
-            x.set_meta("ts_anomaly", False)
+        # If this is our first time data, set the t0 time
+        if (self._t0_epoch is None):
+            self._t0_epoch = self._timeseries_data["event_dt"].iloc[0]
+
+            # TODO(MDD): Floor to the day to unsure all buckets are always aligned with val data
+            self._t0_epoch = self._t0_epoch.floor(freq="D")
+
+        # Calc the bins for the timeseries data
+        self._timeseries_data["event_bin"] = self._calc_bin_series(self._timeseries_data["event_dt"])
 
         # At this point there are 3 things that can happen
         # 1. We are warming up to build a front buffer. Save the current message times and send the message on
@@ -411,7 +451,13 @@ class UserTimeSeries(object):
 
             if (action.perform_calc):
                 # Actually do the calc
-                self._calc_outliers(action)
+                anomalies = self._calc_outliers(action)
+
+                if (anomalies is not None):
+                    if (is_complete):
+                        logger.debug("Found anomalies (Shutdown): %s", list(anomalies))
+                    else:
+                        logger.debug("Found anomalies: %s", list(anomalies))
 
             if (action.send_message):
                 # Now send the message
@@ -440,6 +486,10 @@ class TimeSeriesStage(SinglePortStage):
         Enabling 'hot_start' will run calculations on all messages even if the min_window is not satisfied on both
         sides, i.e. during startup or teardown. This is likely to increase the number of false positives but can be
         helpful for debugging and testing on small datasets.
+    cold_end : bool, default = True
+        This flag is the inverse of `hot_start` and prevents ignoring messages that don't satisfy the `min_window`
+        during the shutdown phase. This is likely to increase the number of false positives but can be helpful for
+        debugging and testing on small datasets.
     filter_percent : float, default = 90
         The percent of timeseries samples to remove from the inverse FFT for spectral density filtering.
     zscore_threshold : float, default = 8.0
@@ -451,6 +501,7 @@ class TimeSeriesStage(SinglePortStage):
                  resolution: str,
                  min_window: str,
                  hot_start: bool,
+                 cold_end: bool,
                  filter_percent: float,
                  zscore_threshold: float):
         super().__init__(c)
@@ -460,6 +511,7 @@ class TimeSeriesStage(SinglePortStage):
         self._resolution = resolution
         self._min_window = min_window
         self._hot_start = hot_start
+        self._cold_end = cold_end
         self._filter_percent = filter_percent
         self._zscore_threshold = zscore_threshold
 
@@ -488,6 +540,7 @@ class TimeSeriesStage(SinglePortStage):
                                                                   resolution=self._resolution,
                                                                   min_window=self._min_window,
                                                                   hot_start=self._hot_start,
+                                                                  cold_end=self._cold_end,
                                                                   filter_percent=self._filter_percent,
                                                                   zscore_threshold=self._zscore_threshold)
 

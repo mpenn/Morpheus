@@ -26,6 +26,7 @@ import pandas as pd
 from morpheus._lib.common import FiberQueue
 from morpheus.config import Config
 from morpheus.pipeline.file_types import FileTypes
+from morpheus.pipeline.file_types import determine_file_type
 from morpheus.pipeline.input.utils import read_file_to_df
 from morpheus.pipeline.messages import UserMessageMeta
 from morpheus.pipeline.pipeline import SingleOutputSource
@@ -136,37 +137,25 @@ class CloudTrailSourceStage(SingleOutputSource):
             If an unsupported file type is detected
         """
 
-        mode = file_type
-        kwargs = {}
+        df = read_file_to_df(filename, file_type, df_type="pandas")
 
-        if (mode == FileTypes.Auto):
-            # Determine from the file extension
-            ext = os.path.splitext(filename)
+        # If reading the file only produced one line and we are a JSON file, try loading structured file
+        if (determine_file_type(filename) == FileTypes.Json and len(df) == 1 and list(df) == ["Records"]):
 
-            # Get the extension without the dot
-            ext = ext[1].lower()[1:]
+            # Reread with lines=False
+            df = read_file_to_df(filename, file_type, df_type="pandas", parser_kwargs={"lines": False})
 
-            # Check against supported options
-            if (ext == "json" or ext == "jsonlines"):
-                mode = FileTypes.Json
-            elif (ext == "csv"):
-                mode = FileTypes.Csv
-            else:
-                raise RuntimeError(
-                    "Unsupported extension '{}' with 'auto' type. 'auto' only works with: csv, json".format(ext))
-
-        if (mode == FileTypes.Json):
-            df = pd.read_json(filename, **kwargs)
+            # Normalize
             df = pd.json_normalize(df['Records'])
-            return df
-        elif (mode == FileTypes.Csv):
-            df = pd.read_csv(filename, **kwargs)
-            return df
-        else:
-            assert False, "Unsupported file type mode: {}".format(mode)
+
+        return df
 
     def _get_filename_queue(self) -> FiberQueue:
-        # Return an asyncio queue
+        """
+        Returns an async queue with tuples of `([files], is_event)` where `is_event` indicates if this is a file changed
+        event (and we should wait for potentially more changes) or if these files were read on startup and should be
+        processed immediately
+        """
         q = FiberQueue(128)
 
         if (self._watch_directory):
@@ -194,7 +183,8 @@ class CloudTrailSourceStage(SingleOutputSource):
 
             def process_dir_change(event: FileSystemEvent):
 
-                q.put([event.src_path])
+                # Push files into the queue indicating this is an event
+                q.put(([event.src_path], True))
 
             event_handler.on_created = process_dir_change
 
@@ -211,7 +201,7 @@ class CloudTrailSourceStage(SingleOutputSource):
         logger.info("Found %d CloudTrail files in glob. Loading...", len(file_list))
 
         # Push all to the queue and close it
-        q.put(file_list)
+        q.put((file_list, False))
 
         if (not self._watch_directory):
             # Close the queue
@@ -231,11 +221,12 @@ class CloudTrailSourceStage(SingleOutputSource):
         while True:
 
             try:
-                files = file_queue.get(timeout=batch_timeout)
+                files, is_event = file_queue.get(timeout=batch_timeout)
 
-                if (len(files) == 1):
+                if (is_event):
                     # We may be getting files one at a time from the folder watcher, wait a bit
                     files_to_process = files_to_process + files
+                    continue
 
                 # We must have gotten a group at startup, process immediately
                 yield files
@@ -284,8 +275,9 @@ class CloudTrailSourceStage(SingleOutputSource):
                 cloudtrail_df[col_name] = cloudtrail_df[col_name].apply(lambda x: remove_null(x))
             return cloudtrail_df
 
-        # Drop any unneeded columns
-        df.drop(columns=df.columns.difference(feature_columns), inplace=True)
+        # Drop any unneeded columns if specified
+        if (feature_columns is not None):
+            df.drop(columns=df.columns.difference(feature_columns), inplace=True)
 
         # Reorder columns to be the same
         # df = df[pd.Index(feature_columns).intersection(df.columns)]
@@ -327,10 +319,8 @@ class CloudTrailSourceStage(SingleOutputSource):
 
         combined_df = pd.concat(x)
 
-        # # Ensure were still in the right order
-        # combined_df = combined_df[pd.Index(feature_columns).intersection(combined_df.columns)]
-
         if ("eventTime" in combined_df):
+
             # Convert to date_time column
             combined_df["event_dt"] = pd.to_datetime(combined_df["eventTime"])
 
@@ -380,7 +370,7 @@ class CloudTrailSourceStage(SingleOutputSource):
         # https://github.com/rapidsai/cudf/issues/8827
         dfs = []
         for file in x:
-            df = read_file_to_df(file, file_type, df_type="pandas")
+            df = CloudTrailSourceStage.read_file(file, file_type)
             df = CloudTrailSourceStage.cleanup_df(df, feature_columns)
             dfs = dfs + CloudTrailSourceStage.repeat_df(df, repeat_count)
 
@@ -399,7 +389,7 @@ class CloudTrailSourceStage(SingleOutputSource):
                 self._rows_per_user[user_name] = 0
 
             # Combine the original index with itself so it shows up as a named column
-            user_df.index.name = "_index_" + user_df.index.name
+            user_df.index.name = "_index_" + (user_df.index.name or "")
             user_df = user_df.reset_index()
 
             # Now ensure the index for this user is correct
@@ -432,12 +422,13 @@ class CloudTrailSourceStage(SingleOutputSource):
         # batches of dataframes
         filenames_to_df = seg.make_node(
             self.unique_name + "-filetodf",
-            partial(self.files_to_dfs_per_user,
-                    file_type=self._file_type,
-                    userid_column_name=self._user_column_name,
-                    feature_columns=self._feature_columns,
-                    userid_filter=self._userid_filter,
-                    repeat_count=self._repeat_count))
+            partial(
+                self.files_to_dfs_per_user,
+                file_type=self._file_type,
+                userid_column_name=self._user_column_name,
+                feature_columns=None,  # Use None here to leave all columns in
+                userid_filter=self._userid_filter,
+                repeat_count=self._repeat_count))
         seg.make_edge(out_stream, filenames_to_df)
 
         # Now group the batch of dataframes into a single df, split by user, and send a single UserMessageMeta per user
