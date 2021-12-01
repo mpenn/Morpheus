@@ -720,7 +720,7 @@ class MultiResponseAEMessage(MultiResponseProbsMessage):
     user_id: str
 
 
-if (Config.get().use_cpp and not __sphinx_build__):
+if (Config.get().use_cpp and "__sphinx_build__" not in __builtins__):
 
     import morpheus._lib.messages as neom
 
