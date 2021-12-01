@@ -188,22 +188,16 @@ class DropNullStage(SinglePortStage):
             Accepted input types
 
         """
-        return (cudf.DataFrame, )
-
-    @staticmethod
-    def filter(x: cudf.DataFrame, column: str):
-        x = x[~x[column].isna()]
-
-        return x
+        return (MessageMeta, )
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
         stream = input_stream[0]
 
         # Finally, flatten to a single stream
         def node_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: cudf.DataFrame):
-
-                x = x[~x[self._column].isna()]
+            def obs_on_next(x: MessageMeta):
+                
+                x.df = x.df[~x.df[self._column].isna()]
 
                 if (not x.empty):
                     output.on_next(x)
