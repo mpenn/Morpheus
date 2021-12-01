@@ -399,8 +399,16 @@ def pipeline_fil(ctx: click.Context, **kwargs):
               help=("Specifies a file to read labels from in order to convert class IDs into labels. "
                     "A label file is a simple text file where each line corresponds to a label. "
                     "If unspecified, only a single output label is created for FIL"))
-@click.option('--userid_column_name', type=str, default="userIdentityaccountId", required=True, help=(""))
-@click.option('--userid_filter', type=str, default=None, required=True, help=(""))
+@click.option('--userid_column_name',
+              type=str,
+              default="userIdentityaccountId",
+              required=True,
+              help=("Which column to use as the User ID."))
+@click.option('--userid_filter',
+              type=str,
+              default=None,
+              help=("Specifying this value will filter all incoming data to only use rows with matching User IDs. "
+                    "Which column is used for the User ID is specified by `userid_column_name`"))
 @click.option('--viz_file',
               default=None,
               type=click.Path(dir_okay=False, writable=True),
@@ -438,7 +446,6 @@ def pipeline_ae(ctx: click.Context, **kwargs):
     config.ae = ConfigAutoEncoder()
 
     config.ae.userid_column_name = kwargs["userid_column_name"]
-    config.ae.userid_filter = kwargs["userid_filter"]
 
     if ("columns_file" in kwargs and kwargs["columns_file"] is not None):
         with open(kwargs["columns_file"], "r") as lf:
@@ -455,6 +462,11 @@ def pipeline_ae(ctx: click.Context, **kwargs):
     else:
         # Use a default single label
         config.class_labels = ["ae_anomaly_score"]
+
+    if ("userid_filter" in kwargs):
+        config.ae.userid_filter = kwargs["userid_filter"]
+
+        logger.info("Filtering all users except ID: '%s'", str(config.ae.userid_filter))
 
     from morpheus.pipeline import LinearPipeline
 
@@ -735,6 +747,7 @@ def deserialize(ctx: click.Context, **kwargs):
               default=1000,
               help=("Maximum amount of rows that will be retained in history. As new data arrives, models will be "
                     "retrained with a maximum number of rows specified by this value."))
+@click.option('--seed', type=int, default=None, help="Seed to use when training. Helps ensure consistent results.")
 @prepare_command(False)
 def train_ae(ctx: click.Context, **kwargs):
 
@@ -1114,6 +1127,14 @@ def mlflow_drift(ctx: click.Context, **kwargs):
                     "if the min_window is not satisfied on both sides, i.e. during startup or teardown. This "
                     "is likely to increase the number of false positives but can be helpful for debugging "
                     "and testing on small datasets."))
+@click.option('--cold_end',
+              is_flag=True,
+              default=False,
+              help=("This flag prevents the stage from ignoring messages during a warm up phase while the "
+                    "min_window is filled. Enabling 'hot_start' will run calculations on all messages even "
+                    "if the min_window is not satisfied on both sides, i.e. during startup or teardown. This "
+                    "is likely to increase the number of false positives but can be helpful for debugging "
+                    "and testing on small datasets."))
 @click.option('--filter_percent',
               type=click.FloatRange(min=0.0, max=100.0),
               default=90.0,
@@ -1143,24 +1164,42 @@ def timeseries(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Validates pipeline output against an expected output", **command_kwargs)
-@click.option('--val_file_name', type=click.Path(exists=True, dir_okay=False), required=True, help="")
-@click.option('--results_file_name', type=click.Path(dir_okay=False), required=True, help="")
-@click.option('--overwrite', is_flag=True, help="")
+@click.option('--val_file_name',
+              type=click.Path(exists=True, dir_okay=False),
+              required=True,
+              help=("File to use as the comparison 'truth' object. CSV files are preferred"))
+@click.option('--results_file_name',
+              type=click.Path(dir_okay=False),
+              required=True,
+              help=("Output filename to store a JSON object containing the validation results"))
+@click.option('--overwrite', is_flag=True, help=("Whether or not to overwrite existing JSON output"))
 @click.option('--include',
               type=str,
               default=tuple(),
               multiple=True,
               show_default="All Columns",
-              help=("Which columns to include from MultiMessage into JSON. Can be specified multiple times. "
+              help=("Which columns to include in the validation. Can be specified multiple times. "
                     "Resulting columns is the intersection of all regex. Include applied before exclude"))
 @click.option('--exclude',
               type=str,
               default=[r'^ID$', r'^_ts_'],
               multiple=True,
               required=True,
-              help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
+              help=("Which columns to exclude from the validation. Can be specified multiple times. "
                     "Resulting ignored columns is the intersection of all regex. Include applied before exclude"))
-@click.option('--index_col', type=str, help=(""))
+@click.option('--index_col',
+              type=str,
+              help=("Specifies a column which will be used to align messages with rows in the validation dataset."))
+@click.option('--abs_tol',
+              type=click.FloatRange(min=0.0),
+              default=0.001,
+              required=True,
+              help="Absolute tolerance to use when comparing float columns.")
+@click.option('--rel_tol',
+              type=click.FloatRange(min=0.0),
+              default=0.05,
+              required=True,
+              help="Relative tolerance to use when comparing float columns.")
 @prepare_command(False)
 def validate(ctx: click.Context, **kwargs):
 

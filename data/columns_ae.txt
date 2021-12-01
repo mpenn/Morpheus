@@ -14,7 +14,6 @@ userIdentityarn
 userIdentityaccountId
 userIdentityaccessKeyId
 userIdentitysessionContextsessionIssuerprincipalId
-userIdentitysessionContextsessionIssuerarn
 userIdentitysessionContextsessionIssueruserName
 tlsDetailsclientProvidedHostHeader
 requestParametersownersSetitems
@@ -32,6 +31,3 @@ requestParametersdisableApiTermination
 requestParametersebsOptimized
 responseElementsreservationId
 requestParametersgroupName
-eventTime
-recipientAccountId
-awsRegion

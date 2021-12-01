@@ -320,3 +320,60 @@ Commands:
 
 ```
 Note: The available commands for different types of pipelines are not the same. And the same stage in different pipelines may have different options. Please check the CLI help for the most up to date information during development.
+
+
+## Pipeline Validation
+
+To verify that all pipelines are working correctly, validation scripts have been added at `${MORPHEUS_ROOT}/scripts/validation`. There are scripts for each of the main workflows: Anomalous Behavioral Profiling (ABP), Humans-as-Machines-Machines-as-Humans (HAMMAH), Phishing Detection (Phishing), and Sensitive Information Detection (SID).
+
+To run all of the validation workflow scripts, use the follownig commands:
+
+Build the latest container (Not necessary if using a pre-built container):
+```bash
+DOCKER_TARGET=build ./docker/build_container_release.sh
+```
+
+Launch Triton to serve the models:
+```bash
+# Serve all workflow models via Triton
+docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 -v $PWD/models:/models \
+  nvcr.io/ea-nvidia-morpheus/tritonserver:21.10-trt-8.2.1.3 \
+    tritonserver --model-repository=/models/triton-model-repo \
+                 --exit-on-error=false \
+                 --model-control-mode=explicit \
+                 --load-model abp-nvsmi-xgb \
+                 --load-model sid-minibert-onnx \
+                 --load-model phishing-bert-onnx
+```
+
+Launch the Morpheus container:
+```bash
+# Launch the Morpheus container (If built from source)
+./docker/run_container_dev.sh
+
+# Launch the Morpheus container (If using a pre-built container)
+export DOCKER_IMAGE_TAG="latest" # Only needed if using a tag other than 'latest'
+./docker/run_container_release.sh
+```
+
+Run the validation scripts:
+```bash
+# Install utils for checking output
+apt update && apt install -y jq bc
+
+# Run validation scripts
+./scripts/validate/val-run-all.sh
+```
+
+At the end of each workflow, a section will print the different inference workloads that were run and the validation error percentage for each. For example:
+
+```bash
+===ERRORS===
+PyTorch     :3/314 (0.96 %)
+Triton(ONNX):Skipped
+Triton(TRT) :Skipped
+TensorRT    :Skipped
+Complete!
+```
+
+This indicates that only 3 out of 314 rows did not match the validation dataset. If you see errors similar to `:/ ( %)` or very high percentages, then the workflow did not complete sucessfully.

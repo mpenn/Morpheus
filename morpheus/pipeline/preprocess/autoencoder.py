@@ -22,6 +22,7 @@ from functools import partial
 import cupy as cp
 import dill
 import neo
+import numpy as np
 import pandas as pd
 import torch
 from dfencoder import AutoEncoder
@@ -68,12 +69,19 @@ class MultiAEMessage(MultiMessage):
 
 
 class UserModelManager(object):
-    def __init__(self, c: Config, user_id: str, save_model: bool, epochs: int, max_history: int) -> None:
+    def __init__(self,
+                 c: Config,
+                 user_id: str,
+                 save_model: bool,
+                 epochs: int,
+                 max_history: int,
+                 seed: int = None) -> None:
         super().__init__()
 
         self._user_id = user_id
         self._history: pd.DataFrame = None
         self._max_history: int = max_history
+        self._seed: int = seed
         self._feature_columns = c.ae.feature_columns
         self._epochs = epochs
         self._save_model = save_model
@@ -96,8 +104,12 @@ class UserModelManager(object):
         else:
             combined_df = df
 
-        # # One more check to make sure they are in order
-        # combined_df = combined_df[pd.Index(self._feature_columns).intersection(combined_df.columns)]
+        # If the seed is set, enforce that here
+        if (self._seed is not None):
+            torch.manual_seed(self._seed)
+            torch.cuda.manual_seed(self._seed)
+            np.random.seed(self._seed)
+            torch.backends.cudnn.deterministic = True
 
         model = AutoEncoder(
             encoder_layers=[512, 500],  # layers of the encoding part
@@ -143,15 +155,17 @@ class TrainAEStage(MultiMessageStage):
                  pretrained_filename: str = None,
                  train_data_glob: str = None,
                  train_epochs: int = 25,
-                 train_max_history: int = 1000):
+                 train_max_history: int = 1000,
+                 seed: int = None):
         super().__init__(c)
 
         self._feature_columns = c.ae.feature_columns
-        self._batch_size = c.model_max_batch_size
+        self._batch_size = c.pipeline_batch_size
         self._pretrained_filename = pretrained_filename
         self._train_data_glob: str = train_data_glob
         self._train_epochs = train_epochs
         self._train_max_history = train_max_history
+        self._seed = seed
 
         # Single model for the entire pipeline
         self._pretrained_model: AutoEncoder = None
@@ -191,7 +205,8 @@ class TrainAEStage(MultiMessageStage):
                                                             x.user_id,
                                                             False,
                                                             self._train_epochs,
-                                                            self._train_max_history)
+                                                            self._train_max_history,
+                                                            self._seed)
 
         model = self._user_models[x.user_id].train(x.df)
 
@@ -228,7 +243,8 @@ class TrainAEStage(MultiMessageStage):
                                                               user_id,
                                                               True,
                                                               self._train_epochs,
-                                                              self._train_max_history)
+                                                              self._train_max_history,
+                                                              self._seed)
 
                 self._user_models[user_id].train(df)
 

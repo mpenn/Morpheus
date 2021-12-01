@@ -56,7 +56,7 @@ setup(
         "configargparse",
         "dask",
         "datacompy",
-        "distributed",
+        "dfencoder @ git+https://github.com/efajardo-nv/dfencoder.git@nv-updates#egg=dfencoder",
         "distributed",
         "docker",
         "grpcio-channelz",
