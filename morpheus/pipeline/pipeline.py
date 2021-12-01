@@ -241,7 +241,7 @@ def _save_init_vals(func: _DecoratorType) -> _DecoratorType:
 
 class StreamWrapper(ABC, collections.abc.Hashable):
     """
-    This abstract class serves as the morpheus.pipeline's base class. This class wraps a `streamz.Stream`
+    This abstract class serves as the morpheus.pipeline's base class. This class wraps a `neo.Node`
     object and aids in hooking stages up together.
 
     Parameters
@@ -410,23 +410,25 @@ class StreamWrapper(ABC, collections.abc.Hashable):
     @abstractmethod
     def _build(self, seg: neo.Segment, in_ports_streams: typing.List[StreamPair]) -> typing.List[StreamPair]:
         """
-        This function is responsible for constructing this Stage's internal `streamz.Stream` object. The input
-        of this function is the returned value from the upstream stage.
+        This function is responsible for constructing this stage's internal `neo.Node` object. The input
+        of this function contains the returned value from the upstream stage.
 
-        The input value is a `StreamPair` which is a tuple containing the input `streamz.Stream` object and
-        the message data type.
+        The input values are the `neo.Segment` for this stage and a `StreamPair` tuple which contain the input
+        `neo.Node` object and the message data type.
 
         :meta public:
 
         Parameters
         ----------
-        input_stream : StreamPair
-            A tuple containing the input `streamz.Stream` object and the message data type.
+        seg : neo.Segment
+            `neo.Segment` object for the pipeline. This should be used to construct/attach the internal `neo.Node`.
+        in_ports_streams : StreamPair
+            List of tuples containing the input `neo.Node` object and the message data type.
 
         Returns
         -------
         StreamPair
-            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+            List of tuples containing the output `neo.Node` object from this stage and the message data type.
 
         """
         pass
@@ -499,7 +501,7 @@ class SourceStage(StreamWrapper):
         -------
 
         StreamPair:
-            A tuple containing the output `streamz.Stream` object from this stage and the message data type.
+            A tuple containing the output `neo.Node` object from this stage and the message data type.
         """
 
         pass

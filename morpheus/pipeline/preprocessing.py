@@ -280,6 +280,20 @@ class PreprocessNLPStage(PreprocessBaseStage):
     ----------
     c : morpheus.config.Config
         Pipeline configuration instance
+    vocab_hashfile : str
+        Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary
+        using the `cudf.utils.hash_vocab_utils.hash_vocab` function
+    truncation : bool
+        If set to true, strings will be truncated and padded to max_length. Each input string will result in exactly one
+        output sequence. If set to false, there may be multiple output sequences when the max_length is smaller
+        than generated tokens.
+    do_lower_case : bool
+        If set to true, original text will be lowercased before encoding.
+    stride : int
+        If `truncation` == False and the tokenized string is larger than max_length, the sequences containing the
+        overflowing token-ids can contain duplicated token-ids from the main sequence. If max_length is equal to stride
+        there are no duplicated-id tokens. If stride is 80% of max_length, 20% of the first sequence will be repeated on
+        the second sequence and so on until the entire sentence is encoded.
 
     """
     def __init__(self,
@@ -326,7 +340,12 @@ class PreprocessNLPStage(PreprocessBaseStage):
         Parameters
         ----------
         x : morpheus.messages.MultiMessage
-            Input rows recieved from Deserialized stage.
+            Input rows received from Deserialized stage.
+        vocab_hashfile : str
+            Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary
+            using the `cudf.utils.hash_vocab_utils.hash_vocab` function
+        do_lower_case : bool
+            If set to true, original text will be lowercased before encoding.
         seq_len : int
             Limits the length of the sequence returned. If tokenized string is shorter than max_length, output will be
             padded with 0s. If the tokenized string is longer than max_length and do_truncate == False, there will be
@@ -336,9 +355,10 @@ class PreprocessNLPStage(PreprocessBaseStage):
             overflowing token-ids can contain duplicated token-ids from the main sequence. If max_length is equal to
             stride there are no duplicated-id tokens. If stride is 80% of max_length, 20% of the first sequence will be
             repeated on the second sequence and so on until the entire sentence is encoded.
-        vocab_hash_file : str
-            Path to hash file containing vocabulary of words with token-ids. This can be created from the raw vocabulary
-            using the cudf.utils.hash_vocab_utils.hash_vocab function.
+        truncation : bool
+            If set to true, strings will be truncated and padded to max_length. Each input string will result in exactly one
+            output sequence. If set to false, there may be multiple output sequences when the max_length is smaller
+            than generated tokens.
 
         Returns
         -------
