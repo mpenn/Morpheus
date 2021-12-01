@@ -628,7 +628,7 @@ def monitor(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Buffer results", **command_kwargs)
+@click.command(short_help="Buffer results", deprecated=True, **command_kwargs)
 @click.option('--count', type=int, default=1000, help="")
 @prepare_command(False)
 def buffer(ctx: click.Context, **kwargs):
@@ -664,7 +664,7 @@ def dropna(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Delay results", **command_kwargs)
+@click.command(short_help="Delay results for a certain duration", deprecated=True, **command_kwargs)
 @click.option('--duration', type=str, help="Time to delay messages in the pipeline. Follows the pandas interval format")
 @prepare_command(False)
 def delay(ctx: click.Context, **kwargs):
@@ -1142,7 +1142,7 @@ def timeseries(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="", **command_kwargs)
+@click.command(short_help="Validates pipeline output against an expected output", **command_kwargs)
 @click.option('--val_file_name', type=click.Path(exists=True, dir_okay=False), required=True, help="")
 @click.option('--results_file_name', type=click.Path(dir_okay=False), required=True, help="")
 @click.option('--overwrite', is_flag=True, help="")
@@ -1223,7 +1223,7 @@ def to_kafka(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Write out vizualization data frames", **command_kwargs)
+@click.command(short_help="Write out vizualization data frames", deprecated=True, **command_kwargs)
 @click.option('--out_dir',
               type=click.Path(dir_okay=True, file_okay=False),
               default="./viz_frames",
