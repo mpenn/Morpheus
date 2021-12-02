@@ -135,32 +135,64 @@ FROM cudf_build as build
 COPY . ./
 
 # Build/Install neo/morpheus C++ libraries. Need buildkit and ssh auth to get private repos
-RUN --mount=type=ssh source activate morpheus && INSTALL_PREFIX="/workspace/.cache/install" ./scripts/compile.sh
+RUN --mount=type=ssh source activate morpheus && ./scripts/compile.sh
+
+# Install libraries to alternate folder and package into a single tar to preserve symlinks (Docker will remove these)
+RUN source activate morpheus &&\
+    DESTDIR="/workspace/.cache/install" cmake --build build -j --target install &&\
+    mkdir -p /workspace/.cache/dist &&\
+    cd /workspace/.cache/install/opt/conda/envs/morpheus &&\
+    tar -zcvf /workspace/.cache/dist/install.tar.gz ./lib ./bin ./share &&\
+    cd /workspace
 
 # Build/Install morpheus CLI and put on PATH. Export wheels for installation
 RUN source activate morpheus && \
     pip install . && \
+    cd /workspace/.cache/install/workspace/build &&\
     python setup.py bdist_wheel --dist-dir /workspace/.cache/dist && \
-    cd build/_deps/trtlab-build/trtlab/neo/python/ && \
+    cd /workspace/.cache/install/workspace/build/_deps/trtlab-build/trtlab/neo/python/ && \
     python setup.py bdist_wheel --dist-dir /workspace/.cache/dist && \
-    cd -
+    cd /workspace
 
 # Setup container for runtime environment
 FROM cudf_build as runtime
 
 # Copy the install directory over and the pip packages
-COPY --from=build ["/workspace/.cache/install/lib/", "/opt/conda/envs/morpheus/lib/"]
-COPY --from=build ["/opt/conda/envs/morpheus/lib/python${PYTHON_VER}/site-packages/neo*", "/opt/conda/envs/morpheus/lib/python${PYTHON_VER}/site-packages/morpheus*", "/opt/conda/envs/morpheus/lib/python${PYTHON_VER}/site-packages/"]
-COPY --from=build ["/opt/conda/envs/morpheus/bin/morpheus*", "/opt/conda/envs/morpheus/bin/"]
 COPY --from=build ["/workspace/.cache/dist/*", "/tmp/"]
 
+# Install the binaries by untarring
+RUN source activate morpheus &&\
+    cd /opt/conda/envs/morpheus &&\
+    tar -zxvf /tmp/install.tar.gz &&\
+    rm /tmp/install.tar.gz &&\
+    cd -
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+      patchelf \
+    && rm -rf /var/lib/apt/lists/*
+
+# TMP: Hard coded the installed RPATH for UCX
+RUN source activate morpheus &&\
+    patchelf --set-rpath '/opt/conda/envs/morpheus/lib' /opt/conda/envs/morpheus/lib/libucm.so.0.0.0 &&\
+    patchelf --set-rpath '/opt/conda/envs/morpheus/lib' /opt/conda/envs/morpheus/lib/libucs.so.0.0.0 &&\
+    patchelf --set-rpath '/opt/conda/envs/morpheus/lib' /opt/conda/envs/morpheus/lib/libuct.so.0.0.0 &&\
+    patchelf --set-rpath '/opt/conda/envs/morpheus/lib' /opt/conda/envs/morpheus/lib/libucp.so.0.0.0
+
+# Install the Python packages
 RUN source activate morpheus && \
     pip install /tmp/neo-* && \
     pip install /tmp/morpheus-* && \
     rm /tmp/neo-* && \
     rm /tmp/morpheus-*
 
-COPY . ./
+# Only copy specific files/folders over that are necessary for runtime
+COPY ["*.md", "LICENSE", "./"]
+COPY "./data" "./data"
+COPY "./docker" "./docker"
+COPY "./docs" "./docs"
+COPY "./examples" "./examples"
+COPY "./scripts" "./scripts"
 
 # Use morpheus by default
 CMD [ "morpheus" ]

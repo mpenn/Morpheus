@@ -140,4 +140,29 @@ if (NEO_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
+set(MORPHEUS_PYTHON_FILES "")
+
+# Manually install the below files. install(DIRECTORY) doesnt work well and
+# makes it impossible to get these files and neo/*.py in one command.
+list(PREPEND MORPHEUS_PYTHON_FILES
+  "pyproject.toml"
+  "setup.cfg"
+  "setup.py"
+  "versioneer.py"
+)
+
+install(
+  FILES ${MORPHEUS_PYTHON_FILES}
+  DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+# Ensure that all python files get installed somewhere. TBD on whether
+# ${CMAKE_CURRENT_BINARY_DIR} is the correct place
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/morpheus
+  DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+  FILES_MATCHING
+    PATTERN "*.py"
+)
+
 list(POP_BACK CMAKE_MESSAGE_CONTEXT)

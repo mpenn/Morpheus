@@ -8,10 +8,10 @@ e="\033[0;90m"
 y="\033[0;33m"
 x="\033[0m"
 
-DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-"nvcr.io/ea-nvidia-morpheus/morpheus-sdk-cli"}
+DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-"nvcr.io/ea-nvidia-morpheus/morpheus"}
 DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG:-"latest"}
 
-DOCKER_ARGS="--net=host --gpus=all"
+DOCKER_ARGS="-v $PWD/models:/workspace/models --net=host --gpus=all"
 
 if [[ -z "${SSH_AUTH_SOCK}" ]]; then
    echo -e "${y}No ssh-agent auth socket found. Dependencies in private git repos may fail during build.${x}"
