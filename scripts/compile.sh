@@ -14,4 +14,4 @@ cmake -B ${BUILD_DIR} -GNinja \
    ${INSTALL_PREFIX:+"-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}"} .
 
 echo "Running CMake build..."
-cmake --build ${BUILD_DIR} -j ${INSTALL_PREFIX:+"--target install"}
+cmake --build ${BUILD_DIR} -j ${INSTALL_PREFIX:+"--target install"} "$@"

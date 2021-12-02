@@ -324,7 +324,9 @@ Note: The available commands for different types of pipelines are not the same. 
 
 ## Pipeline Validation
 
-To verify that all pipelines are working correctly, validation scripts have been added at `${MORPHEUS_ROOT}/scripts/validation`. There are scripts for each of the main workflows: Anomalous Behavioral Profiling (ABP), Humans-as-Machines-Machines-as-Humans (HAMMAH), Phishing Detection (Phishing), and Sensitive Information Detection (SID).
+To verify that all pipelines are working correctly, validation scripts have been added at `${MORPHEUS_ROOT}/scripts/validation`. There are scripts for each of the main workflows: Anomalous Behavioral Profilirun_container_release.shng (ABP), Humans-as-Machines-Machines-as-Humans (HAMMAH), Phishing Detection (Phishing), and Sensitive Information Detection (SID).
+
+Note: This assumes you have a copy of the Morpheus Models repo. If building from source, you can ensure the Models repo is downloaded by running `git submodule update --init --recursive`. When working with a pre-built container, the Models repo will need to be downloaded and mounted manually.
 
 To run all of the validation workflow scripts, use the follownig commands:
 
@@ -362,7 +364,7 @@ Run the validation scripts:
 apt update && apt install -y jq bc
 
 # Run validation scripts
-./scripts/validate/val-run-all.sh
+./scripts/validation/val-run-all.sh
 ```
 
 At the end of each workflow, a section will print the different inference workloads that were run and the validation error percentage for each. For example:

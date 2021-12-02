@@ -28,6 +28,8 @@ target_link_libraries(utils
     trtlab::pyneo matx::matx cudf::cudf Python3::NumPy
 )
 
+set_target_properties(utils PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_utils)
+
 # Cudf_helpers needs to come first
 morpheus_add_cython_libraries(./cudf_helpers.pyx
   LINK_TARGETS utils
@@ -40,3 +42,13 @@ morpheus_add_pybind11_module(./common.cpp
 
 morpheus_add_pybind11_module(./messages.cpp LINK_TARGETS ${cudf_helpers_target} utils)
 morpheus_add_pybind11_module(./stages.cpp LINK_TARGETS ${cudf_helpers_target} TritonClient::httpclient utils)
+
+install(
+  TARGETS utils
+  EXPORT ${PROJECT_NAME}-targets
+)
+
+install(
+  DIRECTORY include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)

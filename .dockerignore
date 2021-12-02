@@ -5,6 +5,7 @@
 **/*.ipynb_checkpoints
 **/*Dockerfile*
 .tmp
+./models
 
 # Ignore any build folder
 ./build*

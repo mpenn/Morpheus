@@ -27,11 +27,27 @@ set(CYTHON_FLAGS "--directive binding=True,boundscheck=False,wraparound=False,em
 # Save the root of the python for relative paths
 set(MORPHEUS_PY_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# Determine the install directory for built modules
+file(RELATIVE_PATH python_relative_install ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR} ${Python3_SITELIB})
+
 if(MORPHEUS_PYTHON_INPLACE_BUILD)
   message(STATUS "Performing inplace build for Python modules. Use `pip install -e .` from the python folder to install Neo.")
 endif()
 
-function(morpheus_get_python_module_name TARGET_NAME MODULE_NAME CPP_FILENAME)
+function(morpheus_get_python_module_name CPP_FILENAME)
+
+  set(prefix NEO)
+  set(flags "")
+  set(singleValues OUTPUT_TARGET_NAME OUTPUT_MODULE_NAME OUTPUT_RELATIVE_PATH)
+  set(multiValues "")
+
+  include(CMakeParseArguments)
+  cmake_parse_arguments(${prefix}
+                        "${flags}"
+                        "${singleValues}"
+                        "${multiValues}"
+                        ${ARGN})
+
   get_filename_component(py_module_name ${CPP_FILENAME} NAME_WLE)
 
   # Get the relative path from the py root
@@ -41,8 +57,15 @@ function(morpheus_get_python_module_name TARGET_NAME MODULE_NAME CPP_FILENAME)
   # Convert the relative path to a namespace. i.e. `cuml/package/module` -> `cuml::package::module
   string(REPLACE "/" "." py_module_namespace ${py_module_path})
 
-  set(${TARGET_NAME} "${py_module_namespace}.${py_module_name}" PARENT_SCOPE)
-  set(${MODULE_NAME} "${py_module_name}" PARENT_SCOPE)
+  if (NEO_OUTPUT_TARGET_NAME)
+    set(${NEO_OUTPUT_TARGET_NAME} "${py_module_namespace}.${py_module_name}" PARENT_SCOPE)
+  endif()
+  if (NEO_OUTPUT_MODULE_NAME)
+    set(${NEO_OUTPUT_MODULE_NAME} "${py_module_name}" PARENT_SCOPE)
+  endif()
+  if (NEO_OUTPUT_RELATIVE_PATH)
+    set(${NEO_OUTPUT_RELATIVE_PATH} "${py_module_path}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 macro(morpheus_add_python_module source_file)
@@ -66,7 +89,11 @@ macro(morpheus_add_python_module source_file)
   set(link_libs trtlab::pyneo)
 
   # Auto determine the module name
-  morpheus_get_python_module_name(TARGET_NAME MODULE_NAME ${cpp_file})
+  morpheus_get_python_module_name(${cpp_file}
+    OUTPUT_TARGET_NAME TARGET_NAME
+    OUTPUT_MODULE_NAME MODULE_NAME
+    OUTPUT_RELATIVE_PATH SOURCE_RELATIVE_PATH
+  )
 
   if (PYMOD_MODULE_NAME)
     # Overwrite the module name
