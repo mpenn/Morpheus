@@ -166,7 +166,7 @@ class SerializeStage(SinglePortStage):
         elif (self._output_type == "json"):
             fn = SerializeStage.convert_to_json
             out_type = typing.List[str]
-        elif (self._output_type == "pandas"):
+        elif (self._output_type == "csv"):
             fn = SerializeStage.convert_to_csv
             out_type = typing.List[str]
         else:
