@@ -25,6 +25,7 @@ import neo
 import numpy as np
 import pandas as pd
 import typing_utils
+from neo.core import operators as ops
 
 import cudf
 from cudf.core.subword_tokenizer import SubwordTokenizer
@@ -99,59 +100,24 @@ class DeserializeStage(MultiMessageStage):
 
         return output
 
-    @staticmethod
-    def add_start_time(x: MultiMessage):
-
-        curr_time = get_time_ms()
-
-        x.set_meta("ts_start", curr_time)
-
-        return x
-
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
         out_type = MultiMessage
 
-        def deserialize_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: MessageMeta):
+        def node_fn(input: neo.Observable, output: neo.Subscriber):
 
-                message_list: typing.List[MultiMessage] = DeserializeStage.process_dataframe(x, self._batch_size)
-
-                for y in message_list:
-
-                    output.on_next(y)
-
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.map(partial(DeserializeStage.process_dataframe, batch_size=self._batch_size)),
+                       ops.flatten()).subscribe(output)
 
         if (Config.get().use_cpp):
             stream = neos.DeserializeStage(seg, self.unique_name, self._batch_size)
         else:
-            stream = seg.make_node_full(self.unique_name + "-flatten", deserialize_fn)
+            stream = seg.make_node_full(self.unique_name, node_fn)
 
         seg.make_edge(input_stream[0], stream)
 
         return stream, out_type
-
-    def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
-
-        if (self._should_log_timestamps):
-
-            stream = seg.make_node(self.unique_name + "-ts", DeserializeStage.add_start_time)
-            seg.make_edge(out_pair[0], stream)
-
-            # Only have one port
-            out_pair = (stream, out_pair[1])
-
-        return super()._post_build_single(seg, out_pair)
 
 
 class DropNullStage(SinglePortStage):
@@ -195,22 +161,13 @@ class DropNullStage(SinglePortStage):
 
         # Finally, flatten to a single stream
         def node_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: MessageMeta):
-                
-                x.df = x.df[~x.df[self._column].isna()]
+            def on_next(x: MessageMeta):
 
-                if (not x.empty):
-                    output.on_next(x)
+                y = MessageMeta(x.df[~x.df[self._column].isna()])
 
-            def obs_on_error(x):
-                output.on_error(x)
+                return y
 
-            def obs_on_completed():
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.map(on_next), ops.filter(lambda x: not x.df.empty)).subscribe(output)
 
         node = seg.make_node_full(self.unique_name, node_fn)
         seg.make_edge(stream, node)

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import time
 import weakref
 
@@ -25,6 +26,8 @@ from morpheus.config import Config
 from morpheus.pipeline.messages import MessageMeta
 from morpheus.pipeline.pipeline import SingleOutputSource
 from morpheus.pipeline.pipeline import StreamPair
+
+logger = logging.getLogger(__name__)
 
 
 class KafkaSourceStage(SingleOutputSource):
@@ -124,93 +127,134 @@ class KafkaSourceStage(SingleOutputSource):
             # weakref.finalize(self, lambda c=consumer: _close_consumer(c))
             tp = ck.TopicPartition(self._topic, 0, 0)
 
-            # blocks for consumer thread to come up
-            consumer.get_watermark_offsets(tp)
+            attempts = 0
+            max_attempts = 5
 
-            if npartitions is None:
-
-                kafka_cluster_metadata = consumer.list_topics(self._topic)
-
-                if self._engine == "cudf":  # pragma: no cover
-                    npartitions = len(kafka_cluster_metadata[self._topic.encode('utf-8')])
-                else:
-                    npartitions = len(kafka_cluster_metadata.topics[self._topic].partitions)
-
-            positions = [0] * npartitions
-
-            tps = []
-            for partition in range(npartitions):
-                tps.append(ck.TopicPartition(self._topic, partition))
-
-            while s.is_subscribed():
+            # Attempt to connect to the cluster. Try 5 times before giving up
+            while attempts < max_attempts:
                 try:
-                    committed = consumer.committed(tps, timeout=1)
-                except ck.KafkaException:
-                    pass
-                else:
-                    for tp in committed:
-                        positions[tp.partition] = tp.offset
+                    # blocks for consumer thread to come up
+                    consumer.get_watermark_offsets(tp)
+
+                    logger.debug("Connected to Kafka source at '%s' on attempt #%d/%d",
+                                 self._consumer_conf["bootstrap.servers"],
+                                 attempts + 1,
+                                 max_attempts)
+
                     break
+                except (RuntimeError, ck.KafkaException):
+                    attempts += 1
 
-            while s.is_subscribed():
-                out = []
+                    # Raise the error if we hit the max
+                    if (attempts >= max_attempts):
+                        logger.exception(("Error while getting Kafka watermark offsets. Max attempts (%d) reached. "
+                                          "Check the bootstrap_servers parameter ('%s')"),
+                                         max_attempts,
+                                         self._consumer_conf["bootstrap.servers"])
+                        raise
+                    else:
+                        logger.warning("Error while getting Kafka watermark offsets. Attempt #%d/%d",
+                                       attempts,
+                                       max_attempts,
+                                       exc_info=True)
 
-                if self._refresh_partitions:
+                        # Exponential backoff
+                        time.sleep(2.0**attempts)
+
+            try:
+                if npartitions is None:
+
                     kafka_cluster_metadata = consumer.list_topics(self._topic)
 
                     if self._engine == "cudf":  # pragma: no cover
-                        new_partitions = len(kafka_cluster_metadata[self._topic.encode('utf-8')])
+                        npartitions = len(kafka_cluster_metadata[self._topic.encode('utf-8')])
                     else:
-                        new_partitions = len(kafka_cluster_metadata.topics[self._topic].partitions)
+                        npartitions = len(kafka_cluster_metadata.topics[self._topic].partitions)
 
-                    if new_partitions > npartitions:
-                        positions.extend([-1001] * (new_partitions - npartitions))
-                        npartitions = new_partitions
+                positions = [0] * npartitions
 
+                tps = []
                 for partition in range(npartitions):
+                    tps.append(ck.TopicPartition(self._topic, partition))
 
-                    tp = ck.TopicPartition(self._topic, partition, 0)
-
+                while s.is_subscribed():
                     try:
-                        low, high = consumer.get_watermark_offsets(tp, timeout=0.1)
-                    except (RuntimeError, ck.KafkaException):
-                        continue
+                        committed = consumer.committed(tps, timeout=1)
+                    except ck.KafkaException:
+                        pass
+                    else:
+                        for tp in committed:
+                            positions[tp.partition] = tp.offset
+                        break
 
-                    started = True
+                while s.is_subscribed():
+                    out = []
 
-                    if 'auto.offset.reset' in consumer_params.keys():
-                        if consumer_params['auto.offset.reset'] == 'latest' and positions[partition] == -1001:
+                    if self._refresh_partitions:
+                        kafka_cluster_metadata = consumer.list_topics(self._topic)
+
+                        if self._engine == "cudf":  # pragma: no cover
+                            new_partitions = len(kafka_cluster_metadata[self._topic.encode('utf-8')])
+                        else:
+                            new_partitions = len(kafka_cluster_metadata.topics[self._topic].partitions)
+
+                        if new_partitions > npartitions:
+                            positions.extend([-1001] * (new_partitions - npartitions))
+                            npartitions = new_partitions
+
+                    for partition in range(npartitions):
+
+                        tp = ck.TopicPartition(self._topic, partition, 0)
+
+                        try:
+                            low, high = consumer.get_watermark_offsets(tp, timeout=0.1)
+                        except (RuntimeError, ck.KafkaException):
+                            continue
+
+                        if 'auto.offset.reset' in consumer_params.keys():
+                            if consumer_params['auto.offset.reset'] == 'latest' and positions[partition] == -1001:
+                                positions[partition] = high
+
+                        current_position = positions[partition]
+
+                        lowest = max(current_position, low)
+
+                        if high > lowest + self._max_batch_size:
+                            high = lowest + self._max_batch_size
+                        if high > lowest:
+                            out.append((consumer_params, self._topic, partition, self._keys, lowest, high - 1))
                             positions[partition] = high
 
-                    current_position = positions[partition]
+                    consumer_params['auto.offset.reset'] = 'earliest'
 
-                    lowest = max(current_position, low)
+                    if (out):
+                        for part in out:
 
-                    if high > lowest + self._max_batch_size:
-                        high = lowest + self._max_batch_size
-                    if high > lowest:
-                        out.append((consumer_params, self._topic, partition, self._keys, lowest, high - 1))
-                        positions[partition] = high
+                            meta = self._kafka_params_to_messagemeta(part)
 
-                consumer_params['auto.offset.reset'] = 'earliest'
+                            # Once the meta goes out of scope, commit it
+                            def commit(topic, part_no, keys, lowest, offset):
+                                # topic, part_no, _, _, offset = part[1:]
+                                try:
+                                    _tp = ck.TopicPartition(topic, part_no, offset + 1)
+                                    consumer.commit(offsets=[_tp], asynchronous=True)
+                                except:
+                                    logger.exception(("Error occurred in `from-kafka` stage with "
+                                                      "broker '%s' while committing message: %d"),
+                                                     self._consumer_conf["bootstrap.servers"],
+                                                     offset)
 
-                if (out):
-                    for part in out:
+                            weakref.finalize(meta, commit, *part[1:])
 
-                        meta = self._kafka_params_to_messagemeta(part)
+                            # Push the message meta
+                            s.on_next(meta)
+                    else:
+                        time.sleep(self._poll_interval)
+            except Exception:
+                logger.exception(("Error occurred in `from-kafka` stage with broker '%s' while processing messages"),
+                                 self._consumer_conf["bootstrap.servers"])
+                raise
 
-                        # Once the meta goes out of scope, commit it
-                        def commit(topic, part_no, keys, lowest, offset):
-                            # topic, part_no, _, _, offset = part[1:]
-                            _tp = ck.TopicPartition(topic, part_no, offset + 1)
-                            consumer.commit(offsets=[_tp], asynchronous=True)
-
-                        weakref.finalize(meta, commit, *part[1:])
-
-                        # Push the message meta
-                        s.on_next(meta)
-                else:
-                    time.sleep(self._poll_interval)
         finally:
             # Close the consumer and call on_completed
             consumer.close()
@@ -235,6 +279,9 @@ class KafkaSourceStage(SingleOutputSource):
                   batch_timeout=10000,
                   delimiter="\n",
                   message_format="json"):
+        """
+        Replicates `custreamz.Consumer.read_gdf` function which does not work for some reason
+        """
 
         if topic is None:
             raise ValueError("ERROR: You must specifiy the topic " "that you want to consume from")
@@ -265,7 +312,8 @@ class KafkaSourceStage(SingleOutputSource):
             result = cudf_readers[message_format](kafka_datasource, engine="cudf", lines=lines)
 
             return cudf.DataFrame(data=result._data, index=result._index)
-
+        except Exception as ex:
+            logger.exception("Error occurred converting KafkaDatasource to Dataframe.")
         finally:
             if (kafka_datasource is not None):
                 # Close up the cudf datasource instance

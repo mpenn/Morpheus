@@ -22,6 +22,7 @@ from functools import partial
 
 import neo
 import pandas as pd
+from neo.core import operators as ops
 from pandas.core.frame import DataFrame
 
 import cudf
@@ -227,29 +228,13 @@ class ValidationStage(MultiMessageStage):
 
         # Store all messages until on_complete is called and then build the dataframe and compare
         def node_fn(input: neo.Observable, output: neo.Subscriber):
-
-            delayed_messages = []
-
-            def obs_on_next(x):
-
-                delayed_messages.append(x)
-
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
+            def do_compare(delayed_messages):
 
                 self._do_comparison(delayed_messages)
 
-                # Now push all the messages
-                for x in delayed_messages:
-                    output.on_next(x)
+                return delayed_messages
 
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.to_list(), ops.map(do_compare), ops.flatten()).subscribe(output)
 
         node = seg.make_node_full(self.unique_name, node_fn)
         seg.make_edge(input_stream[0], node)

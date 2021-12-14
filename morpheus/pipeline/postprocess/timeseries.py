@@ -8,6 +8,7 @@ from math import ceil
 import cupy as cp
 import neo
 import pandas as pd
+from neo.core import operators as ops
 from streamz.core import Stream
 from streamz.core import sync
 
@@ -552,31 +553,27 @@ class TimeSeriesStage(SinglePortStage):
         out_type = input_stream[1]
 
         def node_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: MultiResponseAEMessage):
+            def on_next(x: MultiResponseAEMessage):
 
                 message_list: typing.List[MultiResponseMessage] = self._call_timeseries_user(x)
 
-                for y in message_list:
+                return message_list
 
-                    output.on_next(y)
+            def on_completed():
 
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
+                to_send = []
 
                 for ts in self._timeseries_per_user.values():
                     message_list: typing.List[MultiResponseMessage] = ts._calc_timeseries(None, True)
 
-                    for y in message_list:
+                    to_send = to_send + message_list
 
-                        output.on_next(y)
+                return to_send if len(to_send) > 0 else None
 
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.map(on_next),
+                       ops.filter(lambda x: len(x) > 0),
+                       ops.on_completed(on_completed),
+                       ops.flatten()).subscribe(output)
 
         stream = seg.make_node_full(self.unique_name, node_fn)
 

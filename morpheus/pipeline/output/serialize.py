@@ -17,6 +17,7 @@ import json
 import re
 import typing
 from functools import partial
+from io import StringIO
 
 import neo
 import pandas as pd
@@ -121,11 +122,16 @@ class SerializeStage(SinglePortStage):
 
         df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
 
+        str_buf = StringIO()
+
         # Convert to list of json string objects
-        output_strs = [json.dumps(y) for y in df.to_dict(orient="records")]
+        df.to_json(str_buf, orient="records", lines=True)
+
+        # Start from beginning
+        str_buf.seek(0)
 
         # Return list of strs to write out
-        return output_strs
+        return str_buf.readlines()
 
     @staticmethod
     def convert_to_csv(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):

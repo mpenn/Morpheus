@@ -18,6 +18,7 @@ from functools import reduce
 
 import cupy as cp
 import neo
+from neo.core import operators as ops
 from tqdm import tqdm
 
 import cudf
@@ -148,26 +149,7 @@ class TriggerStage(SinglePortStage):
         # Store all messages until on_complete is called and then push them
         def node_fn(input: neo.Observable, output: neo.Subscriber):
 
-            delayed_messages = []
-
-            def obs_on_next(x):
-
-                delayed_messages.append(x)
-
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
-
-                # Now push all the messages
-                for x in delayed_messages:
-                    output.on_next(x)
-
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.to_list(), ops.flatten()).subscribe(output)
 
         node = seg.make_node_full(self.unique_name, node_fn)
         seg.make_edge(input_stream[0])
@@ -468,30 +450,13 @@ class FilterDetectionsStage(SinglePortStage):
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
-        # Reduce messages to only have detections
-        stream = seg.make_node(self.unique_name, self.filter)
-
-        seg.make_edge(input_stream[0], stream)
-
         # Convert list back to single MultiResponseProbsMessage
         def flatten_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: typing.List):
 
-                for y in x:
-                    output.on_next(y)
+            input.pipe(ops.map(self.filter), ops.flatten()).subscribe(output)
 
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
-
-        flattened = seg.make_node_full(self.unique_name + "-flatten", flatten_fn)
-        seg.make_edge(stream, flattened)
+        flattened = seg.make_node_full(self.unique_name, flatten_fn)
+        seg.make_edge(input_stream[0], flattened)
         stream = flattened
 
         return stream, MultiResponseProbsMessage
