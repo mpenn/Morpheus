@@ -22,6 +22,7 @@ from functools import partial
 import neo
 import numpy as np
 import pandas as pd
+from neo.core import operators as ops
 
 from morpheus._lib.common import FiberQueue
 from morpheus.config import Config
@@ -418,44 +419,29 @@ class CloudTrailSourceStage(SingleOutputSource):
         out_stream = out_pair[0]
         out_type = out_pair[1]
 
-        # At this point, we have batches of filenames to process. Make a node for processing batches of filenames into
-        # batches of dataframes
-        filenames_to_df = seg.make_node(
-            self.unique_name + "-filetodf",
-            partial(
-                self.files_to_dfs_per_user,
-                file_type=self._file_type,
-                userid_column_name=self._user_column_name,
-                feature_columns=None,  # Use None here to leave all columns in
-                userid_filter=self._userid_filter,
-                repeat_count=self._repeat_count))
-        seg.make_edge(out_stream, filenames_to_df)
+        def node_fn(input: neo.Observable, output: neo.Subscriber):
 
-        # Now group the batch of dataframes into a single df, split by user, and send a single UserMessageMeta per user
-        df_to_meta = seg.make_node(self.unique_name + "-usersplit", self._build_user_metadata)
-        seg.make_edge(filenames_to_df, df_to_meta)
+            input.pipe(
+                # At this point, we have batches of filenames to process. Make a node for processing batches of
+                # filenames into batches of dataframes
+                ops.map(
+                    partial(
+                        self.files_to_dfs_per_user,
+                        file_type=self._file_type,
+                        userid_column_name=self._user_column_name,
+                        feature_columns=None,  # Use None here to leave all columns in
+                        userid_filter=self._userid_filter,
+                        repeat_count=self._repeat_count)),
+                # Now group the batch of dataframes into a single df, split by user, and send a single UserMessageMeta
+                # per user
+                ops.map(self._build_user_metadata),
+                # Finally flatten to single meta
+                ops.flatten()).subscribe(output)
 
-        # Finally, flatten to a single stream
-        def flatten_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: typing.List):
+        post_node = seg.make_node_full(self.unique_name + "-post", node_fn)
+        seg.make_edge(out_stream, post_node)
 
-                for y in x:
-                    output.on_next(y)
-
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
-
-        flattened = seg.make_node_full(self.unique_name + "-post", flatten_fn)
-        seg.make_edge(df_to_meta, flattened)
-
-        out_stream = flattened
+        out_stream = post_node
         out_type = UserMessageMeta
 
         return super()._post_build_single(seg, (out_stream, out_type))

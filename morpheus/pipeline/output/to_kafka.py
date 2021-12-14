@@ -12,15 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import time
 import typing
 
 import confluent_kafka as ck
 import neo
+from neo.core import operators as ops
 
 from morpheus.config import Config
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
+
+logger = logging.getLogger(__name__)
 
 
 class WriteToKafkaStage(SinglePortStage):
@@ -66,7 +70,6 @@ class WriteToKafkaStage(SinglePortStage):
 
         # Convert the messages to rows of strings
         stream = input_stream[0]
-        input_type = input_stream[1]
 
         def node_fn(input: neo.Observable, output: neo.Subscriber):
 
@@ -74,17 +77,20 @@ class WriteToKafkaStage(SinglePortStage):
 
             outstanding_requests = 0
 
-            def obs_on_next(x: typing.List[str]):
+            def on_next(x: typing.List[str]):
                 nonlocal outstanding_requests
 
-                futures = []
-
-                def cb(err, msg):
+                def cb(_, msg):
                     if msg is not None and msg.value() is not None:
                         # fut.set_result(None)
                         pass
                     else:
                         # fut.set_exception(err or msg.error())
+                        logger.error(("Error occurred in `to-kafka` stage with broker '%s' "
+                                      "while committing message:\n%s\nError:\n%s"),
+                                     self._kafka_conf["bootstrap.servers"],
+                                     msg.value(),
+                                     msg.error())
                         output.on_error(msg.error())
 
                 for m in x:
@@ -97,9 +103,12 @@ class WriteToKafkaStage(SinglePortStage):
                             break
                         except BufferError:
                             time.sleep(self._poll_time)
-                        except Exception as e:
-                            output.on_error(e)
-                            return
+                        except Exception:
+                            logger.exception(("Error occurred in `to-kafka` stage with broker '%s' "
+                                              "while committing message:\n%s"),
+                                             self._kafka_conf["bootstrap.servers"],
+                                             m)
+                            break
                         finally:
                             # Try and process some
                             producer.poll(0)
@@ -107,20 +116,13 @@ class WriteToKafkaStage(SinglePortStage):
                 while len(producer) > 0:
                     producer.poll(0)
 
-                output.on_next(x)
+                return x
 
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
+            def on_completed():
 
                 producer.flush(-1)
 
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.map(on_next), ops.on_completed(on_completed)).subscribe(output)
 
             assert outstanding_requests == 0, "Not all inference requests were completed"
 

@@ -17,6 +17,7 @@ import typing
 
 import neo
 import typing_utils
+from neo.core import operators as ops
 
 import morpheus._lib.stages as neos
 from morpheus.config import Config
@@ -110,23 +111,11 @@ class FileSourceStage(SingleOutputSource):
         # Convert our list of dataframes into the desired type. Flatten if necessary
         if (typing_utils.issubtype(out_type, typing.List)):
 
-            def flatten_fn(input: neo.Observable, output: neo.Subscriber):
-                def obs_on_next(x: typing.List):
+            def node_fn(input: neo.Observable, output: neo.Subscriber):
 
-                    for y in x:
-                        output.on_next(y)
+                input.pipe(ops.flatten()).subscribe(output)
 
-                def obs_on_error(x):
-                    output.on_error(x)
-
-                def obs_on_completed():
-                    output.on_completed()
-
-                obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-                input.subscribe(obs)
-
-            flattened = seg.make_node_full(self.unique_name + "-post", flatten_fn)
+            flattened = seg.make_node_full(self.unique_name + "-post", node_fn)
             seg.make_edge(out_stream, flattened)
             out_stream = flattened
             out_type = typing.get_args(out_type)[0]
@@ -139,7 +128,7 @@ class FileSourceStage(SingleOutputSource):
             self._filename,
             self._file_type,
             filter_nulls=True,
-            df_type="pandas",
+            df_type="cudf",
         )
 
         count = 0

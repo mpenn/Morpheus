@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import torch
 from dfencoder import AutoEncoder
+from neo.core import operators as ops
 
 from morpheus.config import Config
 from morpheus.pipeline.file_types import FileTypes
@@ -254,26 +255,22 @@ class TrainAEStage(MultiMessageStage):
             get_model_fn = self._train_model
 
         def node_fn(input: neo.Observable, output: neo.Subscriber):
-            def obs_on_next(x: UserMessageMeta):
+            def on_next(x: UserMessageMeta):
 
                 model = get_model_fn(x)
 
                 full_message = MultiAEMessage(meta=x, mess_offset=0, mess_count=x.count, model=model)
 
+                to_send = []
+
                 # Now split into batches
                 for i in range(0, full_message.mess_count, self._batch_size):
 
-                    output.on_next(full_message.get_slice(i, min(i + self._batch_size, full_message.mess_count)))
+                    to_send.append(full_message.get_slice(i, min(i + self._batch_size, full_message.mess_count)))
 
-            def obs_on_error(x):
-                output.on_error(x)
+                return to_send
 
-            def obs_on_completed():
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.map(on_next), ops.flatten()).subscribe(output)
 
         node = seg.make_node_full(self.unique_name, node_fn)
         seg.make_edge(stream, node)

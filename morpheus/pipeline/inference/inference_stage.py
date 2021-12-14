@@ -21,6 +21,7 @@ from functools import reduce
 
 import cupy as cp
 import neo
+from neo.core import operators as ops
 from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
@@ -252,7 +253,7 @@ class InferenceStage(MultiMessageStage):
 
             outstanding_requests = 0
 
-            def obs_on_next(x: MultiInferenceMessage):
+            def on_next(x: MultiInferenceMessage):
                 nonlocal outstanding_requests
 
                 batches = self._split_batches(x, self._max_batch_size)
@@ -283,17 +284,9 @@ class InferenceStage(MultiMessageStage):
                 for f in fut_list:
                     f.result()
 
-                output.on_next(output_message)
+                return output_message
 
-            def obs_on_error(x):
-                output.on_error(x)
-
-            def obs_on_completed():
-                output.on_completed()
-
-            obs = neo.Observer.make_observer(obs_on_next, obs_on_error, obs_on_completed)
-
-            input.subscribe(obs)
+            input.pipe(ops.map(on_next)).subscribe(output)
 
             assert outstanding_requests == 0, "Not all inference requests were completed"
 
