@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
+# Copyright (c) 2021, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Reports relevant environment information useful for diagnosing and
 # debugging cuDF issues.
-# Usage: 
+# Usage:
 # "./print_env.sh" - prints to stdout
 # "./print_env.sh > env.txt" - prints to file "env.txt"
 
@@ -14,16 +28,16 @@ git submodule status --recursive
 else
 echo "Not inside a git repository"
 fi
-echo 
+echo
 
 echo "***OS Information***"
 cat /etc/*-release
 uname -a
-echo 
+echo
 
 echo "***GPU Information***"
 nvidia-smi
-echo 
+echo
 
 echo "***CPU***"
 lscpu
@@ -31,15 +45,15 @@ echo
 
 echo "***CMake***"
 which cmake && cmake --version
-echo 
+echo
 
 echo "***g++***"
 which g++ && g++ --version
-echo 
+echo
 
 echo "***nvcc***"
 which nvcc && nvcc --version
-echo 
+echo
 
 echo "***Python***"
 which python && python -c "import sys; print('Python {0}.{1}.{2}'.format(sys.version_info[0], sys.version_info[1], sys.version_info[2]))"
