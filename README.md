@@ -37,7 +37,7 @@ docker pull nvcr.io/ea-nvidia-morpheus/morpheus-sdk-cli:latest
 To manually build the container, run the following from the repo root:
 
 ```bash
-./docker/build_dev_container.sh
+./docker/build_container_dev.sh
 ```
 
 This will create the `morpheus:YYMMDD` where `YYMMDD` is the current 2 digit year, month and day respectively. See the `CONTRIBUTING.md` guide for more information on building the container and available options.

@@ -27,7 +27,7 @@ More information can be found at: [Contributor Code of Conduct](CODE_OF_CONDUCT.
 
 1. Find an issue to work on. The best way is to look for the [good first issue](https://gitlab-master.nvidia.com/morpheus/morpheus/-/issues).
 2. Comment on the issue stating that you are going to work on it.
-3. Code! Make sure to update unit tests!
+3. Code! Make sure to update unit tests! Ensure the [license headers are set properly](#Licensing).
 4. When done, [create your merge request](https://gitlab-master.nvidia.com/morpheus/morpheus/-/merge_requests/new).
 5. Wait for other developers to review your code and update code as needed.
 6. Once reviewed and approved, a Morpheus developer will merge your merge request.
@@ -64,19 +64,19 @@ This workflow utilizes a docker container to setup most dependencies ensuring a 
 
 1. Build the development container
    ```bash
-   ./docker/build_dev_container.sh
+   ./docker/build_container_dev.sh
    ```
    1. The container tag will default to `morpheus:YYMMDD` where `YYMMDD` is the current 2 digit year, month and day respectively. The tag can be overridden by setting `MORPHEUS_TAG`. For example,
       ```bash
-      MORPHEUS_TAG=my_tag ./docker/build_dev_container.sh
+      MORPHEUS_TAG=my_tag ./docker/build_container_dev.sh
       ```
       Would build the container `morpheus:my_tag`.
    1. Note: This does not build any Morpheus or Neo code and defers building the code until the entire repo can be mounted into a running container. This allows for faster incremental builds during development.
 2. Run the development container
    ```bash
-   ./docker/run_dev_container.sh
+   ./docker/run_container_dev.sh
    ```
-   1. The container tag follows the same rules as `build_dev_container.sh` and will default to the current `YYMMDD`. Specify the desired tag with `MORPHEUS_TAG`. i.e. `MORPHEUS_TAG=my_tag ./docker/run_dev_container.sh`
+   1. The container tag follows the same rules as `build_container_dev.sh` and will default to the current `YYMMDD`. Specify the desired tag with `MORPHEUS_TAG`. i.e. `MORPHEUS_TAG=my_tag ./docker/run_container_dev.sh`
    2. This will automatically mount the current working directory to `/workspace`. In addition, this script sets up `SSH_AUTH_SOCK` to allow docker containers to pull from private repos.
 3. Compile Morpheus
    ```bash
@@ -157,6 +157,57 @@ Due to the large number of dependencies, it's common to run into build issues. T
  - Message indicating `git apply ...` failed
    - Many of the dependencies require small patches to make them work. These patches must be applied once and only once. If you see this error, try deleting the offending package from the `build/_deps/<offending_packag>` directory or from `.cache/cpm/<offending_package>`.
    - If all else fails, delete the entire `build/` directory and `.cache/` directory.
+
+## Licensing
+Morpheus is licensed under the Apache v2.0 license. All new source files including CMake and other build scripts should contain the Apache v2.0 license header. Any edits to existing source code should update the date range of the copyright to the current year. The format for the license header is:
+
+```
+/*
+ * SPDX-FileCopyrightText: Copyright (c) <year>, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+ ```
+
+### Thirdparty code
+Thirdparty code included in the source tree (that is not pulled in as an external dependency) must be compatible with the Apache v2.0 license and should retain the original license along with a url to the source. If this code is modified, it should contain both the Apache v2.0 license followed by the original license of the code and the url to the original code.
+
+Ex:
+```
+/**
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+//
+// Original Source: https://github.com/org/other_project
+//
+// Original License:
+// ...
+```
 
 
 ---
