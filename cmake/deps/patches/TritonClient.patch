@@ -25,7 +25,7 @@ index 4df5a71..967c0ea 100644
 +         LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/libgrpcclient.ldscript"
       )
    endif() # NOT WIN32
-
+ 
 @@ -312,7 +312,7 @@ if(TRITON_ENABLE_CC_HTTP OR TRITON_ENABLE_PERF_ANALYZER)
         httpclient
         PROPERTIES
@@ -34,3 +34,4 @@ index 4df5a71..967c0ea 100644
 +         LINK_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/libhttpclient.ldscript"
       )
    endif() # NOT WIN32
+ 
