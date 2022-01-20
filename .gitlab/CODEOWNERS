@@ -1,5 +1,5 @@
 # Engineering is requried for changes to `morpheus`
-/morpheus/ @morpheus/approvers/eng
+/morpheus/ @morpheus/approvers
 
 # Data Science is requried for changes to `models`
 /models/ @morpheus/approvers/ds
