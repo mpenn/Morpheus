@@ -19,7 +19,9 @@ set -e +o pipefail
 # set -v
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-MORPHEUS_ROOT=$(realpath ${MORPHEUS_ROOT:-"${SCRIPT_DIR}/../../.."})
+
+# Load the utility scripts
+source ${SCRIPT_DIR}/../val-run-pipeline.sh
 
 ABP_INPUT_FILE=${ABP_INPUT_FILE:-"${MORPHEUS_ROOT}/models/datasets/validation-data/abp-validation-data.jsonlines"}
 ABP_TRUTH_FILE=${ABP_TRUTH_FILE:-"${MORPHEUS_ROOT}/models/datasets/validation-data/abp-validation-data.jsonlines"}
@@ -34,9 +36,6 @@ MODEL_EXTENSION="${MODEL_FILENAME##*.}"
 MODEL_NAME="${MODEL_FILENAME%.*}"
 
 OUTPUT_FILE_BASE="${MORPHEUS_ROOT}/.tmp/val_${MODEL_NAME}-"
-
-# Load the utility scripts
-source ${SCRIPT_DIR}/../val-run-pipeline.sh
 
 if [[ "${RUN_PYTORCH}" = "1" ]]; then
    OUTPUT_FILE="${OUTPUT_FILE_BASE}pytorch.csv"
@@ -62,9 +61,10 @@ if [[ "${RUN_TRITON_XGB}" = "1" ]]; then
    OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-xgb.csv"
    VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-onnx-results.json"
 
+   TRITON_IP=${TRITON_IP:-"localhost"}
    run_pipeline_abp_${ABP_TYPE} \
       "${ABP_INPUT_FILE}" \
-      "inf-triton --model_name=abp-${ABP_TYPE}-xgb --server_url=localhost:8001 --force_convert_inputs=True" \
+      "inf-triton --model_name=abp-${ABP_TYPE}-xgb --server_url=${TRITON_URL} --force_convert_inputs=True" \
       "${OUTPUT_FILE}" \
       "${ABP_TRUTH_FILE}" \
       "${VAL_OUTPUT_FILE}"
@@ -81,9 +81,10 @@ if [[ "${RUN_TRITON_TRT}" = "1" ]]; then
    OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-trt.csv"
    VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}triton-trt-results.json"
 
+   TRITON_IP=${TRITON_IP:-"localhost"}
    run_pipeline_abp_${SID_TYPE} \
       "${PCAP_INPUT_FILE}" \
-      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=localhost:8001 --force_convert_inputs=True" \
+      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=${TRITON_URL} --force_convert_inputs=True" \
       "${OUTPUT_FILE}" \
       "${ABP_TRUTH_FILE}" \
       "${VAL_OUTPUT_FILE}"
@@ -108,9 +109,10 @@ if [[ "${RUN_TENSORRT}" = "1" ]]; then
    OUTPUT_FILE="${OUTPUT_FILE_BASE}tensorrt.csv"
    VAL_OUTPUT_FILE="${OUTPUT_FILE_BASE}tensorrt-results.json"
 
+   TRITON_IP=${TRITON_IP:-"localhost"}
    run_pipeline_abp_${SID_TYPE} \
       "${PCAP_INPUT_FILE}" \
-      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=localhost:8001 --force_convert_inputs=True" \
+      "inf-triton --model_name=sid-${SID_TYPE}-trt --server_url=${TRITON_URL} --force_convert_inputs=True" \
       "${OUTPUT_FILE}" \
       "${ABP_TRUTH_FILE}" \
       "${VAL_OUTPUT_FILE}"
