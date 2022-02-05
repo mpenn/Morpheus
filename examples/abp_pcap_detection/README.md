@@ -21,18 +21,9 @@ limitations under the License.
 ## Setup
 To run this example, an instance of Triton Inference Server and a sample dataset is required. The following steps will outline how to build and run Trtion with the provided FIL model.
 
-### FIL Backend Triton Inference Server
-
-##### Download source code
+### Triton Inference Server
 ```bash
-git clone https://github.com/triton-inference-server/fil_backend.git
-```
-Note: The `fil_backend` repo can be cloned in any directory you like. It does not need to be within the Morpheus repo.
-##### Build Docker Image
-
-```bash
-cd fil_backend
-docker build -t triton_fil -f ops/Dockerfile .
+docker pull nvcr.io/nvidia/tritonserver:21.12-py3
 ```
 
 ##### Deploy Triton Inference Server
@@ -44,7 +35,7 @@ Bind the provided `abp-pcap-xgb` directory to the docker container model repo at
 cd <MORPHEUS_ROOT>/examples/abp_pcap_detection
 
 # Launch the container
-docker run --rm --gpus=all -p 8000:8000 -p 8001:8001 -p 8002:8002 -v $PWD/abp-pcap-xgb:/models/abp-pcap-xgb --name tritonserver triton_fil tritonserver --model-repository=/models --exit-on-error=false --model-control-mode=poll --repository-poll-secs=30
+docker run --rm --gpus=all -p 8000:8000 -p 8001:8001 -p 8002:8002 -v $PWD/models/abp-pcap-xgb:/models/abp-pcap-xgb --name tritonserver nvcr.io/nvidia/tritonserver:21.12-py3 tritonserver --model-repository=/models --exit-on-error=false --model-control-mode=poll --repository-poll-secs=30
 ```
 
 ##### Verify Model Deployment
@@ -91,7 +82,7 @@ To launch the configured Morpheus pipeline with the sample data that is provided
 
 ```bash
 python run.py \
-	--input_file ../../data/pcap_dump.jsonlines \
+	--input_file ../../data/abp_pcap_dump.jsonlines \
 	--output_file pcap_out.jsonlines \
 	--model_name 'abp-pcap-xgb' \
 	--server_url localhost:8001

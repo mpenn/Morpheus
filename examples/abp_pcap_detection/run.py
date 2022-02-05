@@ -18,18 +18,8 @@ import os
 import click
 import psutil
 from abp_pcap_preprocessing import AbpPcapPreprocessingStage
-
 from morpheus.config import Config
 from morpheus.config import PipelineModes
-from morpheus.pipeline.general_stages import AddClassificationsStage
-from morpheus.pipeline.general_stages import FilterDetectionsStage
-from morpheus.pipeline.general_stages import MonitorStage
-from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
-from morpheus.pipeline.input.from_file import FileSourceStage
-from morpheus.pipeline.output.serialize import SerializeStage
-from morpheus.pipeline.output.to_file import WriteToFileStage
-from morpheus.pipeline.pipeline import LinearPipeline
-from morpheus.pipeline.preprocessing import DeserializeStage
 from morpheus.utils.logging import configure_logging
 
 
@@ -76,24 +66,41 @@ from morpheus.utils.logging import configure_logging
     default="abp-pcap-xgb",
     help="The name of the model that is deployed on Tritonserver",
 )
+@click.option(
+    "--iterative",
+    is_flag=True,
+    default=False,
+    help=("Iterative mode will emit dataframes one at a time. Otherwise a list of dataframes is emitted. "
+          "Iterative mode is good for interleaving source stages. Non-iterative is better for dask "
+          "(uploads entire dataset in one call)"),
+)
 @click.option("--server_url", required=True, help="Tritonserver url")
-def run_pipeline(num_threads,
-                 pipeline_batch_size,
-                 model_max_batch_size,
-                 model_fea_length,
-                 input_file,
-                 output_file,
-                 model_name,
-                 server_url):
-
-    # Find our current example folder
-    this_ex_dir = os.path.dirname(__file__)
+@click.option(
+    "--file_type",
+    type=click.Choice(["auto", "json", "csv"], case_sensitive=False),
+    default="auto",
+    help=("Indicates what type of file to read. "
+          "Specifying 'auto' will determine the file type from the extension."),
+)
+def run_pipeline(
+    num_threads,
+    pipeline_batch_size,
+    model_max_batch_size,
+    model_fea_length,
+    input_file,
+    output_file,
+    model_name,
+    iterative,
+    server_url,
+    file_type,
+):
 
     # Enable the default logger
     configure_logging(log_level=logging.INFO)
 
     # Its necessary to get the global config object and configure it for FIL mode
     config = Config.get()
+    config.use_cpp = False
     config.mode = PipelineModes.FIL
 
     # Below properties are specified by the command line
@@ -101,12 +108,33 @@ def run_pipeline(num_threads,
     config.pipeline_batch_size = pipeline_batch_size
     config.model_max_batch_size = model_max_batch_size
     config.feature_length = model_fea_length
+    config.class_labels = ["probs"]
+
+    kwargs = {}
+
+    from morpheus.pipeline.pipeline import LinearPipeline
 
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)
 
+    from morpheus.pipeline.general_stages import AddClassificationsStage
+    from morpheus.pipeline.general_stages import MonitorStage
+    from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
+    from morpheus.pipeline.input.from_file import FileSourceStage
+    from morpheus.pipeline.input.from_file import FileTypes
+    from morpheus.pipeline.output.to_file import WriteToFileStage
+    from morpheus.pipeline.preprocessing import DeserializeStage
+    from morpheus.pipeline.output.serialize import SerializeStage
+
     # Set source stage
-    pipeline.set_source(FileSourceStage(config, filename=input_file))
+    pipeline.set_source(
+        FileSourceStage(
+            config,
+            filename=input_file,
+            iterative=iterative,
+            file_type=FileTypes(file_type),
+            filter_null=False,
+        ))
 
     # Add a deserialize stage
     pipeline.add_stage(DeserializeStage(config))
@@ -119,7 +147,12 @@ def run_pipeline(num_threads,
 
     # Add a inference stage
     pipeline.add_stage(
-        TritonInferenceStage(config, model_name=model_name, server_url=server_url, force_convert_inputs=True))
+        TritonInferenceStage(
+            config,
+            model_name=model_name,
+            server_url=server_url,
+            force_convert_inputs=True,
+        ))
 
     # Add a monitor stage
     pipeline.add_stage(MonitorStage(config, description="Inference rate", unit="inf"))
@@ -127,21 +160,22 @@ def run_pipeline(num_threads,
     # Add a add classification stage
     pipeline.add_stage(AddClassificationsStage(config, labels=["probs"]))
 
-    # Add a filter stage
-    # Filters all benign entries
-    pipeline.add_stage(FilterDetectionsStage(config))
+    # Add a monitor stage
+    pipeline.add_stage(MonitorStage(config, description="Add classification rate", unit="add-class"))
 
     # Convert the probabilities to serialized JSON strings using the custom serialization stage
-    pipeline.add_stage(SerializeStage(config))
+    pipeline.add_stage(SerializeStage(config, **kwargs))
+
+    # Add a monitor stage
+    pipeline.add_stage(MonitorStage(config, description="Serialize rate", unit="ser"))
 
     # Write the file to the output
     pipeline.add_stage(WriteToFileStage(config, filename=output_file, overwrite=True))
 
+    # Add a monitor stage
+    pipeline.add_stage(MonitorStage(config, description="Write to file rate", unit="to-file"))
     # Build the pipeline here to see types in the vizualization
     pipeline.build()
-
-    # Save the pipeline vizualization
-    pipeline.visualize(os.path.join(this_ex_dir, "pipeline.png"), rankdir="LR")
 
     # Run the pipeline
     pipeline.run()

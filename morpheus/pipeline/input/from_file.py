@@ -127,7 +127,7 @@ class FileSourceStage(SingleOutputSource):
         df = read_file_to_df(
             self._filename,
             self._file_type,
-            filter_nulls=True,
+            filter_nulls=self._filter_null,
             df_type="cudf",
         )
 
