@@ -26,6 +26,9 @@ from morpheus.pipeline.messages import (
     MultiInferenceMessage,
     MultiMessage,
 )
+import morpheus._lib.stages as neos
+
+import neo
 
 
 class AbpPcapPreprocessingStage(PreprocessBaseStage):
@@ -58,38 +61,41 @@ class AbpPcapPreprocessingStage(PreprocessBaseStage):
 
     @staticmethod
     def pre_process_batch(x: MultiMessage, fea_len: int, fea_cols: typing.List[str]) -> MultiInferenceFILMessage:
-        x.meta.df["flags_bin"] = x.meta.df["flags"].apply(lambda x: format(int(x), "05b"))
-        x.meta.df = cudf.from_pandas(x.meta.df)
-        flag_split_df = x.meta.df["flags_bin"].str.findall("[0-1]")
+        flags_bin_series = cudf.Series(x.get_meta("flags").to_pandas().apply(lambda x: format(int(x), "05b")))
+
+        df = flags_bin_series.str.findall("[0-1]")
+
         rename_cols_dct = {0: "ack", 1: "psh", 2: "rst", 3: "syn", 4: "fin"}
 
         # adding [ack, psh, rst, syn, fin] details from the binary flag
-        for col in flag_split_df.columns:
+        for col in df.columns:
             rename_col = rename_cols_dct[col]
-            x.meta.df[rename_col] = flag_split_df[col].astype("int8")
+            df[rename_col] = df[col].astype("int8")
 
-        x.meta.df["timestamp"] = x.meta.df["timestamp"].astype("int64")
+        df = df.drop([0, 1, 2, 3, 4], axis=1)
 
-        def round_to_minute_kernel(timestamp, rollup_time, kwarg1):
+        df["flags_bin"] = flags_bin_series
+        df["timestamp"] = x.get_meta("timestamp").astype("int64")
+
+        def round_time_kernel(timestamp, rollup_time, secs):
             for i, ts in enumerate(timestamp):
-                x = ts % 60000000
-                y = 1 - (x / 60000000)
-                delta = y * 60000000
+                x = ts % secs
+                y = 1 - (x / secs)
+                delta = y * secs
                 rollup_time[i] = ts + delta
 
-        x.meta.df = x.meta.df.apply_rows(
-            round_to_minute_kernel,
+        df = df.apply_rows(
+            round_time_kernel,
             incols=["timestamp"],
             outcols=dict(rollup_time=np.int64),
-            kwargs=dict(kwarg1=0),
+            kwargs=dict(secs=60000000),
         )
-        x.meta.df["rollup_time"] = cudf.to_datetime(x.meta.df["rollup_time"], unit="us")
-        x.meta.df["rollup_time"] = x.meta.df["rollup_time"].dt.strftime("%Y-%m-%d %H:%M")
+
+        df["rollup_time"] = cudf.to_datetime(df["rollup_time"], unit="us").dt.strftime("%Y-%m-%d %H:%M")
 
         # creating flow_id "src_ip:src_port=dst_ip:dst_port"
-        x.meta.df["flow_id"] = (x.meta.df["src_ip"] + ":" + x.meta.df["src_port"].astype("str") + "="
-                                + x.meta.df["dest_ip"] + ":" + x.meta.df["dest_port"].astype("str"))
-
+        df["flow_id"] = (x.get_meta("src_ip") + ":" + x.get_meta("src_port").astype("str") + "=" +
+                         x.get_meta("dest_ip") + ":" + x.get_meta("dest_port").astype("str"))
         agg_dict = {
             "ack": "sum",
             "psh": "sum",
@@ -100,36 +106,61 @@ class AbpPcapPreprocessingStage(PreprocessBaseStage):
             "flow_id": "count",
         }
 
-        x.meta.df["data_len"] = x.meta.df["data_len"].astype("int16")
+        df["data_len"] = x.get_meta("data_len").astype("int16")
 
         # group by operation
-        x.meta.df = x.meta.df.groupby(["rollup_time", "flow_id"]).agg(agg_dict)
+        grouped_df = df.groupby(["rollup_time", "flow_id"]).agg(agg_dict)
 
         # Assumption: Each flow corresponds to a single packet flow
         # Given that the roll-up is on 1 minute, packets-per-minute(ppm)=number of flows
-        x.meta.df.rename(columns={"flow_id": "ppm"}, inplace=True)
-        x.meta.df.reset_index(inplace=True)
+        grouped_df.rename(columns={"flow_id": "ppm"}, inplace=True)
+        grouped_df.reset_index(inplace=True)
 
         # bpp - Bytes per packet per flow. In the absence of data on number-of-packets
         # and the assumption that the flow and packet are the same, bpp=bytes/packets
-        x.meta.df["bpp"] = x.meta.df["data_len"] / x.meta.df["ppm"]
-        x.meta.df["all"] = (x.meta.df["ack"] + x.meta.df["psh"] + x.meta.df["rst"] + x.meta.df["syn"]
-                            + x.meta.df["fin"])
+        grouped_df["bpp"] = grouped_df["data_len"] / grouped_df["ppm"]
+        grouped_df["all"] = (grouped_df["ack"] + grouped_df["psh"] + grouped_df["rst"] + grouped_df["syn"] +
+                             grouped_df["fin"])
+
         # ackpush/all - Number of flows with ACK+PUSH flags to all flows
-        x.meta.df["ackpush/all"] = (x.meta.df["ack"] + x.meta.df["psh"]) / x.meta.df["all"]
+        grouped_df["ackpush/all"] = (grouped_df["ack"] + grouped_df["psh"]) / grouped_df["all"]
 
         # rst/all - Number of flows with RST flag to all flows
         # syn/all - Number of flows with SYN flag to all flows
         # fin/all - Number of flows with FIN flag to all flows
         for col in ["rst", "syn", "fin"]:
             dst_col = "{}/all".format(col)
-            x.meta.df[dst_col] = x.meta.df[col] / x.meta.df["all"]
+            grouped_df[dst_col] = grouped_df[col] / grouped_df["all"]
+
+        # Adding index column to retain the order of input messages.
+        df["idx"] = df.index
+
+        df = df[["rollup_time", "flow_id", "idx"]]
+
+        # Joining grouped dataframe entries with input dataframe entries to match input messages count.
+        merged_df = df.merge(
+            grouped_df,
+            left_on=["rollup_time", "flow_id"],
+            right_on=["rollup_time", "flow_id"],
+            how="left",
+            suffixes=("_left", ""),
+        )
+
+        merged_df = merged_df.sort_values("idx")
+
+        del df, grouped_df
 
         # Convert the dataframe to cupy the same way cuml does
-        data = cp.asarray(x.meta.df[fea_cols].as_gpu_matrix(order="C"))
-
-        x.meta.df = x.meta.df[["rollup_time", "flow_id", "data_len"]].to_pandas()
+        data = cp.asarray(merged_df[fea_cols].as_gpu_matrix(order="C"))
         count = data.shape[0]
+
+        # columns required to be added to input message meta
+        req_cols = ["flow_id", "rollup_time"]
+
+        for col in req_cols:
+            x.set_meta(col, merged_df[col].to_arrow().to_pylist())
+
+        del merged_df
 
         seg_ids = cp.zeros((count, 3), dtype=cp.uint32)
         seg_ids[:, 0] = cp.arange(0, count, dtype=cp.uint32)
@@ -155,3 +186,6 @@ class AbpPcapPreprocessingStage(PreprocessBaseStage):
             fea_len=self._fea_length,
             fea_cols=self.features,
         )
+
+    def _get_preprocess_node(self, seg: neo.Segment):
+        return neos.AbpPcapPreprocessingStage(seg, self.unique_name)
