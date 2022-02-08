@@ -22,6 +22,7 @@ from cudf_kafka._lib.kafka import KafkaDatasource
 
 import cudf
 
+import morpheus._lib.stages as neos
 from morpheus.config import Config
 from morpheus.pipeline.messages import MessageMeta
 from morpheus.pipeline.pipeline import SingleOutputSource
@@ -49,7 +50,9 @@ class KafkaSourceStage(SingleOutputSource):
         `Pipeline.use_dask` option
     poll_interval : str
         Seconds that elapse between polling Kafka for new messages. Follows the pandas interval format
-
+    disable_commit: bool, default = False
+        Enabling this option will skip committing messages as they are pulled off the server. This is only useful for
+        debugging, allowing the user to process the same messages multiple times
     """
     def __init__(self,
                  c: Config,
@@ -57,7 +60,8 @@ class KafkaSourceStage(SingleOutputSource):
                  input_topic: str = "test_pcap",
                  group_id: str = "custreamz",
                  use_dask: bool = False,
-                 poll_interval: str = "10millis"):
+                 poll_interval: str = "10millis",
+                 disable_commit: bool = False):
         super().__init__(c)
 
         self._consumer_conf = {
@@ -69,6 +73,7 @@ class KafkaSourceStage(SingleOutputSource):
         self._poll_interval = poll_interval
         self._max_batch_size = c.pipeline_batch_size
         self._max_concurrent = c.num_threads
+        self._disable_commit = disable_commit
         self._client = None
 
         # What gets passed to streamz kafka
@@ -324,7 +329,18 @@ class KafkaSourceStage(SingleOutputSource):
 
     def _build_source(self, seg: neo.Segment) -> StreamPair:
 
-        source = seg.make_source(self.unique_name, self._source_generator)
-        # source.concurrency = self._max_concurrent
+        if (Config.get().use_cpp or True):
+            source = neos.KafkaSourceStage(seg,
+                                           self.unique_name,
+                                           self._max_batch_size,
+                                           self._topic,
+                                           int(self._poll_interval * 1000),
+                                           self._consumer_params,
+                                           self._disable_commit)
+            source.concurrency = self._max_concurrent
+        else:
+            source = seg.make_source(self.unique_name, self._source_generator)
+
+        source.concurrency = self._max_concurrent
 
         return source, MessageMeta

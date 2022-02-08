@@ -556,6 +556,10 @@ def from_file(ctx: click.Context, **kwargs):
               default="10millis",
               required=True,
               help="Polling interval to check for messages. Follows the pandas interval format")
+@click.option("--disable_commit",
+              is_flag=True,
+              help=("Enabling this option will skip committing messages as they are pulled off the server. "
+                    "This is only useful for debugging, allowing the user to process the same messages multiple times"))
 @prepare_command(False)
 def from_kafka(ctx: click.Context, **kwargs):
 
