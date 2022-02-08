@@ -17,22 +17,31 @@
 
 #pragma once
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
-#include <cudf/strings/strings_column_view.hpp>
+#include <exception>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <regex>
+#include <sstream>
 #include <utility>
 
 #include "morpheus/common.hpp"
 #include "morpheus/messages.hpp"
 #include "morpheus/type_utils.hpp"
 
+#include <glog/logging.h>
 #include <http_client.h>
+#include <librdkafka/rdkafkacpp.h>
 #include <pybind11/gil.h>
 #include <pybind11/pytypes.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <boost/fiber/recursive_mutex.hpp>
 #include <nlohmann/json.hpp>
 
 #include <cudf/column/column_factories.hpp>
@@ -46,6 +55,7 @@
 
 #include "pyneo/node.hpp"
 #include "trtlab/neo/core/segment_object.hpp"
+#include "trtlab/neo/neo_fwd.hpp"
 #include "trtlab/neo/util/type_utils.hpp"
 
 namespace morpheus {
@@ -55,6 +65,32 @@ using namespace pybind11::literals;
 namespace fs = std::filesystem;
 namespace tc = triton::client;
 using json   = nlohmann::json;
+
+template <typename FuncT, typename SeqT>
+auto foreach_map(const SeqT& seq, FuncT func)
+{
+    using value_t  = typename SeqT::const_reference;
+    using return_t = decltype(func(std::declval<value_t>()));
+
+    std::vector<return_t> result{};
+
+    std::transform(seq.cbegin(), seq.cend(), std::back_inserter(result), func);
+
+    return result;
+}
+
+template <typename FuncT, typename SeqT>
+auto foreach_map2(const SeqT& seq, FuncT func)
+{
+    using value_t  = typename SeqT::const_reference;
+    using return_t = decltype(func(std::declval<value_t>()));
+
+    std::vector<return_t> result{};
+
+    std::transform(seq.begin(), seq.end(), std::back_inserter(result), func);
+
+    return result;
+}
 
 class FileSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
 {
@@ -179,6 +215,510 @@ class FileSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
 
     std::string m_filename;
     int m_repeat{1};
+};
+
+#define CHECK_KAFKA(command, expected, msg)                                                                    \
+    {                                                                                                          \
+        RdKafka::ErrorCode __code = command;                                                                   \
+        if (__code != expected)                                                                                \
+        {                                                                                                      \
+            LOG(ERROR) << msg << ". Received unexpected ErrorCode. Expected: " << #expected << "(" << expected \
+                       << "), Received: " << __code << ", Msg: " << RdKafka::err2str(__code);                  \
+        }                                                                                                      \
+    }
+
+class KafkaSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
+{
+  public:
+    using base_t = pyneo::PythonSource<std::shared_ptr<MessageMeta>>;
+    using base_t::source_type_t;
+
+    KafkaSourceStage(const neo::Segment& parent,
+                     const std::string& name,
+                     size_t max_batch_size,
+                     std::string topic,
+                     int32_t batch_timeout_ms,
+                     std::map<std::string, std::string> config,
+                     bool disable_commit = false) :
+      neo::SegmentObject(parent, name),
+      base_t(parent, name),
+      m_max_batch_size(max_batch_size),
+      m_topic(std::move(topic)),
+      m_batch_timeout_ms(batch_timeout_ms),
+      m_config(std::move(config)),
+      m_disable_commit(disable_commit)
+    {
+        this->set_source_observable(neo::Observable<source_type_t>([this](neo::Subscriber<source_type_t>& sub) {
+            // Build rebalancer
+            Rebalancer rebalancer(*this, [&sub, this](std::vector<std::unique_ptr<RdKafka::Message>>& message_batch) {
+                // If we are unsubscribed, throw an error to break the loops
+                if (!sub.is_subscribed())
+                {
+                    throw UnsubscribedException();
+                }
+
+                if (!message_batch.empty())
+                {
+                    auto batch = this->process_batch(std::move(message_batch));
+
+                    sub.on_next(std::move(batch));
+
+                    if (m_requires_commit)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            });
+
+            // Build consumer
+            auto consumer = this->create_consumer(&rebalancer);
+
+            rebalancer.rebalance_loop(consumer.get());
+
+            consumer->unsubscribe();
+
+            consumer->close();
+
+            consumer.reset();
+
+            sub.on_completed();
+        }));
+    }
+
+    ~KafkaSourceStage() override = default;
+
+  protected:
+  private:
+    class UnsubscribedException : public std::exception
+    {};
+
+    void start() override
+    {
+        // Save off the queues before setting our concurrency back to 1
+        for (size_t i = 0; i < this->concurrency(); ++i)
+        {
+            m_task_queues.push_back(this->resources().fiber_pool().next_task_queue());
+        }
+
+        this->concurrency(1);
+
+        // Call the default start
+        pyneo::PythonSource<std::shared_ptr<MessageMeta>>::start();
+    }
+
+    class Rebalancer : public RdKafka::RebalanceCb
+    {
+      public:
+        Rebalancer(KafkaSourceStage& parent,
+                   std::function<bool(std::vector<std::unique_ptr<RdKafka::Message>>&)> process_fn) :
+          m_parent(parent),
+          m_process_fn(std::move(process_fn))
+        {}
+
+        void rebalance_cb(RdKafka::KafkaConsumer* consumer,
+                          RdKafka::ErrorCode err,
+                          std::vector<RdKafka::TopicPartition*>& partitions) override
+        {
+            std::unique_lock<boost::fibers::recursive_mutex> lock(m_mutex);
+
+            if (err == RdKafka::ERR__ASSIGN_PARTITIONS)
+            {
+                VLOG(10) << m_parent.display_str("Rebalance: Assign Partitions");
+
+                // application may load offets from arbitrary external storage here and update \p partitions
+                if (consumer->rebalance_protocol() == "COOPERATIVE")
+                {
+                    CHECK_KAFKA(std::unique_ptr<RdKafka::Error>(consumer->incremental_assign(partitions))->code(),
+                                RdKafka::ERR_NO_ERROR,
+                                "Error during incremental assign");
+                }
+                else
+                {
+                    CHECK_KAFKA(consumer->assign(partitions), RdKafka::ERR_NO_ERROR, "Error during assign");
+                }
+
+                std::vector<std::function<bool()>> tasks;
+
+                for (auto partition : partitions)
+                {
+                    auto queue_ptr = consumer->get_partition_queue(partition);
+
+                    // Now forward to one of the running queues
+                    // queue->forward(m_parent.m_queues[i % m_parent.m_queues.size()].get());
+                    queue_ptr->forward(nullptr);
+
+                    auto partition_ptr = RdKafka::TopicPartition::create(
+                        partition->topic(), partition->partition(), partition->offset());
+
+                    tasks.emplace_back([q = queue_ptr, p = partition_ptr, consumer, this]() {
+                        auto partition = std::unique_ptr<RdKafka::TopicPartition>(p);
+                        auto queue     = std::unique_ptr<RdKafka::Queue>(q);
+
+                        while (m_is_rebalanced)
+                        {
+                            // Build the batch
+                            auto messages = this->partition_progress_step(queue.get());
+
+                            try
+                            {
+                                // Process the messages. Returns true if we need to commit
+                                auto should_commit = m_process_fn(messages);
+
+                                if (should_commit)
+                                {
+                                    int64_t max_offset = -1000;
+                                    for (auto& m : messages)
+                                    {
+                                        DCHECK(m->partition() == partition->partition())
+                                            << "Inconsistent error. Message partition does not match fiber partition";
+
+                                        max_offset = std::max(max_offset, m->offset());
+                                    }
+
+                                    // Find the last message for this partition
+                                    partition->set_offset(max_offset + 1);
+
+                                    CHECK_KAFKA(
+                                        consumer->commitAsync(std::vector<RdKafka::TopicPartition*>{partition.get()}),
+                                        RdKafka::ERR_NO_ERROR,
+                                        "Error during commitAsync");
+                                }
+                            } catch (UnsubscribedException&)
+                            {
+                                // Return false for unsubscribed error
+                                return false;
+                            }
+                        }
+
+                        // Return true if we exited normally
+                        return true;
+                    });
+                }
+
+                // Set this before launching the tasks
+                m_is_rebalanced = true;
+
+                m_partition_future = std::move(m_parent.launch_tasks(std::move(tasks)));
+            }
+            else if (err == RdKafka::ERR__REVOKE_PARTITIONS)
+            {
+                VLOG(10) << m_parent.display_str("Rebalance: Revoke Partitions");
+
+                // Application may commit offsets manually here if auto.commit.enable=false
+                if (consumer->rebalance_protocol() == "COOPERATIVE")
+                {
+                    CHECK_KAFKA(std::unique_ptr<RdKafka::Error>(consumer->incremental_unassign(partitions))->code(),
+                                RdKafka::ERR_NO_ERROR,
+                                "Error during incremental unassign");
+                }
+                else
+                {
+                    CHECK_KAFKA(consumer->unassign(), RdKafka::ERR_NO_ERROR, "Error during unassign");
+                }
+
+                // Stop all processing queues
+                m_is_rebalanced = false;
+
+                // Wait until all processing has completed
+                if (m_partition_future.valid())
+                {
+                    m_partition_future.wait();
+                }
+            }
+            else
+            {
+                LOG(ERROR) << "Rebalancing error: " << RdKafka::err2str(err) << std::endl;
+                CHECK_KAFKA(consumer->unassign(), RdKafka::ERR_NO_ERROR, "Error during unassign");
+            }
+        }
+
+        void rebalance_loop(RdKafka::KafkaConsumer* consumer)
+        {
+            do
+            {
+                // Poll until we are rebalanced
+                while (!this->is_rebalanced())
+                {
+                    VLOG(10) << m_parent.display_str("Rebalance: Calling poll to trigger rebalance");
+                    consumer->poll(500);
+                }
+            } while (m_partition_future.get());
+        }
+
+        bool is_rebalanced()
+        {
+            std::unique_lock<boost::fibers::recursive_mutex> lock(m_mutex);
+
+            return m_is_rebalanced;
+        }
+
+      private:
+        std::vector<std::unique_ptr<RdKafka::Message>> partition_progress_step(RdKafka::Queue* queue)
+        {
+            auto batch_timeout = std::chrono::milliseconds(m_parent.m_batch_timeout_ms);
+
+            size_t msg_count = 0;
+            std::vector<std::unique_ptr<RdKafka::Message>> messages;
+
+            auto now       = std::chrono::high_resolution_clock::now();
+            auto batch_end = now + batch_timeout;
+
+            do
+            {
+                auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(batch_end - now).count();
+
+                DCHECK(remaining_ms >= 0) << "Cant have negative reminaing time";
+
+                std::unique_ptr<RdKafka::Message> msg{queue->consume(std::min(10L, remaining_ms))};
+
+                switch (msg->err())
+                {
+                case RdKafka::ERR__TIMED_OUT:
+                    // Yield on a timeout
+                    boost::this_fiber::yield();
+                    break;
+                case RdKafka::ERR_NO_ERROR:
+
+                    // VLOG(10) << this->display_str(
+                    //     CONCAT_STR("Got message. Topic: " << msg->topic_name() << ", Part: " <<
+                    //     msg->partition()
+                    //                                       << ", Offset: " << msg->offset()));
+
+                    messages.emplace_back(std::move(msg));
+                    break;
+                case RdKafka::ERR__PARTITION_EOF:
+                    VLOG_EVERY_N(10, 10) << "Hit EOF for partition";
+                    // Hit the end, sleep for 100 ms
+                    boost::this_fiber::sleep_for(std::chrono::milliseconds(100));
+                    break;
+                default:
+                    /* Errors */
+                    LOG(ERROR) << "Consume failed: " << msg->errstr();
+                }
+
+                // Update now
+                now = std::chrono::high_resolution_clock::now();
+            } while (msg_count < m_parent.m_max_batch_size && now < batch_end && m_is_rebalanced);
+
+            return std::move(messages);
+        }
+
+        KafkaSourceStage& m_parent;
+        std::function<bool(std::vector<std::unique_ptr<RdKafka::Message>>&)> m_process_fn;
+        boost::fibers::recursive_mutex m_mutex;
+        bool m_is_rebalanced{false};
+        trtlab::neo::SharedFuture<bool> m_partition_future;
+    };
+
+    std::unique_ptr<RdKafka::Conf> build_kafka_conf(const std::map<std::string, std::string>& config_in)
+    {
+        // Copy the config
+        std::map<std::string, std::string> config_out(config_in);
+
+        std::map<std::string, std::string> defaults{{"session.timeout.ms", "60000"},
+                                                    {"enable.auto.commit", "false"},
+                                                    {"auto.offset.reset", "latest"},
+                                                    {"enable.partition.eof", "true"}};
+
+        // Set some defaults if they dont exist
+        config_out.merge(defaults);
+
+        m_requires_commit = config_out["enable.auto.commit"] == "false";
+
+        if (m_requires_commit && m_disable_commit)
+        {
+            LOG(WARNING) << "KafkaSourceStage: Commits have been disabled for this Kafka consumer. This should only be "
+                            "used in a debug environment";
+            m_requires_commit = false;
+        }
+        else if (!m_requires_commit && m_disable_commit)
+        {
+            // User has auto-commit on and disable commit at same time
+            LOG(WARNING) << "KafkaSourceStage: The config option 'enable.auto.commit' was set to True but commits have "
+                            "been disabled for this Kafka consumer. This should only be used in a debug environment";
+        }
+
+        // Make the kafka_conf and set all properties
+        auto kafka_conf = std::unique_ptr<RdKafka::Conf>(RdKafka::Conf::create(RdKafka::Conf::CONF_GLOBAL));
+
+        for (auto const& key_value : config_out)
+        {
+            std::string error_string;
+            if (RdKafka::Conf::ConfResult::CONF_OK != kafka_conf->set(key_value.first, key_value.second, error_string))
+            {
+                LOG(ERROR) << "Error occurred while setting Kafka configuration. Error: " << error_string;
+            }
+        }
+
+        return std::move(kafka_conf);
+    }
+
+    trtlab::neo::SharedFuture<bool> launch_tasks(std::vector<std::function<bool()>>&& tasks)
+    {
+        std::vector<trtlab::neo::SharedFuture<bool>> partition_futures;
+
+        // Loop over tasks enqueuing onto saved fiber queues
+        for (size_t i = 0; i < tasks.size(); ++i)
+        {
+            partition_futures.emplace_back(
+                this->m_task_queues[i % this->m_task_queues.size()]->enqueue(std::move(tasks[i])));
+        }
+
+        // Launch a new task to await on the futures
+        return this->m_task_queues[tasks.size() % this->m_task_queues.size()]->enqueue([partition_futures]() {
+            bool ret_val = true;
+
+            for (auto& f : partition_futures)
+            {
+                if (!f.get())
+                {
+                    // Return false if any return false
+                    ret_val = false;
+                }
+            }
+
+            return ret_val;
+        });
+    }
+
+    std::unique_ptr<RdKafka::KafkaConsumer> create_consumer(Rebalancer* rebalancer)
+    {
+        auto kafka_conf = this->build_kafka_conf(m_config);
+        std::string errstr;
+
+        if (RdKafka::Conf::ConfResult::CONF_OK != kafka_conf->set("rebalance_cb", rebalancer, errstr))
+        {
+            LOG(FATAL) << "Error occurred while setting Kafka rebalance function. Error: " << errstr;
+        }
+
+        auto consumer =
+            std::unique_ptr<RdKafka::KafkaConsumer>(RdKafka::KafkaConsumer::create(kafka_conf.get(), errstr));
+
+        if (!consumer)
+        {
+            LOG(FATAL) << "Error occurred creating Kafka consumer. Error: " << errstr;
+        }
+
+        // Subscribe to the topic. Uses the default rebalancer
+        CHECK_KAFKA(consumer->subscribe(std::vector<std::string>{m_topic}),
+                    RdKafka::ERR_NO_ERROR,
+                    "Error subscribing to topics");
+
+        auto spec_topic =
+            std::unique_ptr<RdKafka::Topic>(RdKafka::Topic::create(consumer.get(), m_topic, nullptr, errstr));
+
+        RdKafka::Metadata* md;
+        CHECK_KAFKA(consumer->metadata(spec_topic == nullptr, spec_topic.get(), &md, 1000),
+                    RdKafka::ERR_NO_ERROR,
+                    "Failed to list_topics in Kafka broker");
+
+        std::map<std::string, std::vector<int32_t>> topic_parts;
+
+        VLOG(10) << this->display_str(CONCAT_STR("Subscribed to " << md->topics()->size() << " topics:"));
+
+        for (auto const& topic : *(md->topics()))
+        {
+            auto& part_ids = topic_parts[topic->topic()];
+
+            auto const& parts = *(topic->partitions());
+
+            std::transform(parts.cbegin(), parts.cend(), std::back_inserter(part_ids), [](auto const& part) {
+                return part->id();
+            });
+
+            auto toppar_list = foreach_map(parts, [&topic](const auto& part) {
+                return std::unique_ptr<RdKafka::TopicPartition>{
+                    RdKafka::TopicPartition::create(topic->topic(), part->id())};
+            });
+
+            std::vector<RdKafka::TopicPartition*> toppar_ptrs =
+                foreach_map(toppar_list, [](const std::unique_ptr<RdKafka::TopicPartition>& x) { return x.get(); });
+
+            // Query Kafka to populate the TopicPartitions with the desired offsets
+            CHECK_KAFKA(consumer->committed(toppar_ptrs, 1000),
+                        RdKafka::ERR_NO_ERROR,
+                        "Failed retrieve Kafka committed offsets");
+
+            auto committed =
+                foreach_map(toppar_list, [](const std::unique_ptr<RdKafka::TopicPartition>& x) { return x->offset(); });
+
+            // Query Kafka to populate the TopicPartitions with the desired offsets
+            CHECK_KAFKA(consumer->position(toppar_ptrs), RdKafka::ERR_NO_ERROR, "Failed retrieve Kafka positions");
+
+            auto positions =
+                foreach_map(toppar_list, [](const std::unique_ptr<RdKafka::TopicPartition>& x) { return x->offset(); });
+
+            VLOG(10) << this->display_str(CONCAT_STR(
+                "   Topic: '" << topic->topic() << "', Parts: " << array_to_str(part_ids.begin(), part_ids.end())
+                              << ", Committed: " << array_to_str(committed.begin(), committed.end())
+                              << ", Positions: " << array_to_str(positions.begin(), positions.end())));
+        }
+
+        return std::move(consumer);
+    }
+
+    cudf::io::table_with_metadata load_table(const std::string& buffer)
+    {
+        auto options =
+            cudf::io::json_reader_options::builder(cudf::io::source_info(buffer.c_str(), buffer.size())).lines(true);
+
+        auto tbl = cudf::io::read_json(options.build());
+
+        auto found = std::find(tbl.metadata.column_names.begin(), tbl.metadata.column_names.end(), "data");
+
+        if (found == tbl.metadata.column_names.end())
+            return tbl;
+
+        // Super ugly but cudf cant handle newlines and add extra escapes. So we need to convert
+        // \\n -> \n
+        // \\/ -> \/
+        auto columns = tbl.tbl->release();
+
+        size_t idx = found - tbl.metadata.column_names.begin();
+
+        auto updated_data = cudf::strings::replace(
+            cudf::strings_column_view{columns[idx]->view()}, cudf::string_scalar("\\n"), cudf::string_scalar("\n"));
+
+        updated_data = cudf::strings::replace(
+            cudf::strings_column_view{updated_data->view()}, cudf::string_scalar("\\/"), cudf::string_scalar("/"));
+
+        columns[idx] = std::move(updated_data);
+
+        tbl.tbl = std::move(std::make_unique<cudf::table>(std::move(columns)));
+
+        return tbl;
+    }
+
+    std::shared_ptr<morpheus::MessageMeta> process_batch(std::vector<std::unique_ptr<RdKafka::Message>>&& message_batch)
+    {
+        std::ostringstream buffer;
+
+        // Build the string for the batch
+        for (auto& msg : message_batch)
+        {
+            buffer << static_cast<char*>(msg->payload()) << "\n";
+        }
+
+        auto data_table = this->load_table(buffer.str());
+
+        // Next, create the message metadata. This gets reused for repeats
+        auto meta = MessageMeta::create_from_cpp(std::move(data_table), 0);
+
+        return meta;
+    }
+
+    size_t m_max_batch_size{128};
+    std::string m_topic{"test_pcap"};
+    uint32_t m_batch_timeout_ms{100};
+    std::map<std::string, std::string> m_config;
+    bool m_disable_commit{false};
+
+    bool m_requires_commit{false};  // Whether or not manual committing is required
+    std::vector<std::shared_ptr<neo::TaskQueue<neo::PriorityMetaData>>> m_task_queues;
+
+    friend Rebalancer;
 };
 
 class DeserializeStage : public pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MultiMessage>>
@@ -403,9 +943,10 @@ class PreprocessFILStage
                         }
                     }
 
-                    // Need to ensure all string columns have been converted to numbers. This requires running a regex
-                    // which is too difficult to do from C++ at this time. So grab the GIL, make the conversions, and
-                    // release. This is horribly inefficient, but so is the JSON lines format for this workflow
+                    // Need to ensure all string columns have been converted to numbers. This requires running a
+                    // regex which is too difficult to do from C++ at this time. So grab the GIL, make the
+                    // conversions, and release. This is horribly inefficient, but so is the JSON lines format for
+                    // this workflow
                     if (!bad_cols.empty())
                     {
                         py::gil_scoped_acquire gil;
@@ -488,19 +1029,6 @@ class PreprocessFILStage
 
     std::string m_vocab_file;
 };
-
-template <typename FuncT, typename SeqT>
-auto foreach_map(SeqT seq, FuncT func)
-{
-    using value_t  = typename SeqT::value_type;
-    using return_t = decltype(func(std::declval<value_t>()));
-
-    std::vector<return_t> result{};
-
-    std::transform(seq.begin(), seq.end(), std::back_inserter(result), func);
-
-    return result;
-}
 
 void __checkTritonErrors(tc::Error status,
                          const std::string& methodName,
@@ -596,16 +1124,32 @@ class InferenceClientStage
 
         tc::Error status = client->IsServerLive(&is_server_live);
 
-        if (!status.IsOk() && this->is_default_grpc_port(server_url))
+        if (!status.IsOk())
         {
-            // We are using the default gRPC port, try the default HTTP
-            std::unique_ptr<tc::InferenceServerHttpClient> unique_client;
+            if (this->is_default_grpc_port(server_url))
+            {
+                LOG(WARNING) << "Failed to connect to Triton at '" << m_server_url
+                             << "'. Default gRPC port of (8001) was detected but C++ "
+                                "InferenceClientStage uses HTTP protocol. Retrying with default HTTP port (8000)";
 
-            auto result = tc::InferenceServerHttpClient::Create(&unique_client, server_url, false);
+                // We are using the default gRPC port, try the default HTTP
+                std::unique_ptr<tc::InferenceServerHttpClient> unique_client;
 
-            client = std::move(unique_client);
+                auto result = tc::InferenceServerHttpClient::Create(&unique_client, server_url, false);
 
-            status = client->IsServerLive(&is_server_live);
+                client = std::move(unique_client);
+
+                status = client->IsServerLive(&is_server_live);
+            }
+            else if (status.Message().find("Unsupported protocol") != std::string::npos)
+            {
+                throw std::runtime_error(
+                    CONCAT_STR("Failed to connect to Triton at '"
+                               << m_server_url
+                               << "'. Received 'Unsupported Protocol' error. Are you using the right port? The C++ "
+                                  "InferenceClientStage uses Triton's HTTP protocol instead of gRPC. Ensure you have "
+                                  "specified the HTTP port (Default 8000)."));
+            }
 
             if (!status.IsOk())
                 throw std::runtime_error(CONCAT_STR("Unable to connect to Triton at '"

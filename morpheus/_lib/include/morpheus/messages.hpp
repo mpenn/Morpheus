@@ -49,6 +49,17 @@ struct PyDataTable : public IDataTable
 {
     PyDataTable(py::object&& py_table) : m_py_table(std::move(py_table)) {}
 
+    ~PyDataTable()
+    {
+        if (m_py_table)
+        {
+            py::gil_scoped_acquire gil;
+
+            // Clear out the python object
+            m_py_table = py::object();
+        }
+    }
+
     cudf::size_type count() const override
     {
         py::gil_scoped_acquire gil;
