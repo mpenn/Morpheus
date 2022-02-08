@@ -80,50 +80,30 @@ nohup mlflow server --backend-store-uri sqlite:////tmp/mlflow-db.sqlite --defaul
 
 ## Download Morpheus reference models
 
-You can download the Morpheus reference models by cloning the [morpheus-models](https://gitlab-master.nvidia.com/morpheus/morpheus-models) GitLab repo.
+The Morpheus reference models can be found in the [Morpheus](https://gitlab-master.nvidia.com/morpheus/morpheus) repo.
 
 ```
-git clone https://gitlab-master.nvidia.com/morpheus/morpheus-models.git
+git clone https://gitlab-master.nvidia.com/morpheus/morpheus.git
+cd morpheus/models
+git lfs pull
 ```
 
 ## Publish reference models to MLflow
 
-The `publish_model_to_mlflow` script is used to publish `onnx`, `tensorrt`, and `fil` models to MLflow.
+The `publish_model_to_mlflow` script is used to publish `triton` flavor models to MLflow. A `triton` flavor model is a directory containing the model files following the [model layout](https://github.com/triton-inference-server/server/blob/main/docs/model_repository.md#repository-layout). Below is an example usage:
 
 ```
-cd /mlflow/scripts
-
 python publish_model_to_mlflow.py \
-  	--model_name sid-bert-onnx \
-  	--model_file <path-to-morpheus-models-repo>/sid-minibert-onnx/1/model.onnx \
-  	--model_config <path-to-morpheus-models-repo>/sid-minibert-onnx/config.pbtxt \
-    --flavor onnx  
-
-python publish_model_to_mlflow.py \
-  	--model_name sid-minibert-trt \
-  	--model_file <path-to-morpheus-models-repo>/sid-minibert-trt/1/model.plan \
-  	--model_config <path-to-morpheus-models-repo>/sid-minibert-trt/config.pbtxt \
-    --flavor tensorrt
-
-python publish_model_to_mlflow.py \
-  	--model_name abp-nvsmi-xgb \
-  	--model_file <path-to-morpheus-models-repo>/abp-nvsmi-xgb/1/abp-nvsmi-xgb.bst \
-  	--model_config <path-to-morpheus-models-repo>/abp-nvsmi-xgb/config.pbtxt \
-    --flavor fil
-```
-
-## Deploy reference models to Triton
-
-```
-mlflow deployments create -t triton --flavor onnx --name ref_model_1 -m models:/ref_model_1/1 -C "version=1"
-
-mlflow deployments create -t triton --flavor onnx --name ref_model_2 -m models:/ref_model_2/1 -C "version=1"
+	--model_name sid-minibert-onnx \
+	--model_directory <path-to-morpheus-models-repo>/models/triton-model-repo/sid-minibert-onnx \
+    --flavor triton
 ```
 
 ## Deployments
 
-The following deployment functions are implemented within the plugin.
-The plugin will deploy associated `config.pbtxt` with the saved model version.
+The Triton `mlflow-triton-plugin` is installed on this container and can be used to deploy your models from MLflow to Triton Inference Server. The following
+are examples of how the plugin is used with the `sid-minibert-onnx` model that we published to MLflow above. For more information about the
+`mlflow-triton-plugin`, please see Triton's [documentation](https://github.com/triton-inference-server/server/tree/r21.12/deploy/mlflow-triton-plugin)
 
 ### Create Deployment
 
@@ -131,38 +111,42 @@ To create a deployment use the following command
 
 ##### CLI
 ```
-mlflow deployments create -t triton --flavor onnx --name mini_bert_onnx -m models:/mini_bert_onnx/1 -C "version=1"
+mlflow deployments create -t triton --flavor triton --name sid-minibert-onnx -m models:/sid-minibert-onnx/1
 ```
 
 ##### Python API
 ```
 from mlflow.deployments import get_deploy_client
 client = get_deploy_client('triton')
-client.create_deployment("mini_bert_onnx", "models:/mini_bert_onnx/1", flavor="onnx", config={"version": "1"})
+client.create_deployment("id-minibert-onnx", " models:/sid-minibert-onnx/1", flavor="triton")
 ```
 
 ### Delete Deployment
 
 ##### CLI
 ```
-mlflow deployments delete -t triton --name mini_bert_onnx/1 
+mlflow deployments delete -t triton --name sid-minibert-onnx
 ```
 
 ##### Python API
 ```
-client.delete_deployment("mini_bert_onnx/1")
+from mlflow.deployments import get_deploy_client
+client = get_deploy_client('triton')
+client.delete_deployment("sid-minibert-onnx")
 ```
 
 ### Update Deployment
 
 ##### CLI
 ```
-mlflow deployments update -t triton --flavor onnx --name mini_bert_onnx/1 -m models:/mini_bert_onnx/1
+mlflow deployments update -t triton --flavor triton --name sid-minibert-onnx -m models:/sid-minibert-onnx/2
 ```
 
 ##### Python API
 ```
-client.update_deployment("mini_bert_onnx/1", "models:/mini_bert_onnx/2", flavor="onnx")
+from mlflow.deployments import get_deploy_client
+client = get_deploy_client('triton')
+client.update_deployment("sid-minibert-onnx", "models:/sid-minibert-onnx/2", flavor="triton")
 ```
 
 ### List Deployments
@@ -174,6 +158,8 @@ mlflow deployments list -t triton
 
 ##### Python API
 ```
+from mlflow.deployments import get_deploy_client
+client = get_deploy_client('triton')
 client.list_deployments()
 ```
 
@@ -181,10 +167,12 @@ client.list_deployments()
 
 ##### CLI
 ```
-mlflow deployments get -t triton --name mini_bert_onnx
+mlflow deployments get -t triton --name sid-minibert-onnx
 ```
 
 ##### Python API
 ```
-client.get_deployment("mini_bert_onnx")
+from mlflow.deployments import get_deploy_client
+client = get_deploy_client('triton')
+client.get_deployment("sid-minibert-onnx")
 ```
