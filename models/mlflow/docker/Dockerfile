@@ -1,6 +1,7 @@
 ARG FROM_IMAGE=gpuci/miniconda-cuda
 ARG CUDA_VER=11.4
 ARG LINUX_VER=ubuntu18.04
+ARG TRITON_VER=r21.12
 FROM ${FROM_IMAGE}:${CUDA_VER}-runtime-${LINUX_VER} AS base
 
 WORKDIR /mlflow
@@ -8,15 +9,23 @@ WORKDIR /mlflow
 COPY . ./
 
 RUN apt-get update && apt-get install -y procps vim
-RUN /opt/conda/bin/conda env create -f environment/environment.yml
+RUN /opt/conda/bin/conda env create -f docker/conda/environment.yml
 RUN sed -i 's/conda activate base/conda activate mlflow/g' ~/.bashrc
 
 SHELL ["/opt/conda/bin/conda", "run", "-n", "mlflow", "/bin/bash", "-c"]
 
-RUN source activate mlflow && \
-    python setup.py install
+ARG TRITON_DIR=/mlflow/triton-inference-server
+ARG TRITON_VER=r21.12
 
-RUN mkdir -p /mlflow/artifacts
+RUN mkdir ${TRITON_DIR} && \
+    cd ${TRITON_DIR} && \
+    git clone -b ${TRITON_VER} --depth 1 https://github.com/triton-inference-server/server && \
+    source activate mlflow && \
+    cd ${TRITON_DIR}/server/deploy/mlflow-triton-plugin && \
+    pip install .
+
+RUN ln -sf ${TRITON_DIR}/server/deploy/mlflow-triton-plugin/scripts/publish_model_to_mlflow.py /mlflow && \
+    mkdir /mlflow/artifacts
 
 ENV MLFLOW_MODEL_REPO=/mlflow/artifacts
 ENV MLFLOW_TRACKING_URI=sqlite:////tmp/mlflow-db.sqlite
