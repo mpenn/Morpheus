@@ -13,3 +13,7 @@ https://medium.com/rapids-ai/rapids-forest-inference-library-prediction-at-100-m
 https://developer.nvidia.com/nvidia-system-management-interface
 https://developer.nvidia.com/morpheus-cybersecurity
 https://github.com/rapidsai/clx/blob/branch-0.20/examples/forest_inference/xgboost_training.ipynb"
+hinsage_model.pt and xgb-model.pt,Fraud detection using GNN,"This use case a graph neural network based fraud detecter in transaction data 
+.It uses a bipartite heteregenous graph representation as input for GraphSAGE for feature learning and XGBoost as a classifier.", Tad Zemicheal,0.1.1,TBD,N/A,756KB,25, 5 ,V100,cyber security and IT professionals,To detect fraud in transaction data,,F1=0.96,265 labelled credit card transaction, 753 labelled credit card transaction data, N/A,"
+https://stellargraph.readthedocs.io/en/stable/hinsage.html?highlight=hinsage,
+https://github.com/rapidsai/clx/blob/branch-0.20/examples/forest_inference/xgboost_training.ipynb"
