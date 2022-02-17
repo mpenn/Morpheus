@@ -628,6 +628,12 @@ def from_cloudtrail(ctx: click.Context, **kwargs):
               default=0.05,
               help="How much to average throughput numbers. 0=full average, 1=instantaneous")
 @click.option('--unit', type=str, help="Units to use for data rate")
+@click.option('--delayed_start',
+              is_flag=True,
+              help=("When delayed_start is enabled, the progress bar will not be shown until the first "
+                    "message is received. Otherwise, the progress bar is shown on pipeline startup and "
+                    "will begin timing immediately. In large pipelines, this option may be desired to "
+                    "give a more accurate timing."))
 @prepare_command(False)
 def monitor(ctx: click.Context, **kwargs):
 
