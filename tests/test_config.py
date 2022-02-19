@@ -21,6 +21,7 @@ from unittest import mock
 
 import docker
 from morpheus import config
+from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 

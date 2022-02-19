@@ -17,9 +17,12 @@
 import os
 import unittest
 
+import pytest
+
 from morpheus.config import Config
 from morpheus.config import ConfigAutoEncoder
 from morpheus.config import PipelineModes
+from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
@@ -27,6 +30,7 @@ class TestHammah(BaseMorpheusTest):
     """
     End-to-end test intended to imitate the hammah validation test
     """
+    @pytest.mark.slow
     def test_hammah_roleg(self):
         config = Config.get()
         config.mode = PipelineModes.AE
@@ -42,7 +46,7 @@ class TestHammah(BaseMorpheusTest):
         config.ae.userid_column_name = "userIdentitysessionContextsessionIssueruserName"
         config.ae.userid_filter = "role-g"
 
-        with open(os.path.join(self._data_dir, 'columns_ae.txt')) as fh:
+        with open(os.path.join(TEST_DIRS.data_dir, 'columns_ae.txt')) as fh:
             config.ae.feature_columns = [x.strip() for x in fh.readlines()]
 
         from morpheus.pipeline import LinearPipeline
@@ -58,10 +62,10 @@ class TestHammah(BaseMorpheusTest):
         from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
 
         temp_dir = self._mk_tmp_dir()
-        input_glob = os.path.join(self._validation_data_dir, "hammah-*.csv")
-        train_data_glob = os.path.join(self._training_data_dir, "hammah-*.csv")
+        input_glob = os.path.join(TEST_DIRS.validation_data_dir, "hammah-*.csv")
+        train_data_glob = os.path.join(TEST_DIRS.training_data_dir, "hammah-*.csv")
         out_file = os.path.join(temp_dir, 'results.csv')
-        val_file_name = os.path.join(self._validation_data_dir, 'hammah-role-g-validation-data.csv')
+        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv')
         results_file_name = os.path.join(temp_dir, 'results.json')
 
         pipe = LinearPipeline(config)
@@ -93,6 +97,7 @@ class TestHammah(BaseMorpheusTest):
         results = self._calc_error_val(results_file_name)
         self.assertEqual(results.diff_rows, 3)
 
+    @pytest.mark.slow
     def test_hammah_user123(self):
         config = Config.get()
         config.mode = PipelineModes.AE
@@ -107,7 +112,7 @@ class TestHammah(BaseMorpheusTest):
         config.ae.userid_column_name = "userIdentitysessionContextsessionIssueruserName"
         config.ae.userid_filter = "user123"
 
-        with open(os.path.join(self._data_dir, 'columns_ae.txt')) as fh:
+        with open(os.path.join(TEST_DIRS.data_dir, 'columns_ae.txt')) as fh:
             config.ae.feature_columns = [x.strip() for x in fh.readlines()]
 
         from morpheus.pipeline import LinearPipeline
@@ -123,10 +128,10 @@ class TestHammah(BaseMorpheusTest):
         from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
 
         temp_dir = self._mk_tmp_dir()
-        input_glob = os.path.join(self._validation_data_dir, "hammah-*.csv")
-        train_data_glob = os.path.join(self._training_data_dir, "hammah-*.csv")
+        input_glob = os.path.join(TEST_DIRS.validation_data_dir, "hammah-*.csv")
+        train_data_glob = os.path.join(TEST_DIRS.training_data_dir, "hammah-*.csv")
         out_file = os.path.join(temp_dir, 'results.csv')
-        val_file_name = os.path.join(self._validation_data_dir, 'hammah-user123-validation-data.csv')
+        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'hammah-user123-validation-data.csv')
         results_file_name = os.path.join(temp_dir, 'results.json')
 
         pipe = LinearPipeline(config)
