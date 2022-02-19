@@ -19,10 +19,12 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import pytest
 import tritonclient.grpc
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
+from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 FEATURE_LENGTH = 29
@@ -33,7 +35,7 @@ class TestABP(BaseMorpheusTest):
     """
     End-to-end test intended to imitate the ABP validation test
     """
-
+    @pytest.mark.slow
     @mock.patch('tritonclient.grpc.InferenceServerClient')
     def test_abp_no_cpp(self, mock_triton_client):
         mock_metadata = {
@@ -53,7 +55,7 @@ class TestABP(BaseMorpheusTest):
         mock_triton_client.get_model_metadata.return_value = mock_metadata
         mock_triton_client.get_model_config.return_value = mock_model_config
 
-        data = np.loadtxt(os.path.join(self._expeced_data_dir, 'triton_abp_inf_results.csv'), delimiter=',')
+        data = np.loadtxt(os.path.join(TEST_DIRS.expeced_data_dir, 'triton_abp_inf_results.csv'), delimiter=',')
         inf_results = self._partition_array(data, MODEL_MAX_BATCH_SIZE)
 
         mock_infer_result = mock.MagicMock()
@@ -86,7 +88,7 @@ class TestABP(BaseMorpheusTest):
         from morpheus.pipeline.preprocessing import PreprocessFILStage
 
         temp_dir = self._mk_tmp_dir()
-        val_file_name = os.path.join(self._validation_data_dir, 'abp-validation-data.jsonlines')
+        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
 
         out_file = os.path.join(temp_dir, 'results.csv')
         results_file_name = os.path.join(temp_dir, 'results.json')
@@ -108,6 +110,7 @@ class TestABP(BaseMorpheusTest):
         results = self._calc_error_val(results_file_name)
         self.assertEqual(results.error_pct, 0)
 
+    @pytest.mark.slow
     def test_abp_cpp(self):
         self._launch_camouflage_triton()
 
@@ -133,7 +136,7 @@ class TestABP(BaseMorpheusTest):
         from morpheus.pipeline.preprocessing import PreprocessFILStage
 
         temp_dir = self._mk_tmp_dir()
-        val_file_name = os.path.join(self._validation_data_dir, 'abp-validation-data.jsonlines')
+        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
 
         out_file = os.path.join(temp_dir, 'results.csv')
         results_file_name = os.path.join(temp_dir, 'results.json')

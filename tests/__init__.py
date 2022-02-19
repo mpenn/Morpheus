@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import collections
 import json
 import logging
@@ -24,17 +23,27 @@ import tempfile
 import time
 import unittest
 
+import mlflow
 import numpy as np
 import requests
+from mlflow.tracking import fluent
 
 from morpheus.config import Config
 
-TESTS_DIR = os.path.dirname(__file__)
-WORKSPACE_DIR = os.path.dirname(TESTS_DIR)
-MOCK_TRITON_DIR = os.path.join(TESTS_DIR, 'mock_triton_server')
 
-#logging.basicConfig(level=logging.INFO)
+class TestDirectories(object):
+    def __init__(self, cur_file=__file__) -> None:
+        self.tests_dir = os.path.dirname(cur_file)
+        self.morpheus_root = os.environ.get('MORPHEUS_ROOT', os.path.dirname(self.tests_dir))
+        self.data_dir = os.path.join(self.morpheus_root, 'data')
+        self.models_dir = os.path.join(self.morpheus_root, 'models')
+        self.datasets_dir = os.path.join(self.models_dir, 'datasets')
+        self.training_data_dir = os.path.join(self.datasets_dir, 'training-data')
+        self.validation_data_dir = os.path.join(self.datasets_dir, 'validation-data')
+        self.expeced_data_dir = os.path.join(self.tests_dir, 'expected_data')
+        self.mock_triton_servers_dir = os.path.join(self.tests_dir, 'mock_triton_server')
 
+TEST_DIRS = TestDirectories()
 
 class BaseMorpheusTest(unittest.TestCase):
     Results = collections.namedtuple('Results', ['total_rows', 'diff_rows', 'error_pct'])
@@ -42,17 +51,8 @@ class BaseMorpheusTest(unittest.TestCase):
     def setUp(self) -> None:
         super().setUp()
 
-        self._morpheus_root = os.environ.get('MORPHEUS_ROOT', WORKSPACE_DIR)
-        self._data_dir = os.path.join(self._morpheus_root, 'data')
-        self._models_dir = os.path.join(self._morpheus_root, 'models')
-        self._datasets_dir = os.path.join(self._models_dir, 'datasets')
-        self._training_data_dir = os.path.join(self._datasets_dir, 'training-data')
-        self._validation_data_dir = os.path.join(self._datasets_dir, 'validation-data')
-
-        self._expeced_data_dir = os.path.join(TESTS_DIR, 'expected_data')
-        self._mock_triton_servers_dir = MOCK_TRITON_DIR
-
     def tearDown(self) -> None:
+        super().tearDown()
         # reset the config singleton
         Config.reset()
 
@@ -135,7 +135,7 @@ class BaseMorpheusTest(unittest.TestCase):
                 time.sleep(sleep_time)
                 elapsed_time += sleep_time
 
-    def _launch_camouflage_triton(self, root_dir=MOCK_TRITON_DIR, config="config.yml", timeout=5):
+    def _launch_camouflage_triton(self, root_dir=TEST_DIRS.mock_triton_servers_dir, config="config.yml", timeout=5):
         """
         Launches a mock triton server using camouflage (https://testinggospels.github.io/camouflage/) with a package
         rooted at `root_dir` and configured with `config`.
@@ -157,3 +157,25 @@ class BaseMorpheusTest(unittest.TestCase):
             if timeout > 0:
                 if not self._wait_for_camouflage(popen, root_dir, timeout=timeout):
                     raise RuntimeError("Failed to launch camouflage server")
+
+    def _shutdown_mlflow(self):
+        """
+        Shutdown all of the active mlflow runs prior to the tmp_dir being deleted
+        """
+        num_runs = len(fluent._active_run_stack)
+        for _ in range(num_runs):
+            mlflow.end_run()
+
+    def _get_mlflow_uri(self, experiment_name="Morpheus"):
+        tmp_dir = self._mk_tmp_dir()
+        uri = "file://{}".format(tmp_dir)
+        mlflow.set_tracking_uri(uri)
+        mlflow.create_experiment(experiment_name)
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        with mlflow.start_run(run_name="Model Drift",
+                              tags={"morpheus.type": "drift"},
+                              experiment_id=experiment.experiment_id):
+            pass
+
+        self.addCleanup(self._shutdown_mlflow)
+        return uri

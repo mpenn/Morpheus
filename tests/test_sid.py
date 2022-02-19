@@ -14,16 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import csv
 import os
 import unittest
 from unittest import mock
 
 import numpy as np
+import pytest
 import tritonclient.grpc
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
+from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 FEATURE_LENGTH = 256
@@ -34,6 +35,7 @@ class TestSid(BaseMorpheusTest):
     """
     End-to-end test intended to imitate the Sid validation test
     """
+    @pytest.mark.slow
     @mock.patch('tritonclient.grpc.InferenceServerClient')
     def test_minibert_no_cpp(self, mock_triton_client):
         mock_metadata = {
@@ -55,7 +57,7 @@ class TestSid(BaseMorpheusTest):
         mock_triton_client.get_model_metadata.return_value = mock_metadata
         mock_triton_client.get_model_config.return_value = mock_model_config
 
-        data = np.loadtxt(os.path.join(self._expeced_data_dir, 'triton_sid_inf_results.csv'), delimiter=',')
+        data = np.loadtxt(os.path.join(TEST_DIRS.expeced_data_dir, 'triton_sid_inf_results.csv'), delimiter=',')
         inf_results = self._partition_array(data, MODEL_MAX_BATCH_SIZE)
 
         mock_infer_result = mock.MagicMock()
@@ -98,8 +100,8 @@ class TestSid(BaseMorpheusTest):
         from morpheus.pipeline.preprocessing import DeserializeStage
         from morpheus.pipeline.preprocessing import PreprocessNLPStage
 
-        val_file_name = os.path.join(self._validation_data_dir, 'sid-validation-data.csv')
-        vocab_file_name = os.path.join(self._data_dir, 'bert-base-uncased-hash.txt')
+        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'sid-validation-data.csv')
+        vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
 
         temp_dir = self._mk_tmp_dir()
         out_file = os.path.join(temp_dir, 'results.csv')
@@ -130,6 +132,7 @@ class TestSid(BaseMorpheusTest):
         results = self._calc_error_val(results_file_name)
         self.assertLess(results.error_pct, 70)
 
+    @pytest.mark.slow
     def test_minibert_cpp(self):
         self._launch_camouflage_triton()
 
@@ -165,8 +168,8 @@ class TestSid(BaseMorpheusTest):
         from morpheus.pipeline.preprocessing import DeserializeStage
         from morpheus.pipeline.preprocessing import PreprocessNLPStage
 
-        val_file_name = os.path.join(self._validation_data_dir, 'sid-validation-data.csv')
-        vocab_file_name = os.path.join(self._data_dir, 'bert-base-uncased-hash.txt')
+        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'sid-validation-data.csv')
+        vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
 
         temp_dir = self._mk_tmp_dir()
         out_file = os.path.join(temp_dir, 'results.csv')

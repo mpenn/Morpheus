@@ -6,3 +6,10 @@ requires = [
    "versioneer-518"
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+addopts = "--no-header"
+
+markers = [
+   "slow: Slow tests, the tests covered by this also need to be run in their own processes until #71 is resolved"
+]

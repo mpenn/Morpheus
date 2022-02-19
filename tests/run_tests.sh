@@ -19,13 +19,16 @@
 # pytest
 TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-python ${TEST_DIR}/test_abp.py TestABP.test_abp_no_cpp -v
-python ${TEST_DIR}/test_abp.py TestABP.test_abp_cpp -v
-python ${TEST_DIR}/test_config.py -v
-python ${TEST_DIR}/test_hammah.py TestHammah.test_hammah_roleg -v
-python ${TEST_DIR}/test_hammah.py TestHammah.test_hammah_user123 -v
-python ${TEST_DIR}/test_package.py
-python ${TEST_DIR}/test_phishing.py TestPhishing.test_email_no_cpp -v
-python ${TEST_DIR}/test_phishing.py TestPhishing.test_email_cpp -v
-python ${TEST_DIR}/test_sid.py TestSid.test_minibert_no_cpp -v
-python ${TEST_DIR}/test_sid.py TestSid.test_minibert_cpp -v
+pytest -m "not slow" --cov=morpheus --cov-report term-missing ${TEST_DIR}
+
+# Run the slow tests without coverage since that causes a crash. Need to run them individually due to #71
+if [ -n "${MORPHEUS_RUN_SLOW_TESTS}" ]; then
+    pytest -m slow ${TEST_DIR}/test_abp.py::TestABP::test_abp_no_cpp
+    pytest -m slow ${TEST_DIR}/test_abp.py::TestABP::test_abp_cpp
+    pytest -m slow ${TEST_DIR}/test_hammah.py::TestHammah::test_hammah_roleg
+    pytest -m slow ${TEST_DIR}/test_hammah.py::TestHammah::test_hammah_user123
+    pytest -m slow ${TEST_DIR}/test_phishing.py::TestPhishing::test_email_no_cpp
+    pytest -m slow ${TEST_DIR}/test_phishing.py::TestPhishing::test_email_cpp
+    pytest -m slow ${TEST_DIR}/test_sid.py::TestSid::test_minibert_no_cpp
+    pytest -m slow ${TEST_DIR}/test_sid.py::TestSid::test_minibert_cpp
+fi

@@ -16,6 +16,7 @@
 
 import unittest
 
+from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 

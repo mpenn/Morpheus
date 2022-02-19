@@ -261,7 +261,7 @@ class MonitorStage(SinglePortStage):
         Pipeline configuration instance
     description : str
         Name to show for this Monitor Stage in the console window
-    smoothing : int
+    smoothing : float
         Smoothing parameter to determine how much the throughput should be averaged. 0 = Instantaneous, 1 =
         Average.
     unit : str
@@ -274,7 +274,7 @@ class MonitorStage(SinglePortStage):
     def __init__(self,
                  c: Config,
                  description: str = "Progress",
-                 smoothing: int = 0.05,
+                 smoothing: float = 0.05,
                  unit="messages",
                  delayed_start: bool = False,
                  determine_count_fn: typing.Callable[[typing.Any], int] = None):
@@ -466,7 +466,7 @@ class AddClassificationsStage(SinglePortStage):
             raise RuntimeError("Label count does not match output of model. Label count: {}, Model output: {}".format(
                 len(self._class_labels), x.probs.shape[1]))
 
-        probs_np = (x.probs > self._threshold).astype(cp.bool).get()
+        probs_np = (x.probs > self._threshold).astype(bool).get()
 
         for i, label in self._idx2label.items():
             x.set_meta(label, probs_np[:, i].tolist())
@@ -674,7 +674,7 @@ class AddScoresStage(SinglePortStage):
 
     @property
     def name(self) -> str:
-        return "add-class"
+        return "add-scores"
 
     def accepted_types(self) -> typing.Tuple:
         """
