@@ -19,13 +19,11 @@ import os
 import unittest
 
 import click
+import pytest
 from click.testing import CliRunner
 
-from morpheus.config import Config
-
-Config.get().use_cpp = False
-
 from morpheus import cli
+from morpheus.config import Config
 from morpheus.config import ConfigAutoEncoder
 from morpheus.config import PipelineModes
 from morpheus.pipeline import LinearPipeline
@@ -68,6 +66,7 @@ KAFKA_BOOTS = ['--bootstrap_servers', 'kserv1:123,kserv2:321']
 FROM_KAFKA_ARGS = ['from-kafka', '--input_topic', 'test_topic'] + KAFKA_BOOTS
 TO_KAFKA_ARGS = ['to-kafka',  '--output_topic', 'test_topic'] + KAFKA_BOOTS
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestCli(BaseMorpheusTest):
     def tearDown(self) -> None:
         super().tearDown()

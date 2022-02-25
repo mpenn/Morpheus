@@ -18,16 +18,15 @@ import unittest
 from unittest import mock
 
 import cupy as cp
+import pytest
 
 from morpheus.config import Config
-
-Config.get().use_cpp = False
-
 from morpheus.pipeline.general_stages import AddClassificationsStage
 from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestAddClassificationsStage(BaseMorpheusTest):
     def test_constructor(self):
         config = Config.get()

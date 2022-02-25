@@ -20,7 +20,6 @@ from unittest import mock
 
 import numpy as np
 import pytest
-import tritonclient.grpc
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes

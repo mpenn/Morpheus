@@ -15,21 +15,18 @@
 # limitations under the License.
 
 import asyncio
-import threading
 import unittest
 from unittest import mock
 
-from morpheus.config import Config
-
-Config.get().use_cpp = False
+import pytest
 
 from morpheus.pipeline.inference import inference_stage
 from morpheus.utils.producer_consumer_queue import Closed
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
-from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestInferenceWorker(BaseMorpheusTest):
     @mock.patch('asyncio.Event')
     @mock.patch('morpheus.pipeline.inference.inference_stage.IOLoop')
@@ -77,7 +74,6 @@ class TestInferenceWorker(BaseMorpheusTest):
         mock_thread.join.assert_called_once()
         mock_event_wait.assert_awaited()
 
-
     def test_build_output_message(self):
         # build_output_message calls calc_output_dims which is abstract
         # creating a subclass for the purpose of testing
@@ -102,7 +98,7 @@ class TestInferenceWorker(BaseMorpheusTest):
 
     @mock.patch('morpheus.pipeline.inference.inference_stage.IOLoop')
     def test_main_loop_short(self, mock_ioloop):
-        mock_asyncio_loop =  mock.MagicMock()
+        mock_asyncio_loop = mock.MagicMock()
         mock_current_loop = mock.MagicMock()
         mock_current_loop.asyncio_loop = mock_asyncio_loop
         mock_ioloop.current.return_value = mock_current_loop
@@ -120,7 +116,7 @@ class TestInferenceWorker(BaseMorpheusTest):
 
     @mock.patch('morpheus.pipeline.inference.inference_stage.IOLoop')
     def test_main_loop_with_event(self, mock_ioloop):
-        mock_asyncio_loop =  mock.MagicMock()
+        mock_asyncio_loop = mock.MagicMock()
         mock_current_loop = mock.MagicMock()
         mock_current_loop.asyncio_loop = mock_asyncio_loop
         mock_ioloop.current.return_value = mock_current_loop
@@ -138,10 +134,9 @@ class TestInferenceWorker(BaseMorpheusTest):
         self.assertEqual(call_args_list[0], mock.call(ready_event.set))
         self.assertEqual(call_args_list[1], mock.call(iw._complete_event.set))
 
-
     @mock.patch('morpheus.pipeline.inference.inference_stage.IOLoop')
     def test_main_loop(self, mock_ioloop):
-        mock_asyncio_loop =  mock.MagicMock()
+        mock_asyncio_loop = mock.MagicMock()
         mock_current_loop = mock.MagicMock()
         mock_current_loop.asyncio_loop = mock_asyncio_loop
         mock_ioloop.current.return_value = mock_current_loop
@@ -180,12 +175,13 @@ class TestInferenceWorker(BaseMorpheusTest):
 
     @mock.patch('morpheus.pipeline.inference.inference_stage.IOLoop')
     def test_main_loop_closed_exception(self, mock_ioloop):
-        mock_asyncio_loop =  mock.MagicMock()
+        mock_asyncio_loop = mock.MagicMock()
         mock_current_loop = mock.MagicMock()
         mock_current_loop.asyncio_loop = mock_asyncio_loop
         mock_ioloop.current.return_value = mock_current_loop
 
         mock_process = mock.MagicMock()
+
         class TestIW(inference_stage.InferenceWorker):
             def process(self, batch, cb):
                 # intentionally calling empty abc method for coverage
@@ -203,14 +199,16 @@ class TestInferenceWorker(BaseMorpheusTest):
 
         def wrapper():
             counter = [0]
+
             def inner(*a, **k):
-                counter[0]+=1
+                counter[0] += 1
                 if counter[0] == 1:
                     return (batch1, fut1)
                 elif counter[0] == 2:
                     return (batch2, fut2)
                 else:
                     raise Closed("unittest")
+
             return inner
 
         mock_queue.get.side_effect = wrapper()

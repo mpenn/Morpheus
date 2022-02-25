@@ -17,15 +17,15 @@
 import unittest
 from unittest import mock
 
+import pytest
+
 from morpheus.config import Config
-
-Config.get().use_cpp = False
-
 from morpheus.pipeline.general_stages import TriggerStage
 from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestTriggerStage(BaseMorpheusTest):
     def test_constructor(self):
         config = Config.get()
@@ -37,7 +37,6 @@ class TestTriggerStage(BaseMorpheusTest):
         accepted_types = ts.accepted_types()
         self.assertIsInstance(accepted_types, tuple)
         self.assertGreater(len(accepted_types), 0)
-
 
     def test_build_single(self):
         mock_stream = mock.MagicMock()

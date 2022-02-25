@@ -18,18 +18,18 @@ import inspect
 import unittest
 from unittest import mock
 
+import pytest
+
 import cudf
 
 from morpheus.config import Config
-
-Config.get().use_cpp = False
-
 from morpheus.pipeline import general_stages as gs
 from morpheus.pipeline.messages import MultiMessage
 from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestMonitor(BaseMorpheusTest):
     def test_constructor(self):
         config = Config.get()
@@ -45,12 +45,15 @@ class TestMonitor(BaseMorpheusTest):
         self.assertGreater(len(accepted_types), 0)
 
         two_x = lambda x: x * 2
-        m = gs.MonitorStage(config, description="Test Description", smoothing=0.7, unit='units', determine_count_fn=two_x)
+        m = gs.MonitorStage(config,
+                            description="Test Description",
+                            smoothing=0.7,
+                            unit='units',
+                            determine_count_fn=two_x)
         self.assertEqual(m._description, "Test Description")
         self.assertEqual(m._smoothing, 0.7)
         self.assertEqual(m._unit, "units")
         self.assertIs(m._determine_count_fn, two_x)
-
 
     @mock.patch('morpheus.pipeline.general_stages.MorpheusTqdm')
     def test_on_start(self, mock_morph_tqdm):
@@ -64,7 +67,6 @@ class TestMonitor(BaseMorpheusTest):
         mock_morph_tqdm.assert_called_once()
         mock_morph_tqdm.reset.assert_called_once()
         self.assertIs(m._progress, mock_morph_tqdm)
-
 
     @mock.patch('morpheus.pipeline.general_stages.MorpheusTqdm')
     def test_stop(self, mock_morph_tqdm):
@@ -81,7 +83,6 @@ class TestMonitor(BaseMorpheusTest):
         m.on_start()
         m.stop()
         mock_morph_tqdm.close.assert_called_once()
-
 
     @mock.patch('morpheus.pipeline.general_stages.MorpheusTqdm')
     def test_refresh(self, mock_morph_tqdm):
@@ -122,7 +123,6 @@ class TestMonitor(BaseMorpheusTest):
         sink_on_completed()
         mock_morph_tqdm.stop.assert_called_once()
 
-
     def test_auto_count_fn(self):
         config = Config.get()
         m = gs.MonitorStage(config)
@@ -145,7 +145,6 @@ class TestMonitor(BaseMorpheusTest):
         self.assertIs(m._auto_count_fn(()), len)
         self.assertIs(m._auto_count_fn(set()), len)
 
-
     @mock.patch('morpheus.pipeline.general_stages.MorpheusTqdm')
     def test_progress_sink(self, mock_morph_tqdm):
         mock_morph_tqdm.return_value = mock_morph_tqdm
@@ -161,6 +160,7 @@ class TestMonitor(BaseMorpheusTest):
         m._progress_sink(MultiMessage(None, 0, 12))
         self.assertTrue(inspect.isfunction(m._determine_count_fn))
         mock_morph_tqdm.update.assert_called_once_with(n=12)
+
 
 if __name__ == '__main__':
     unittest.main()
