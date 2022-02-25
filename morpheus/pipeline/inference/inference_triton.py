@@ -555,7 +555,6 @@ class TritonInferenceWorker(InferenceWorker):
 
         # If its an error, return that here
         if (error is not None):
-            # self._loop.add_callback(f.set_exception, error)
             raise error
 
         # Build response
@@ -593,9 +592,6 @@ class TritonInferenceWorker(InferenceWorker):
                                         inputs=inputs,
                                         callback=partial(self._infer_callback, cb, mem, batch),
                                         outputs=outputs)
-        # result = self._triton_client.infer(model_name=self._model_name, inputs=inputs, outputs=outputs)
-
-        # self._infer_callback(cb, mem, result, None)
 
 
 class TritonInferenceNLP(TritonInferenceWorker):

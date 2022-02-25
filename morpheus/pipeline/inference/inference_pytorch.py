@@ -12,17 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import queue
 import typing
 
 import cupy as cp
-from tornado.ioloop import IOLoop
 
 from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
 from morpheus.pipeline.inference.inference_stage import InferenceWorker
 from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import ResponseMemory
 from morpheus.pipeline.messages import ResponseMemoryProbs
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
 
@@ -72,7 +70,7 @@ class PyTorchInference(InferenceWorker):
 
         return (x.count, self._outputs[list(self._outputs.keys())[0]].shape[1])
 
-    def process(self, batch: MultiInferenceMessage, fut: asyncio.Future):
+    def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemory], None]):
 
         # convert from cupy to torch tensor using dlpack
         input_ids = from_dlpack(batch.get_input("input_ids").astype(cp.float).toDlpack()).type(torch.long)
@@ -90,12 +88,8 @@ class PyTorchInference(InferenceWorker):
 
         response_mem = ResponseMemoryProbs(count=batch.count, probs=probs_cp)
 
-        def tmp(mem: ResponseMemoryProbs):
-
-            # Set result on future
-            fut.set_result(mem)
-
-        self._loop.add_callback(tmp, response_mem)
+        # Return the response
+        cb(response_mem)
 
 
 class PyTorchInferenceStage(InferenceStage):
