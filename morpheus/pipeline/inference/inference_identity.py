@@ -20,11 +20,11 @@ from morpheus.config import Config
 from morpheus.pipeline.inference.inference_stage import InferenceStage
 from morpheus.pipeline.inference.inference_stage import InferenceWorker
 from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import ResponseMemory
 from morpheus.pipeline.messages import ResponseMemoryProbs
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
 
 
-# This class is exclusively run in the worker thread. Separating the classes helps keeps the threads separate
 class IdentityInferenceWorker(InferenceWorker):
     def __init__(self, inf_queue: ProducerConsumerQueue, c: Config):
         super().__init__(inf_queue)
@@ -35,7 +35,7 @@ class IdentityInferenceWorker(InferenceWorker):
     def calc_output_dims(self, x: MultiInferenceMessage) -> typing.Tuple:
         return (x.count, self._seq_length)
 
-    def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemoryProbs], None]):
+    def process(self, batch: MultiInferenceMessage, cb: typing.Callable[[ResponseMemory], None]):
         def tmp(b: MultiInferenceMessage, f):
 
             f(ResponseMemoryProbs(
@@ -43,7 +43,6 @@ class IdentityInferenceWorker(InferenceWorker):
                 probs=cp.zeros((b.count, self._seq_length), dtype=cp.float32),
             ))
 
-        # self._loop.add_callback(tmp, batch, fut)
         # Call directly instead of enqueing
         tmp(batch, cb)
 

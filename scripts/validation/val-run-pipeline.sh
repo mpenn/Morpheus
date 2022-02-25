@@ -24,6 +24,11 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 source ${SCRIPT_DIR}/val-globals.sh
 source ${SCRIPT_DIR}/val-utils.sh
 
+# Make sure the .tmp folder exists
+if [[ ! -d "${MORPHEUS_ROOT}/.tmp" ]]; then
+   mkdir -p "${MORPHEUS_ROOT}/.tmp"
+fi
+
 function run_pipeline_sid_minibert(){
 
    INPUT_FILE=$1

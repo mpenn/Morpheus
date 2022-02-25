@@ -115,7 +115,6 @@ class TestInferenceStage(BaseMorpheusTest):
         mock_observable.pipe.assert_called_once()
         mock_pipe.subscribe.assert_called_once_with(mock_subscriber)
 
-
     @mock.patch('neo.Future')
     @mock.patch('morpheus.pipeline.inference.inference_stage.ops')
     def test_py_inf_fn_on_next(self, mock_ops, mock_future):
@@ -240,25 +239,7 @@ class TestInferenceStage(BaseMorpheusTest):
         self.assertEqual(len(out_resp), 3)
 
         self.assertEqual(mock_message.get_slice.call_count, 3)
-        mock_message.get_slice.assert_has_calls([
-            mock.call(0, 3),
-            mock.call(3, 7),
-            mock.call(7, 10)
-        ])
-
-    @mock.patch('asyncio.gather')
-    @mock.patch('asyncio.get_running_loop')
-    def test_queue_inf_work(self, mock_get_running_loop, mock_gather):
-        mock_loop = mock_get_running_loop.return_value
-
-        config = Config.get()
-        inf_stage = InferenceStage(config)
-        inf_stage._queue_inf_work(range(4))
-
-        self.assertEqual(mock_loop.create_future.call_count, 4)
-        mock_gather.assert_called_once()
-
-        self.assertEqual(inf_stage._inf_queue.qsize(), 4)
+        mock_message.get_slice.assert_has_calls([mock.call(0, 3), mock.call(3, 7), mock.call(7, 10)])
 
     def test_convert_response(self):
         # The C++ impl of MultiResponseProbsMessage doesn't like our mocked messages
@@ -279,11 +260,10 @@ class TestInferenceStage(BaseMorpheusTest):
         self.assertIsInstance(resp.memory, ResponseMemoryProbs)
         self.assertEqual(resp.offset, 0)
         self.assertEqual(resp.count, 2)
-        self.assertEqual(resp.memory.probs.tolist(), [[0.1, 0.5, 0.8], [0,  0,  0]])
+        self.assertEqual(resp.memory.probs.tolist(), [[0.1, 0.5, 0.8], [0, 0, 0]])
 
         mm2.count = 2
-        out_msg2.probs = cp.array([[0.1, 0.5, 0.8],
-                                   [4.5, 6.7, 8.9]])
+        out_msg2.probs = cp.array([[0.1, 0.5, 0.8], [4.5, 6.7, 8.9]])
         mm2.seq_ids = cp.array([[0], [1]])
         out_msg2.count = 2
         resp = inference_stage.InferenceStage._convert_response(([mm1, mm2], [out_msg1, out_msg2]))
@@ -297,13 +277,11 @@ class TestInferenceStage(BaseMorpheusTest):
 
     def test_convert_response_errors(self):
         # Length of input messages doesn't match length of output messages
-        self.assertRaises(AssertionError,
-            inference_stage.InferenceStage._convert_response,
-            ([1,2,3], [1, 2]))
+        self.assertRaises(AssertionError, inference_stage.InferenceStage._convert_response, ([1, 2, 3], [1, 2]))
 
         # Message offst of the second message doesn't line up offset+count of the first
         mm1 = self._mk_message()
-        mm2 = self._mk_message(mess_offset = 12)
+        mm2 = self._mk_message(mess_offset=12)
 
         out_msg1 = self._mk_message()
         out_msg1.probs = cp.array([[0.1, 0.5, 0.8]])
@@ -312,16 +290,14 @@ class TestInferenceStage(BaseMorpheusTest):
         out_msg2.probs = cp.array([[0.1, 0.5, 0.8]])
 
         self.assertRaises(AssertionError,
-            inference_stage.InferenceStage._convert_response,
-            ([mm1, mm2], [out_msg1, out_msg2]))
+                          inference_stage.InferenceStage._convert_response, ([mm1, mm2], [out_msg1, out_msg2]))
 
         # mess_coutn and count don't match for mm2, and mm2.count != out_msg2.count
         mm2.mess_offset = 1
         mm2.count = 2
 
         self.assertRaises(AssertionError,
-            inference_stage.InferenceStage._convert_response,
-            ([mm1, mm2], [out_msg1, out_msg2]))
+                          inference_stage.InferenceStage._convert_response, ([mm1, mm2], [out_msg1, out_msg2]))
 
         # saved_count != total_mess_count
         # Unlike the other asserts that can be triggered due to bad input data
@@ -331,8 +307,7 @@ class TestInferenceStage(BaseMorpheusTest):
         mm2.mess_count.side_effect = [2, 1, 1]
 
         self.assertRaises(AssertionError,
-            inference_stage.InferenceStage._convert_response,
-            ([mm1, mm2], [out_msg1, out_msg2]))
+                          inference_stage.InferenceStage._convert_response, ([mm1, mm2], [out_msg1, out_msg2]))
 
     def test_convert_one_response(self):
         Config.get().use_cpp = False
@@ -340,7 +315,7 @@ class TestInferenceStage(BaseMorpheusTest):
         mem = ResponseMemoryProbs(1, probs=cp.zeros((1, 3)))
 
         inf = self._mk_message()
-        res = ResponseMemoryProbs(count=1, probs=cp.array([[1, 2 ,3]]))
+        res = ResponseMemoryProbs(count=1, probs=cp.array([[1, 2, 3]]))
 
         mpm = inference_stage.InferenceStage._convert_one_response(mem, inf, res)
         self.assertEqual(mpm.meta, inf.meta)
@@ -360,15 +335,13 @@ class TestInferenceStage(BaseMorpheusTest):
         mpm = inference_stage.InferenceStage._convert_one_response(mem, inf, res)
         self.assertEqual(mem.get_output('probs').tolist(), [[0.1, 0.6, 0.8], [5.6, 6.7, 9.2]])
 
-
-
     def test_convert_one_response_error(self):
         mem = ResponseMemoryProbs(1, probs=cp.zeros((1, 3)))
         inf = self._mk_message(mess_count=2)
         res = self._mk_message(count=2)
 
-        self.assertRaises(AssertionError,
-            inference_stage.InferenceStage._convert_one_response, mem, inf, res)
+        self.assertRaises(AssertionError, inference_stage.InferenceStage._convert_one_response, mem, inf, res)
+
 
 if __name__ == '__main__':
     unittest.main()

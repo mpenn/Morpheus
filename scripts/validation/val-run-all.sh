@@ -24,11 +24,6 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 source ${SCRIPT_DIR}/val-globals.sh
 source ${SCRIPT_DIR}/val-utils.sh
 
-# Make sure the .tmp folder exists
-if [[ ! -d "${MORPHEUS_ROOT}/.tmp" ]]; then
-   mkdir -p "${MORPHEUS_ROOT}/.tmp"
-fi
-
 # Load triton here to prevent it being closed and restarted after each command
 ensure_triton_running
 
