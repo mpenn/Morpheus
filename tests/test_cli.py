@@ -55,16 +55,26 @@ from tests import BaseMorpheusTest
 
 GENERAL_ARGS = ['run', '--num_threads=12', '--pipeline_batch_size=1024', '--model_max_batch_size=1024', '--use_cpp=0']
 MONITOR_ARGS = ['monitor', '--description', 'Unittest', '--smoothing=0.001', '--unit', 'inf']
-VALIDATE_ARGS = ['validate', '--val_file_name',
-                 os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'),
-                 '--results_file_name=results.json', '--index_col=_index_', '--exclude', 'event_dt', '--rel_tol=0.1']
+VALIDATE_ARGS = [
+    'validate',
+    '--val_file_name',
+    os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'),
+    '--results_file_name=results.json',
+    '--index_col=_index_',
+    '--exclude',
+    'event_dt',
+    '--rel_tol=0.1'
+]
 TO_FILE_ARGS = ['to-file', '--filename=out.csv']
-FILE_SRC_ARGS = ['from-file', '--filename', os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')]
+FILE_SRC_ARGS = [
+    'from-file', '--filename', os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
+]
 INF_TRITON_ARGS = ['inf-triton', '--model_name=test-model', '--server_url=test:123', '--force_convert_inputs=True']
 
 KAFKA_BOOTS = ['--bootstrap_servers', 'kserv1:123,kserv2:321']
 FROM_KAFKA_ARGS = ['from-kafka', '--input_topic', 'test_topic'] + KAFKA_BOOTS
-TO_KAFKA_ARGS = ['to-kafka',  '--output_topic', 'test_topic'] + KAFKA_BOOTS
+TO_KAFKA_ARGS = ['to-kafka', '--output_topic', 'test_topic'] + KAFKA_BOOTS
+
 
 @pytest.mark.usefixtures("config_no_cpp")
 class TestCli(BaseMorpheusTest):
@@ -83,6 +93,7 @@ class TestCli(BaseMorpheusTest):
         `callback_values` dictionary with the context, pipeline & stages constructed.
         """
         callback_values = {}
+
         @group.result_callback(replace=True)
         @click.pass_context
         def mock_post_callback(ctx, stages, *a, **k):
@@ -105,7 +116,6 @@ class TestCli(BaseMorpheusTest):
         result = runner.invoke(cli.cli, ['run', 'pipeline-ae', '--help'])
         self.assertEqual(result.exit_code, 0, result.output)
 
-
     def test_autocomplete(self):
         tmp_dir = self._mk_tmp_dir()
 
@@ -116,7 +126,6 @@ class TestCli(BaseMorpheusTest):
         # The actual results of this are specific to the implementation of click_completion
         result = runner.invoke(cli.cli, ['tools', 'autocomplete', 'install', 'bash'], env={'HOME': tmp_dir})
         self.assertEqual(result.exit_code, 0, result.output)
-
 
     def test_pipeline_ae(self):
         """
@@ -154,8 +163,8 @@ class TestCli(BaseMorpheusTest):
 
         stages = callback_values['stages']
         # Verify the stages are as we expect them, if there is a size-mismatch python will raise a Value error
-        [cloud_trail, train_ae, process_ae, auto_enc, add_scores, time_series, monitor,
-            validation, serialize, to_file] = stages
+        [cloud_trail, train_ae, process_ae, auto_enc, add_scores, time_series, monitor, validation, serialize,
+         to_file] = stages
 
         self.assertIsInstance(cloud_trail, CloudTrailSourceStage)
         self.assertEqual(cloud_trail._input_glob, "input_glob*.csv")
@@ -174,12 +183,13 @@ class TestCli(BaseMorpheusTest):
         self.assertTrue(time_series._hot_start)
 
         self.assertIsInstance(monitor, MonitorStage)
-        self.assertEqual(monitor._description,  'Unittest')
-        self.assertEqual(monitor._smoothing,  0.001)
+        self.assertEqual(monitor._description, 'Unittest')
+        self.assertEqual(monitor._smoothing, 0.001)
         self.assertEqual(monitor._unit, 'inf')
 
         self.assertIsInstance(validation, ValidationStage)
-        self.assertEqual(validation._val_file_name, os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
+        self.assertEqual(validation._val_file_name,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
         self.assertEqual(validation._results_file_name, 'results.json')
         self.assertEqual(validation._index_col, '_index_')
 
@@ -192,7 +202,6 @@ class TestCli(BaseMorpheusTest):
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
-
 
     def test_pipeline_ae_all(self):
         """
@@ -218,8 +227,22 @@ class TestCli(BaseMorpheusTest):
 
         stages = callback_values['stages']
         # Verify the stages are as we expect them, if there is a size-mismatch python will raise a Value error
-        [cloud_trail, add_class, filter_stage, train_ae, process_ae, auto_enc, add_scores, triton_inf, time_series,
-         monitor, validation, serialize, to_file, to_kafka] = stages
+        [
+            cloud_trail,
+            add_class,
+            filter_stage,
+            train_ae,
+            process_ae,
+            auto_enc,
+            add_scores,
+            triton_inf,
+            time_series,
+            monitor,
+            validation,
+            serialize,
+            to_file,
+            to_kafka
+        ] = stages
 
         self.assertIsInstance(cloud_trail, CloudTrailSourceStage)
         self.assertEqual(cloud_trail._input_glob, "input_glob*.csv")
@@ -246,12 +269,13 @@ class TestCli(BaseMorpheusTest):
         self.assertTrue(time_series._hot_start)
 
         self.assertIsInstance(monitor, MonitorStage)
-        self.assertEqual(monitor._description,  'Unittest')
-        self.assertEqual(monitor._smoothing,  0.001)
+        self.assertEqual(monitor._description, 'Unittest')
+        self.assertEqual(monitor._smoothing, 0.001)
         self.assertEqual(monitor._unit, 'inf')
 
         self.assertIsInstance(validation, ValidationStage)
-        self.assertEqual(validation._val_file_name, os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
+        self.assertEqual(validation._val_file_name,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
         self.assertEqual(validation._results_file_name, 'results.json')
         self.assertEqual(validation._index_col, '_index_')
 
@@ -268,7 +292,6 @@ class TestCli(BaseMorpheusTest):
         self.assertIsInstance(to_kafka, WriteToKafkaStage)
         self.assertEqual(to_kafka._kafka_conf['bootstrap.servers'], 'kserv1:123,kserv2:321')
         self.assertEqual(to_kafka._output_topic, 'test_topic')
-
 
     def test_pipeline_fil(self):
         """
@@ -298,7 +321,8 @@ class TestCli(BaseMorpheusTest):
         [file_source, deserialize, process_fil, triton_inf, monitor, add_class, validation, serialize, to_file] = stages
 
         self.assertIsInstance(file_source, FileSourceStage)
-        self.assertEqual(file_source._filename, os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
+        self.assertEqual(file_source._filename,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
         self.assertFalse(file_source._iterative)
 
         self.assertIsInstance(deserialize, DeserializeStage)
@@ -310,14 +334,15 @@ class TestCli(BaseMorpheusTest):
         self.assertTrue(triton_inf._kwargs['force_convert_inputs'])
 
         self.assertIsInstance(monitor, MonitorStage)
-        self.assertEqual(monitor._description,  'Unittest')
-        self.assertEqual(monitor._smoothing,  0.001)
+        self.assertEqual(monitor._description, 'Unittest')
+        self.assertEqual(monitor._smoothing, 0.001)
         self.assertEqual(monitor._unit, 'inf')
 
         self.assertIsInstance(add_class, AddClassificationsStage)
 
         self.assertIsInstance(validation, ValidationStage)
-        self.assertEqual(validation._val_file_name, os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
+        self.assertEqual(validation._val_file_name,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
         self.assertEqual(validation._results_file_name, 'results.json')
         self.assertEqual(validation._index_col, '_index_')
 
@@ -330,7 +355,6 @@ class TestCli(BaseMorpheusTest):
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
-
 
     def test_pipeline_fil_all(self):
         """
@@ -375,11 +399,29 @@ class TestCli(BaseMorpheusTest):
 
         stages = callback_values['stages']
         # Verify the stages are as we expect them, if there is a size-mismatch python will raise a Value error
-        [file_source, from_kafka, deserialize, filter_stage, dropna, process_fil, add_scores, inf_ident, inf_pytorch,
-         mlflow_drift, triton_inf, monitor, add_class, validation, serialize, to_file, to_kafka] = stages
+        [
+            file_source,
+            from_kafka,
+            deserialize,
+            filter_stage,
+            dropna,
+            process_fil,
+            add_scores,
+            inf_ident,
+            inf_pytorch,
+            mlflow_drift,
+            triton_inf,
+            monitor,
+            add_class,
+            validation,
+            serialize,
+            to_file,
+            to_kafka
+        ] = stages
 
         self.assertIsInstance(file_source, FileSourceStage)
-        self.assertEqual(file_source._filename, os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
+        self.assertEqual(file_source._filename,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
         self.assertFalse(file_source._iterative)
 
         self.assertIsInstance(from_kafka, KafkaSourceStage)
@@ -409,14 +451,15 @@ class TestCli(BaseMorpheusTest):
         self.assertTrue(triton_inf._kwargs['force_convert_inputs'])
 
         self.assertIsInstance(monitor, MonitorStage)
-        self.assertEqual(monitor._description,  'Unittest')
-        self.assertEqual(monitor._smoothing,  0.001)
+        self.assertEqual(monitor._description, 'Unittest')
+        self.assertEqual(monitor._smoothing, 0.001)
         self.assertEqual(monitor._unit, 'inf')
 
         self.assertIsInstance(add_class, AddClassificationsStage)
 
         self.assertIsInstance(validation, ValidationStage)
-        self.assertEqual(validation._val_file_name, os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
+        self.assertEqual(validation._val_file_name,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
         self.assertEqual(validation._results_file_name, 'results.json')
         self.assertEqual(validation._index_col, '_index_')
 
@@ -433,7 +476,6 @@ class TestCli(BaseMorpheusTest):
         self.assertIsInstance(to_kafka, WriteToKafkaStage)
         self.assertEqual(to_kafka._kafka_conf['bootstrap.servers'], 'kserv1:123,kserv2:321')
         self.assertEqual(to_kafka._output_topic, 'test_topic')
-
 
     def test_pipeline_nlp(self):
         """
@@ -473,7 +515,8 @@ class TestCli(BaseMorpheusTest):
         [file_source, deserialize, process_nlp, triton_inf, monitor, add_class, validation, serialize, to_file] = stages
 
         self.assertIsInstance(file_source, FileSourceStage)
-        self.assertEqual(file_source._filename, os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
+        self.assertEqual(file_source._filename,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
         self.assertFalse(file_source._iterative)
 
         self.assertIsInstance(deserialize, DeserializeStage)
@@ -490,8 +533,8 @@ class TestCli(BaseMorpheusTest):
         self.assertTrue(triton_inf._kwargs['force_convert_inputs'])
 
         self.assertIsInstance(monitor, MonitorStage)
-        self.assertEqual(monitor._description,  'Unittest')
-        self.assertEqual(monitor._smoothing,  0.001)
+        self.assertEqual(monitor._description, 'Unittest')
+        self.assertEqual(monitor._smoothing, 0.001)
         self.assertEqual(monitor._unit, 'inf')
 
         self.assertIsInstance(add_class, AddClassificationsStage)
@@ -499,7 +542,8 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(add_class._threshold, 0.7)
 
         self.assertIsInstance(validation, ValidationStage)
-        self.assertEqual(validation._val_file_name, os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
+        self.assertEqual(validation._val_file_name,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
         self.assertEqual(validation._results_file_name, 'results.json')
         self.assertEqual(validation._index_col, '_index_')
 
@@ -512,7 +556,6 @@ class TestCli(BaseMorpheusTest):
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
-
 
     def test_pipeline_nlp_all(self):
         """
@@ -560,11 +603,29 @@ class TestCli(BaseMorpheusTest):
 
         stages = callback_values['stages']
         # Verify the stages are as we expect them, if there is a size-mismatch python will raise a Value error
-        [file_source, from_kafka, deserialize, filter_stage, dropna, process_nlp, add_scores, inf_ident, inf_pytorch,
-         mlflow_drift, triton_inf, monitor, add_class, validation, serialize, to_file, to_kafka] = stages
+        [
+            file_source,
+            from_kafka,
+            deserialize,
+            filter_stage,
+            dropna,
+            process_nlp,
+            add_scores,
+            inf_ident,
+            inf_pytorch,
+            mlflow_drift,
+            triton_inf,
+            monitor,
+            add_class,
+            validation,
+            serialize,
+            to_file,
+            to_kafka
+        ] = stages
 
         self.assertIsInstance(file_source, FileSourceStage)
-        self.assertEqual(file_source._filename, os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
+        self.assertEqual(file_source._filename,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines'))
         self.assertFalse(file_source._iterative)
 
         self.assertIsInstance(from_kafka, KafkaSourceStage)
@@ -598,8 +659,8 @@ class TestCli(BaseMorpheusTest):
         self.assertTrue(triton_inf._kwargs['force_convert_inputs'])
 
         self.assertIsInstance(monitor, MonitorStage)
-        self.assertEqual(monitor._description,  'Unittest')
-        self.assertEqual(monitor._smoothing,  0.001)
+        self.assertEqual(monitor._description, 'Unittest')
+        self.assertEqual(monitor._smoothing, 0.001)
         self.assertEqual(monitor._unit, 'inf')
 
         self.assertIsInstance(add_class, AddClassificationsStage)
@@ -607,7 +668,8 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(add_class._threshold, 0.7)
 
         self.assertIsInstance(validation, ValidationStage)
-        self.assertEqual(validation._val_file_name, os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
+        self.assertEqual(validation._val_file_name,
+                         os.path.join(TEST_DIRS.validation_data_dir, 'hammah-role-g-validation-data.csv'))
         self.assertEqual(validation._results_file_name, 'results.json')
         self.assertEqual(validation._index_col, '_index_')
 
@@ -624,7 +686,6 @@ class TestCli(BaseMorpheusTest):
         self.assertIsInstance(to_kafka, WriteToKafkaStage)
         self.assertEqual(to_kafka._kafka_conf['bootstrap.servers'], 'kserv1:123,kserv2:321')
         self.assertEqual(to_kafka._output_topic, 'test_topic')
-
 
     def test_pipeline_alias(self):
         """
