@@ -35,6 +35,7 @@ dependencies:
 - grpc-cpp
 - gxx_linux-64=9.4
 - libgcc-ng=9.4
+- librdkafka=1.8.2.post2
 - libstdcxx-ng=9.4
 - mlflow=1.23.1
 - ninja
@@ -58,3 +59,5 @@ dependencies:
     - nvidia-pyindex
     - git+https://github.com/mdemoret-nv/streamz.git@on_completed#egg=streamz
     - docutils
+    - --find-links https://download.pytorch.org/whl/cu113/torch_stable.html
+    - torch==1.10.2+cu113
