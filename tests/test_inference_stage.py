@@ -19,11 +19,9 @@ import unittest
 from unittest import mock
 
 import cupy as cp
+import pytest
 
 from morpheus.config import Config
-
-Config.get().use_cpp = False
-
 from morpheus.pipeline.inference import inference_stage
 from morpheus.pipeline.messages import ResponseMemoryProbs
 from tests import TEST_DIRS
@@ -36,6 +34,7 @@ class IW(inference_stage.InferenceWorker):
         super().calc_output_dims(_)
         return (1, 2)
 
+
 class InferenceStage(inference_stage.InferenceStage):
     # Subclass InferenceStage to implement the abstract methods
     def _get_inference_worker(self, pq):
@@ -44,6 +43,7 @@ class InferenceStage(inference_stage.InferenceStage):
         return IW(pq)
 
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestInferenceStage(BaseMorpheusTest):
     def test_constructor(self):
         config = Config.get()
@@ -103,7 +103,6 @@ class TestInferenceStage(BaseMorpheusTest):
 
         mock_observable.pipe.assert_called_once()
         mock_pipe.subscribe.assert_called_once_with(mock_subscriber)
-
 
     @mock.patch('neo.Future')
     @mock.patch('morpheus.pipeline.inference.inference_stage.ops')
@@ -234,11 +233,7 @@ class TestInferenceStage(BaseMorpheusTest):
         self.assertEqual(len(out_resp), 3)
 
         self.assertEqual(mock_message.get_slice.call_count, 3)
-        mock_message.get_slice.assert_has_calls([
-            mock.call(0, 3),
-            mock.call(3, 7),
-            mock.call(7, 10)
-        ])
+        mock_message.get_slice.assert_has_calls([mock.call(0, 3), mock.call(3, 7), mock.call(7, 10)])
 
     @mock.patch('asyncio.gather')
     @mock.patch('asyncio.get_running_loop')

@@ -18,16 +18,15 @@ import unittest
 from unittest import mock
 
 import cupy as cp
+import pytest
 
 from morpheus.config import Config
-
-Config.get().use_cpp = False
-
 from morpheus.pipeline.general_stages import FilterDetectionsStage
 from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
+@pytest.mark.usefixtures("config_no_cpp")
 class TestFilterDetectionsStage(BaseMorpheusTest):
     def test_constructor(self):
         config = Config.get()
@@ -43,9 +42,9 @@ class TestFilterDetectionsStage(BaseMorpheusTest):
         fds = FilterDetectionsStage(config, threshold=0.2)
         self.assertEqual(fds._threshold, 0.2)
 
-
     def test_filter(self):
         config = Config.get()
+
         fds = FilterDetectionsStage(config, threshold=0.5)
 
         mock_message = mock.MagicMock()
