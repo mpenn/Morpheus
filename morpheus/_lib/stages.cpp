@@ -116,7 +116,7 @@ PYBIND11_MODULE(stages, m)
     py::class_<DeserializeStage, neo::SegmentObject, std::shared_ptr<DeserializeStage>>(
         m, "DeserializeStage", py::multiple_inheritance())
         .def(py::init<>([](neo::Segment& parent, const std::string& name, size_t batch_size) {
-                 auto stage      = std::make_shared<DeserializeStage>(parent, name, batch_size);
+                 auto stage = std::make_shared<DeserializeStage>(parent, name, batch_size);
 
                  parent.register_node<DeserializeStage>(stage);
 
@@ -136,7 +136,7 @@ PYBIND11_MODULE(stages, m)
                            bool do_lower_case,
                            bool add_special_token,
                            int stride = -1) {
-                 auto stage      = std::make_shared<PreprocessNLPStage>(parent,
+                 auto stage = std::make_shared<PreprocessNLPStage>(parent,
                                                                    name,
                                                                    vocab_hash_file,
                                                                    sequence_length,
@@ -161,7 +161,7 @@ PYBIND11_MODULE(stages, m)
     py::class_<PreprocessFILStage, neo::SegmentObject, std::shared_ptr<PreprocessFILStage>>(
         m, "PreprocessFILStage", py::multiple_inheritance())
         .def(py::init<>([](neo::Segment& parent, const std::string& name) {
-                 auto stage      = std::make_shared<PreprocessFILStage>(parent, name);
+                 auto stage = std::make_shared<PreprocessFILStage>(parent, name);
 
                  parent.register_node<PreprocessFILStage>(stage);
 
@@ -201,6 +201,56 @@ PYBIND11_MODULE(stages, m)
              py::arg("use_shared_memory"),
              py::arg("needs_logits"),
              py::arg("inout_mapping") = py::dict());
+
+    py::class_<FilterDetectionsStage, neo::SegmentObject, std::shared_ptr<FilterDetectionsStage>>(
+        m, "FilterDetectionsStage", py::multiple_inheritance())
+        .def(py::init<>([](neo::Segment& parent, const std::string& name, float threshold) {
+                 auto stage = std::make_shared<FilterDetectionsStage>(parent, name, threshold);
+
+                 parent.register_node<FilterDetectionsStage>(stage);
+
+                 return stage;
+             }),
+             py::arg("parent"),
+             py::arg("name"),
+             py::arg("threshold"));
+
+    py::class_<AddClassificationsStage, neo::SegmentObject, std::shared_ptr<AddClassificationsStage>>(
+        m, "AddClassificationsStage", py::multiple_inheritance())
+        .def(py::init<>([](neo::Segment& parent,
+                           const std::string& name,
+                           float threshold,
+                           std::size_t num_class_labels,
+                           std::map<std::size_t, std::string> idx2label) {
+                 auto stage =
+                     std::make_shared<AddClassificationsStage>(parent, name, threshold, num_class_labels, idx2label);
+
+                 parent.register_node<AddClassificationsStage>(stage);
+
+                 return stage;
+             }),
+             py::arg("parent"),
+             py::arg("name"),
+             py::arg("threshold"),
+             py::arg("num_class_labels"),
+             py::arg("idx2label"));
+
+    py::class_<AddScoresStage, neo::SegmentObject, std::shared_ptr<AddScoresStage>>(
+        m, "AddScoresStage", py::multiple_inheritance())
+        .def(py::init<>([](neo::Segment& parent,
+                           const std::string& name,
+                           std::size_t num_class_labels,
+                           std::map<std::size_t, std::string> idx2label) {
+                 auto stage = std::make_shared<AddScoresStage>(parent, name, num_class_labels, idx2label);
+
+                 parent.register_node<AddScoresStage>(stage);
+
+                 return stage;
+             }),
+             py::arg("parent"),
+             py::arg("name"),
+             py::arg("num_class_labels"),
+             py::arg("idx2label"));
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

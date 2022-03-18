@@ -28,6 +28,7 @@
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
+#include <cstddef> // for size_t
 
 namespace morpheus {
 
@@ -162,8 +163,6 @@ std::shared_ptr<rmm::device_buffer> transpose(const DevMemInfo& input, size_t ro
     return output;
 }
 
-
-
 struct matx_create_seg_ids
 {
     size_t element_count;
@@ -204,6 +203,98 @@ std::shared_ptr<rmm::device_buffer> create_seg_ids(size_t row_count, size_t fea_
     cudf::type_dispatcher(cudf::data_type{output_dtype.cudf_type_id()},
                           matx_create_seg_ids{row_count, fea_len, output->stream()},
                           output->data());
+
+    return output;
+}
+
+struct matx_threshold
+{
+    size_t rows;
+    size_t cols;
+    bool by_row;
+    rmm::cuda_stream_view stream;
+
+    template <typename InputT, std::enable_if_t<!cudf::is_floating_point<InputT>()>* = nullptr>
+    void operator()(void* input_data, void* output_data, double threshold, const std::vector<neo::TensorIndex>& stride)
+    {
+        throw std::invalid_argument("Unsupported conversion");
+    }
+
+    template <typename InputT, std::enable_if_t<cudf::is_floating_point<InputT>()>* = nullptr>
+    void operator()(void* input_data, void* output_data, double threshold, const std::vector<neo::TensorIndex>& stride)
+    {
+        if (by_row)
+        {
+            this->threshold_by_row<InputT>(input_data, output_data, threshold, stride);
+        }
+        else
+        {
+            this->threshold<InputT>(input_data, output_data, threshold, stride);
+        }
+    }
+
+  private:
+    template <typename InputT>
+    void threshold_by_row(void* input_data, void* output_data, double threshold, const std::vector<neo::TensorIndex>& stride)
+    {
+        matx::tensorShape_t<2> input_shape({static_cast<matx::index_t>(rows), static_cast<matx::index_t>(cols)});
+
+        // Output is always 1 column
+        matx::tensorShape_t<1> output_shape({static_cast<matx::index_t>(rows)});
+
+        // Specify the stride here since the data comes in column major order.
+        matx::tensor_t<InputT, 2> input_tensor(static_cast<InputT*>(input_data),
+                                               input_shape,
+                                               {static_cast<matx::index_t>(stride[0]), static_cast<matx::index_t>(stride[1])});
+
+        // Tmp array to hold max value
+        matx::tensor_t<InputT, 1> max_tensor(output_shape);
+
+        // row-wise reduction
+        matx::rmax(max_tensor, input_tensor, stream.value());
+
+        matx::tensor_t<bool, 1> output_tensor(static_cast<bool*>(output_data), output_shape);
+
+        // Convert max value to bool
+        (output_tensor = max_tensor > (InputT)threshold).run(stream.value());
+    }
+
+    template <typename InputT>
+    void threshold(void* input_data, void* output_data, double threshold, const std::vector<neo::TensorIndex>& stride)
+    {
+        matx::tensorShape_t<2> shape({static_cast<matx::index_t>(rows), static_cast<matx::index_t>(cols)});
+
+        matx::index_t matx_stride[2] = {static_cast<matx::index_t>(stride[0]), static_cast<matx::index_t>(stride[1])};
+
+        matx::tensor_t<InputT, 2> input_tensor(static_cast<InputT*>(input_data), shape, matx_stride);
+        matx::tensor_t<bool, 2> output_tensor(static_cast<bool*>(output_data), shape, matx_stride);
+
+        // Convert max value to bool
+        (output_tensor = input_tensor > (InputT)threshold).run(stream.value());
+    }
+};
+
+std::shared_ptr<rmm::device_buffer> threshold(const DevMemInfo& input, size_t rows, size_t cols, const std::vector<neo::TensorIndex>& stride, double thresh_val, bool by_row)
+{
+    auto input_dtype = DType(input.type_id);
+
+    std::size_t output_size = sizeof(bool) * rows;
+    if (!by_row)
+    {
+        output_size *= cols;
+    }
+
+    // Now create the output array of bools
+    auto output = std::make_shared<rmm::device_buffer>(output_size, input.buffer->stream(), input.buffer->memory_resource());
+
+    cudf::type_dispatcher(cudf::data_type{input_dtype.cudf_type_id()},
+                          matx_threshold{rows, cols, by_row, output->stream()},
+                          input.data(),
+                          output->data(),
+                          thresh_val,
+                          stride);
+
+    neo::enqueue_stream_sync_event(output->stream()).get();
 
     return output;
 }

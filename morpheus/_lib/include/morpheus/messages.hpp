@@ -17,10 +17,13 @@
 
 #pragma once
 
-
 #include <morpheus/common.hpp>
 #include <morpheus/cudf_helpers.hpp>
 #include <morpheus/table_info.hpp>
+#include <morpheus/type_utils.hpp>
+
+#include <neo/core/tensor.hpp>
+#include <neo/utils/type_utils.hpp>
 
 #include <cudf/copying.hpp>
 #include <cudf/io/types.hpp>
@@ -33,12 +36,12 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
-
 
 namespace morpheus {
 struct PyDataTable : public IDataTable
@@ -120,7 +123,7 @@ class MessageMeta
     struct MessageMetaImpl
     {
         virtual pybind11::object get_py_table() const = 0;
-        virtual TableInfo get_info() const      = 0;
+        virtual TableInfo get_info() const            = 0;
     };
 
     MessageMeta(std::shared_ptr<IDataTable> data) : m_data(std::move(data)) {}
@@ -293,12 +296,55 @@ class MultiMessage
         return sliced_info;
     }
 
-    // cudf::column_view set_meta(const std::string& col_name)
-    // {
-    //     auto table_view = this->get_meta(std::vector<std::string>{col_name});
+    void set_meta(const std::string& col_name, neo::TensorObject tensor)
+    {
+        set_meta(std::vector<std::string>{col_name}, std::vector<neo::TensorObject>{tensor});
+    }
 
-    //     return table_view.table_view.column(0);
-    // }
+    void set_meta(const std::vector<std::string>& column_names, const std::vector<neo::TensorObject>& tensors)
+    {
+        std::vector<neo::TypeId> tensor_types{tensors.size()};
+        for (size_t i = 0; i < tensors.size(); ++i)
+        {
+            tensor_types[i] = tensors[i].dtype().type_id();
+        }
+
+        TableInfo info = this->meta->get_info();
+        info.insert_missing_columns(column_names, tensor_types);
+
+        TableInfo table_meta = this->get_meta(column_names);
+        for (size_t i = 0; i < tensors.size(); ++i)
+        {
+            const auto cv          = table_meta.get_column(i);
+            const auto table_type  = cv.type().id();
+            const auto tensor_type = DType(tensor_types[i]).cudf_type_id();
+            const auto row_stride  = tensors[i].stride(0);
+
+            CHECK(tensors[i].count() == cv.size() &&
+                  (table_type == tensor_type ||
+                   (table_type == cudf::type_id::BOOL8 && tensor_type == cudf::type_id::UINT8)));
+
+            if (row_stride == 1)
+            {
+                // column major just use cudaMemcpy
+                NEO_CHECK_CUDA(cudaMemcpy(const_cast<uint8_t*>(cv.data<uint8_t>()),
+                                          tensors[i].data(),
+                                          tensors[i].bytes(),
+                                          cudaMemcpyDeviceToDevice));
+            }
+            else
+            {
+                const auto item_size = tensors[i].dtype().item_size();
+                NEO_CHECK_CUDA(cudaMemcpy2D(const_cast<uint8_t*>(cv.data<uint8_t>()),
+                                            item_size,
+                                            tensors[i].data(),
+                                            row_stride * item_size,
+                                            item_size,
+                                            cv.size(),
+                                            cudaMemcpyDeviceToDevice));
+            }
+        }
+    }
 
     std::shared_ptr<MultiMessage> get_slice(size_t start, size_t stop) const
     {
@@ -568,6 +614,12 @@ class MultiResponseProbsMessage : public MultiResponseMessage
                               size_t count) :
       MultiResponseMessage(meta, mess_offset, mess_count, memory, offset, count)
     {}
+
+    std::shared_ptr<MultiResponseProbsMessage> get_slice(size_t start, size_t stop) const
+    {
+        // This can only cast down
+        return std::static_pointer_cast<MultiResponseProbsMessage>(this->internal_get_slice(start, stop));
+    }
 
     OUTPUT_PROP(probs)
 };

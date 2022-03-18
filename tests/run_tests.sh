@@ -19,16 +19,23 @@
 # pytest
 TEST_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-pytest -m "not slow" --cov=morpheus --cov-report term-missing ${TEST_DIR}
+pytest --cov=morpheus --cov-report term-missing ${TEST_DIR}
 
 # Run the slow tests without coverage since that causes a crash. Need to run them individually due to #71
 if [ -n "${MORPHEUS_RUN_SLOW_TESTS}" ]; then
-    pytest -m slow ${TEST_DIR}/test_abp.py::TestABP::test_abp_no_cpp
-    pytest -m slow ${TEST_DIR}/test_abp.py::TestABP::test_abp_cpp
-    pytest -m slow ${TEST_DIR}/test_hammah.py::TestHammah::test_hammah_roleg
-    pytest -m slow ${TEST_DIR}/test_hammah.py::TestHammah::test_hammah_user123
-    pytest -m slow ${TEST_DIR}/test_phishing.py::TestPhishing::test_email_no_cpp
-    pytest -m slow ${TEST_DIR}/test_phishing.py::TestPhishing::test_email_cpp
-    pytest -m slow ${TEST_DIR}/test_sid.py::TestSid::test_minibert_no_cpp
-    pytest -m slow ${TEST_DIR}/test_sid.py::TestSid::test_minibert_cpp
+    pytest --run_slow ${TEST_DIR}/test_abp.py::TestABP::test_abp_no_cpp
+    pytest --run_slow ${TEST_DIR}/test_abp.py::TestABP::test_abp_cpp
+    pytest --run_slow ${TEST_DIR}/test_add_classifications_stage_pipe.py::TestAddClassificationsStagePipe::test_pipe_no_cpp
+    pytest --run_slow ${TEST_DIR}/test_add_classifications_stage_pipe.py::TestAddClassificationsStagePipe::test_pipe_cpp
+    pytest --run_slow ${TEST_DIR}/test_add_scores_stage_pipe.py::TestAddScoresStagePipe::test_pipe_no_cpp
+    pytest --run_slow ${TEST_DIR}/test_add_scores_stage_pipe.py::TestAddScoresStagePipe::test_pipe_cpp
+    pytest --run_slow ${TEST_DIR}/test_filter_detections_stage_pipe.py::TestFilterDetectionsStagePipe::test_filter_pipe_no_cpp
+    pytest --run_slow ${TEST_DIR}/test_filter_detections_stage_pipe.py::TestFilterDetectionsStagePipe::test_filter_pipe_cpp
+    pytest --run_slow ${TEST_DIR}/test_hammah.py::TestHammah::test_hammah_roleg
+    pytest --run_slow ${TEST_DIR}/test_hammah.py::TestHammah::test_hammah_user123
+    pytest --run_slow ${TEST_DIR}/test_phishing.py::TestPhishing::test_email_no_cpp
+    pytest --run_slow ${TEST_DIR}/test_phishing.py::TestPhishing::test_email_cpp
+    pytest --run_slow ${TEST_DIR}/test_sid.py::TestSid::test_minibert_no_cpp
+    pytest --run_slow ${TEST_DIR}/test_sid.py::TestSid::test_minibert_cpp
+
 fi

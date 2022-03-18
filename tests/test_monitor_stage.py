@@ -25,7 +25,6 @@ import cudf
 from morpheus.config import Config
 from morpheus.pipeline import general_stages as gs
 from morpheus.pipeline.messages import MultiMessage
-from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 

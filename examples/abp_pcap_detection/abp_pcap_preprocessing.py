@@ -15,20 +15,19 @@
 import typing
 from functools import partial
 
-import cudf
-import numpy as np
 import cupy as cp
-from morpheus.config import Config
-from morpheus.pipeline.preprocessing import PreprocessBaseStage
-from morpheus.pipeline.messages import (
-    InferenceMemoryFIL,
-    MultiInferenceFILMessage,
-    MultiInferenceMessage,
-    MultiMessage,
-)
-import morpheus._lib.stages as neos
-
 import neo
+import numpy as np
+
+import cudf
+
+import morpheus._lib.stages as neos
+from morpheus.config import Config
+from morpheus.pipeline.messages import InferenceMemoryFIL
+from morpheus.pipeline.messages import MultiInferenceFILMessage
+from morpheus.pipeline.messages import MultiInferenceMessage
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.preprocessing import PreprocessBaseStage
 
 
 class AbpPcapPreprocessingStage(PreprocessBaseStage):

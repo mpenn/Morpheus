@@ -28,6 +28,23 @@ def test_explicit_fixture_only_cpp(config_only_cpp: Config):
     assert config_only_cpp.use_cpp is True, "Incorrect use_cpp"
 
 
+class TestNoMarkerClass:
+    def test_no_marker(self, config: Config):
+        pass
+
+    @pytest.mark.use_python
+    def test_python_marker(self, config: Config):
+        assert not config.use_cpp
+
+    @pytest.mark.use_cpp
+    def test_cpp_marker(self, config: Config):
+        assert config.use_cpp
+
+    @pytest.mark.slow
+    def test_other_marker(self, config: Config):
+        pass
+
+
 @pytest.mark.use_python
 class TestPythonMarkerClass:
     def test_no_marker(self, config: Config):

@@ -21,7 +21,6 @@ import pytest
 
 from morpheus.config import Config
 from morpheus.pipeline.general_stages import TriggerStage
-from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 

@@ -107,7 +107,7 @@ class TestABP(BaseMorpheusTest):
 
         pipe.run()
         results = self._calc_error_val(results_file_name)
-        self.assertEqual(results.error_pct, 0)
+        self.assertEqual(results.diff_rows, 0)
 
     @pytest.mark.slow
     def test_abp_cpp(self):
@@ -161,7 +161,7 @@ class TestABP(BaseMorpheusTest):
 
         pipe.run()
         results = self._calc_error_val(results_file_name)
-        self.assertLess(results.error_pct, 5)
+        self.assertEqual(results.diff_rows, 0)
 
 
 if __name__ == '__main__':

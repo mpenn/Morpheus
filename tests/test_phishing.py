@@ -20,7 +20,6 @@ from unittest import mock
 
 import numpy as np
 import pytest
-import tritonclient.grpc
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
@@ -119,7 +118,7 @@ class TestPhishing(BaseMorpheusTest):
 
         pipe.run()
         results = self._calc_error_val(results_file_name)
-        self.assertLess(results.error_pct, 80)
+        self.assertEqual(results.diff_rows, 774)
 
     @pytest.mark.slow
     def test_email_cpp(self):
@@ -176,7 +175,7 @@ class TestPhishing(BaseMorpheusTest):
 
         pipe.run()
         results = self._calc_error_val(results_file_name)
-        self.assertLess(results.error_pct, 80)
+        self.assertEqual(results.diff_rows, 230)
 
 
 if __name__ == '__main__':

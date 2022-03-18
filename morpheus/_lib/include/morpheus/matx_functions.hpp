@@ -17,9 +17,9 @@
 
 #pragma once
 
+#include <neo/core/tensor.hpp>
 #include <neo/utils/type_utils.hpp>
 
-// #include <cudf/types.hpp>
 #include <rmm/device_buffer.hpp>
 
 #include <cstddef>
@@ -58,5 +58,14 @@ std::shared_ptr<rmm::device_buffer> transpose(const DevMemInfo& input, size_t ro
 
 // Builds an Nx3 segment ID matrix
 std::shared_ptr<rmm::device_buffer> create_seg_ids(size_t row_count, size_t fea_len, neo::TypeId output_type);
+
+// Return an array of boolean where x[i,j] >= thresh_val, when by_row is true an Nx1 array will be returned with a
+// true if any value in the row is above the threshold
+std::shared_ptr<rmm::device_buffer> threshold(const DevMemInfo& input,
+                                              size_t rows,
+                                              size_t cols,
+                                              const std::vector<neo::TensorIndex>& stride,
+                                              double thresh_val,
+                                              bool by_row);
 
 }  // namespace morpheus
