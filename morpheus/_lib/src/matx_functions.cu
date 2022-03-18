@@ -15,19 +15,19 @@
  * limitations under the License.
  */
 
-#include "morpheus/matx_functions.hpp"
+#include <morpheus/matx_functions.hpp>
+#include <morpheus/type_utils.hpp>
+
+#include <neo/cuda/sync.hpp>
+
+#include <cudf/utilities/traits.hpp>
+#include <cudf/utilities/type_dispatcher.hpp>
+
+#include <matx.h>
 
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
-
-#include <matx.h>
-#include <cudf/utilities/traits.hpp>
-#include <cudf/utilities/type_dispatcher.hpp>
-
-#include "trtlab/cuda/sync.h"
-
-#include <morpheus/type_utils.hpp>
 
 namespace morpheus {
 
@@ -58,7 +58,7 @@ struct matx_cast
     }
 };
 
-std::shared_ptr<rmm::device_buffer> cast(const DevMemInfo& input, trtlab::neo::TypeId output_type)
+std::shared_ptr<rmm::device_buffer> cast(const DevMemInfo& input, neo::TypeId output_type)
 {
     auto input_dtype  = DType(input.type_id);
     auto output_dtype = DType(output_type);
@@ -73,7 +73,7 @@ std::shared_ptr<rmm::device_buffer> cast(const DevMemInfo& input, trtlab::neo::T
                                  input.data(),
                                  output->data());
 
-    trtlab::cuda_sync<trtlab::standard_threads>::stream_sync(output->stream().value());
+    neo::enqueue_stream_sync_event(output->stream()).get();
 
     return output;
 }
@@ -193,7 +193,7 @@ struct matx_create_seg_ids
     }
 };
 
-std::shared_ptr<rmm::device_buffer> create_seg_ids(size_t row_count, size_t fea_len, trtlab::neo::TypeId output_type)
+std::shared_ptr<rmm::device_buffer> create_seg_ids(size_t row_count, size_t fea_len, neo::TypeId output_type)
 {
     auto output_dtype = DType(output_type);
 

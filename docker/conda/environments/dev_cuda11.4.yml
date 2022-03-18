@@ -15,49 +15,78 @@
 
 name: morpheus
 channels:
-- rapidsai
-- nvidia
-- rapidsai-nightly
-- conda-forge
+    - rapidsai
+    - nvidia
+    - rapidsai-nightly
+    - conda-forge
 dependencies:
-- automake
-- boost=1.77
-- ccache
-- cmake>=3.21
-- cudatoolkit=11.4
-- cython
-- docker-compose
-- docker-py
-- faker
-- flatbuffers=2.0
-- gcc_linux-64=9.4
-- gflags=2.2
-- grpc-cpp
-- gxx_linux-64=9.4
-- libgcc-ng=9.4
-- librdkafka=1.8.2.post2
-- libstdcxx-ng=9.4
-- mlflow=1.23.1
-- ninja
-- nlohmann_json=3.10
-- nodejs=17
-- numpy
-- numpydoc
-- pip
-- pydot
-- pytest
-- pytest-cov
-- python-graphviz
-- python=3.8
-- rapidjson
-- scikit-build
-- sphinx
-- sphinx_rtd_theme
-- sysroot_linux-64=2.17
-- tqdm
-- pip:
-    - nvidia-pyindex
-    - git+https://github.com/mdemoret-nv/streamz.git@on_completed#egg=streamz
-    - docutils
-    - --find-links https://download.pytorch.org/whl/cu113/torch_stable.html
-    - torch==1.10.2+cu113
+### Morpheus Dependencies ##############
+    - benchmark=1.6.1
+    - boost=1.77
+    - boost-cpp=1.77
+    - cachetools=5.0.0
+    - ccache>=3.7
+    - cmake=3.22.1
+    - cudatoolkit=11.4.1
+    - cudatoolkit-dev=11.4.0
+    - cupy=9.3.0
+    - cython=0.29.24
+    - docker-compose=1.29.2
+    - docker-py=5.0.3
+    - faker=12.3.0
+    - flatbuffers=2.0
+    - gflags=2.2
+    - glog=0.5
+    - gmock=1.10
+    - grpc-cpp>=1.43.2
+    - gtest=1.10
+    - mlflow>=1.23
+    - ninja=1.10.2
+    - pandas=1.3.5
+    - pip
+    - protobuf=3.19.4
+    - pydot
+    - pytest
+    - pytest-cov
+    - python=3.8
+    - python-graphviz
+    - rapidjson=1.1.0
+    - sphinx
+    - sphinx_rtd_theme
+    - tqdm
+### cuDF Dependencies #################
+    - arrow-cpp=5.0.0=py38h0002f4e_26_cuda
+    - arrow-cpp-proc=3.0.0=cuda
+    - aws-c-cal=0.5.11
+    - aws-c-common=0.6.2
+    - aws-c-event-stream=0.2.7
+    - aws-checksums=0.1.11
+    - aws-c-io=0.10.5
+    - aws-sdk-cpp=1.8.186
+    - bottleneck=1.3.4
+    - dlpack=0.5
+    - fastavro=1.4.9
+    - fastrlock=0.8
+    - fsspec=2022.1.0
+    - librdkafka=1.6.1
+    - llvmlite=0.38.0
+    - nlohmann_json=3.10
+    - nodejs=17.4.0
+    - numba=0.55.1
+    - numexpr=2.8.0
+    - numpy=1.21.2
+    - numpydoc=1.2
+    - nvtx=0.2.3
+    - orc=1.7.3
+    - parquet-cpp=1.5.1
+    - pyarrow=5.0.0=py38ha746e9d_26_cuda
+    - python-confluent-kafka=1.6.0
+    - rmm=21.10.01
+    - scikit-build=0.13.1
+    - pip:
+#### Morpheus Pip Dependencies #######
+          - nvidia-pyindex
+          - git+https://github.com/mdemoret-nv/streamz.git@on_completed#egg=streamz
+          - docutils
+          - --find-links https://download.pytorch.org/whl/cu113/torch_stable.html
+          - torch==1.10.2+cu113

@@ -111,50 +111,37 @@ Note: These instructions assume the user is using `mamba` instead of `conda` sin
 
 1. Create a new Conda environment
    ```bash
-   mamba create -n morpheus -c conda-forge python=${PYTHON_VER}
+   mamba env create -n morpheus -f ./docker/conda/environments/dev_cuda${CUDA_VER}.yml
    conda activate morpheus
-   # Setup the default channels
-   mamba config --env --add channels conda-forge
-   mamba config --env --add channels nvidia
-   mamba config --env --add channels rapidsai
    ```
-   This creates an environment named `morpheus`, activates that environment, and sets the default channels to use.
-2. Install the Conda dependencies
-   ```bash
-   mamba env update -n morpheus --file ./docker/conda/dev_cuda${CUDA_VER}.yml
-   ```
-3. Insteall cuDF dependencies
-   ```bash
-   mamba install -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER}
-   ```
-   Since it's necessary to manually build cuDF, this will install all necessary cuDF dependencies without actually installing cuDF.
-4. Build cuDF
+   This creates an environment named `morpheus` with all necessary dependencies, and activates that environment.
+2. Build cuDF
    ```bash
    # Clone cuDF
    git clone -b branch-${RAPIDS_VER} --depth 1 https://github.com/rapidsai/cudf ${MORPHEUS_ROOT}/.cache/cudf
    cd ${MORPHEUS_ROOT}/.cache/cudf
    # Apply the Morpheus cuDF patch
-   git apply --whitespace=fix /workspace/cmake/deps/patches/cudf.patch &&\
-   # Build cuDF
-   ./build.sh --ptds libcudf cudf
-   cd -
+   git apply --whitespace=fix ${MORPHEUS_ROOT}/cmake/deps/patches/cudf.patch
+   # Build cuDF libraries
+   ./build.sh --ptds libcudf cudf libcudf_kafka cudf_kafka
+   cd ${MORPHEUS_ROOT}
    ```
    This will checkout, patch, build and install cuDF with the necessary fixes to allow Morpheus to work smoothly with cuDF DataFrames in C++.
-5. Build Morpheus
+3. Build Morpheus
    ```bash
    ./scripts/compile.sh
    ```
    This script will run both CMake Configure with default options and CMake build.
-6. Insteall Morpheus
+4. Insteall Morpheus
    ```bash
-   pip install -e /workspace
+   pip install -e ${MORPHEUS_ROOT}
    ```
    Once Morpheus has been built, it can be installed into the current virtual environment.
-7. Install camouflage, needed for the unittests
+5. Install camouflage, needed for the unittests
    ```bash
    npm install -g camouflage-server
    ```
-8. Run Morpheus
+6. Run Morpheus
    ```bash
    morpheus run pipeline-nlp ...
    ```

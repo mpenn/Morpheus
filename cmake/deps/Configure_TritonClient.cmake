@@ -18,8 +18,6 @@ function(find_and_configure_tritonclient version)
 
   list(APPEND CMAKE_MESSAGE_CONTEXT "TritonClient")
 
-  include(get_cpm)
-
   rapids_cpm_find(TritonClient ${version}
     GLOBAL_TARGETS
       TritonClient::httpclient TritonClient::grpcclient

@@ -57,7 +57,7 @@ ARG CUDA_VER
 # Install dependencies to build vcpkg dependencies
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
-      build-essential pkg-config curl unzip tar zip openssh-client bc jq \
+      build-essential pkg-config curl unzip tar zip openssh-client bc jq libxml2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Vcpkg Install
@@ -90,9 +90,7 @@ RUN conda config --set ssl_verify false \
 # Conda dependencies install
 COPY docker/conda/environments/dev_cuda${CUDA_VER}.yml ./docker/conda/environments/
 
-RUN /opt/conda/bin/mamba env create -n morpheus --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
-    # Install only the dependencies for cudf. Need to build cudf manually
-    /opt/conda/bin/mamba install -y -n morpheus -c rapidsai -c nvidia -c conda-forge --only-deps cudf=${RAPIDS_VER} libcudf=${RAPIDS_VER} custreamz=${RAPIDS_VER} cudf_kafka=${RAPIDS_VER} libcudf_kafka=${RAPIDS_VER} &&\
+RUN CONDA_ALWAYS_YES=true /opt/conda/bin/mamba env create -n morpheus --file docker/conda/environments/dev_cuda${CUDA_VER}.yml &&\
     # Clean and activate
     conda clean -afy && \
     sed -i 's/conda activate base/conda activate morpheus/g' ~/.bashrc

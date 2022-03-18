@@ -884,7 +884,7 @@ class Pipeline():
 
     async def join(self):
 
-        await self._neo_executor.join()
+        await self._neo_executor.join_async()
 
         # First wait for all sources to stop. This only occurs after all messages have been processed fully
         for s in list(self._sources):

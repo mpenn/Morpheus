@@ -24,13 +24,13 @@ else()
   set(CPM_DOWNLOAD_LOCATION "${CMAKE_BINARY_DIR}/cmake/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
 endif()
 
-# if(NOT (EXISTS ${CPM_DOWNLOAD_LOCATION}))
+if(NOT (EXISTS ${CPM_DOWNLOAD_LOCATION}))
   message(STATUS "Downloading CPM.cmake to ${CPM_DOWNLOAD_LOCATION}")
   file(DOWNLOAD
        https://raw.githubusercontent.com/cpm-cmake/CPM.cmake/${CPM_DOWNLOAD_VERSION}/cmake/CPM.cmake
        ${CPM_DOWNLOAD_LOCATION}
   )
-# endif()
+endif()
 
 # option(CPM_USE_LOCAL_PACKAGES "Always try to use `find_package` to get dependencies" ON)
 
