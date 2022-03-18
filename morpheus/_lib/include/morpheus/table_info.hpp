@@ -16,6 +16,7 @@
  */
 
 #pragma once
+#include <neo/utils/type_utils.hpp>
 
 #include <cudf/copying.hpp>
 #include <cudf/io/types.hpp>
@@ -23,10 +24,14 @@
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 
+#include <glog/logging.h>  // for CHECK
+#include <pybind11/gil.h>
+#include <pybind11/pytypes.h>
+#include <pybind11/stl.h>
+
 #include <memory>
 #include <stdexcept>
 #include <utility>
-
 
 namespace pybind11 {
 struct object;
@@ -140,6 +145,51 @@ struct TableInfo
         }
 
         return this->m_table_view.column(this->m_index_names.size() + idx);
+    }
+
+    void insert_columns(const std::vector<std::string>& column_names, const std::vector<neo::TypeId>& column_types)
+    {
+        CHECK(column_names.size() == column_types.size());
+        const auto num_existing_cols = m_column_names.size();
+        const auto num_rows          = m_table_view.num_rows();
+
+        // TODO figure out how to do this without the gil
+        {
+            namespace py = pybind11;
+            py::gil_scoped_acquire gil;
+            py::object cupy_zeros = py::module_::import("cupy").attr("zeros");
+
+            auto table = get_parent_table();
+
+            for (std::size_t i = 0; i < column_names.size(); ++i)
+            {
+                auto empty_array = cupy_zeros(num_rows, neo::DataType(column_types[i]).type_str());
+                table.attr("insert")(num_existing_cols + i, column_names[i], empty_array);
+                m_column_names.push_back(column_names[i]);
+            }
+        }
+    }
+
+    void insert_missing_columns(const std::vector<std::string>& column_names,
+                                const std::vector<neo::TypeId>& column_types)
+    {
+        CHECK(column_names.size() == column_types.size());
+
+        std::vector<std::string> missing_names;
+        std::vector<neo::TypeId> missing_types;
+        for (std::size_t i = 0; i < column_names.size(); ++i)
+        {
+            if (std::find(m_column_names.begin(), m_column_names.end(), column_names[i]) == m_column_names.end())
+            {
+                missing_names.push_back(column_names[i]);
+                missing_types.push_back(column_types[i]);
+            }
+        }
+
+        if (!missing_names.empty())
+        {
+            insert_columns(missing_names, missing_types);
+        }
     }
 
     TableInfo get_slice(cudf::size_type start, cudf::size_type stop, std::vector<std::string> column_names = {}) const

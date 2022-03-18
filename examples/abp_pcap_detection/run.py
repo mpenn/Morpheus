@@ -18,6 +18,7 @@ import os
 import click
 import psutil
 from abp_pcap_preprocessing import AbpPcapPreprocessingStage
+
 from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.utils.logging import configure_logging
@@ -122,9 +123,9 @@ def run_pipeline(
     from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
     from morpheus.pipeline.input.from_file import FileSourceStage
     from morpheus.pipeline.input.from_file import FileTypes
+    from morpheus.pipeline.output.serialize import SerializeStage
     from morpheus.pipeline.output.to_file import WriteToFileStage
     from morpheus.pipeline.preprocessing import DeserializeStage
-    from morpheus.pipeline.output.serialize import SerializeStage
 
     # Set source stage
     pipeline.set_source(

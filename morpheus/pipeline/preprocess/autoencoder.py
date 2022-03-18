@@ -149,7 +149,18 @@ class TrainAEStage(MultiMessageStage):
     ----------
     c : morpheus.config.Config
         Pipeline configuration instance
-
+    pretrained_filename : str, default = None
+        Load a pre-trained model from a file
+    train_data_glob : str, default = None
+        Input glob pattern to match files to read.
+    train_epochs : int, default = 25
+        Passed in as the `epoch` parameter to `AutoEncoder.fit` causes data to be trained in `train_epochs` batches.
+    train_max_history : int, default = 1000
+        Truncate training data to at most `train_max_history` rows.
+    seed : int, default = None
+        When not None, ensure random number generators are seeded with `seed`
+    sort_glob : bool, default = False
+        If true the list of files matching `input_glob` will be processed in sorted order.
     """
     def __init__(self,
                  c: Config,
@@ -157,7 +168,8 @@ class TrainAEStage(MultiMessageStage):
                  train_data_glob: str = None,
                  train_epochs: int = 25,
                  train_max_history: int = 1000,
-                 seed: int = None):
+                 seed: int = None,
+                 sort_glob: bool = False):
         super().__init__(c)
 
         self._feature_columns = c.ae.feature_columns
@@ -167,6 +179,7 @@ class TrainAEStage(MultiMessageStage):
         self._train_epochs = train_epochs
         self._train_max_history = train_max_history
         self._seed = seed
+        self._sort_glob = sort_glob
 
         # Single model for the entire pipeline
         self._pretrained_model: AutoEncoder = None
@@ -232,6 +245,8 @@ class TrainAEStage(MultiMessageStage):
 
         elif (self._train_data_glob is not None):
             file_list = glob.glob(self._train_data_glob)
+            if self._sort_glob:
+                file_list = sorted(file_list)
 
             user_to_df = CloudTrailSourceStage.files_to_dfs_per_user(file_list,
                                                                      FileTypes.Auto,

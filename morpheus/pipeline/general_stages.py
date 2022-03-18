@@ -26,6 +26,7 @@ from tqdm import tqdm
 
 import cudf
 
+import morpheus._lib.stages as neos
 from morpheus.config import Config
 from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MessageMeta
@@ -460,6 +461,11 @@ class AddClassificationsStage(SinglePortStage):
         """
         return (MultiResponseProbsMessage, )
 
+    @classmethod
+    def supports_cpp_node(cls):
+        # Enable support by default
+        return True
+
     def _add_labels(self, x: MultiResponseProbsMessage):
 
         if (x.probs.shape[1] != len(self._class_labels)):
@@ -477,7 +483,14 @@ class AddClassificationsStage(SinglePortStage):
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
-        stream = seg.make_node(self.unique_name, self._add_labels)
+        if Config.get().use_cpp:
+            stream = neos.AddClassificationsStage(seg,
+                                                  self.unique_name,
+                                                  self._threshold,
+                                                  len(self._class_labels),
+                                                  self._idx2label)
+        else:
+            stream = seg.make_node(self.unique_name, self._add_labels)
 
         seg.make_edge(input_stream[0], stream)
 
@@ -518,6 +531,11 @@ class FilterDetectionsStage(SinglePortStage):
 
         """
         return (MultiResponseProbsMessage, )
+
+    @classmethod
+    def supports_cpp_node(cls):
+        # Enable support by default
+        return True
 
     def filter(self, x: MultiResponseProbsMessage) -> typing.List[MultiResponseProbsMessage]:
         """
@@ -571,9 +589,12 @@ class FilterDetectionsStage(SinglePortStage):
 
             input.pipe(ops.map(self.filter), ops.flatten()).subscribe(output)
 
-        flattened = seg.make_node_full(self.unique_name, flatten_fn)
-        seg.make_edge(input_stream[0], flattened)
-        stream = flattened
+        if Config.get().use_cpp:
+            stream = neos.FilterDetectionsStage(seg, self.unique_name, self._threshold)
+        else:
+            stream = seg.make_node_full(self.unique_name, flatten_fn)
+
+        seg.make_edge(input_stream[0], stream)
 
         return stream, MultiResponseProbsMessage
 
@@ -688,6 +709,11 @@ class AddScoresStage(SinglePortStage):
         """
         return (MultiResponseProbsMessage, )
 
+    @classmethod
+    def supports_cpp_node(cls):
+        # Enable support by default
+        return True
+
     def _add_labels(self, x: MultiResponseProbsMessage):
 
         if (x.probs.shape[1] != len(self._class_labels)):
@@ -705,7 +731,11 @@ class AddScoresStage(SinglePortStage):
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
-        stream = seg.make_node(self.unique_name, self._add_labels)
+        if Config.get().use_cpp:
+            stream = neos.AddScoresStage(seg, self.unique_name, len(self._class_labels), self._idx2label)
+        else:
+            stream = seg.make_node(self.unique_name, self._add_labels)
+
         seg.make_edge(input_stream[0], stream)
 
         # Return input unchanged

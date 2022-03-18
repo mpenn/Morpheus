@@ -69,8 +69,8 @@ class TestHammah(BaseMorpheusTest):
         results_file_name = os.path.join(temp_dir, 'results.json')
 
         pipe = LinearPipeline(config)
-        pipe.set_source(CloudTrailSourceStage(config, input_glob=input_glob))
-        pipe.add_stage(TrainAEStage(config, train_data_glob=train_data_glob, seed=42))
+        pipe.set_source(CloudTrailSourceStage(config, input_glob=input_glob, sort_glob=True))
+        pipe.add_stage(TrainAEStage(config, train_data_glob=train_data_glob, seed=42, sort_glob=True))
         pipe.add_stage(PreprocessAEStage(config))
         pipe.add_stage(AutoEncoderInferenceStage(config))
         pipe.add_stage(AddScoresStage(config))
@@ -135,8 +135,8 @@ class TestHammah(BaseMorpheusTest):
         results_file_name = os.path.join(temp_dir, 'results.json')
 
         pipe = LinearPipeline(config)
-        pipe.set_source(CloudTrailSourceStage(config, input_glob=input_glob))
-        pipe.add_stage(TrainAEStage(config, train_data_glob=train_data_glob, seed=42))
+        pipe.set_source(CloudTrailSourceStage(config, input_glob=input_glob, sort_glob=True))
+        pipe.add_stage(TrainAEStage(config, train_data_glob=train_data_glob, seed=42, sort_glob=True))
         pipe.add_stage(PreprocessAEStage(config))
         pipe.add_stage(AutoEncoderInferenceStage(config))
         pipe.add_stage(AddScoresStage(config))

@@ -22,7 +22,6 @@ import pytest
 
 from morpheus.config import Config
 from morpheus.pipeline.general_stages import FilterDetectionsStage
-from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
@@ -44,7 +43,7 @@ class TestFilterDetectionsStage(BaseMorpheusTest):
 
     def test_filter(self):
         config = Config.get()
-
+        config.use_cpp = False # C++ doesn't like our mocked messages
         fds = FilterDetectionsStage(config, threshold=0.5)
 
         mock_message = mock.MagicMock()
@@ -108,6 +107,7 @@ class TestFilterDetectionsStage(BaseMorpheusTest):
         mock_input = mock.MagicMock()
 
         config = Config.get()
+        config.use_cpp = False # C++ doesn't like our mocked messages
         fds = FilterDetectionsStage(config)
         fds._build_single(mock_segment, mock_input)
 

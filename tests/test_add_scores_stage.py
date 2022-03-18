@@ -78,6 +78,7 @@ class TestAddScoresStage(BaseMorpheusTest):
         mock_input = mock.MagicMock()
 
         config = Config.get()
+        config.use_cpp = False # C++ doesn't like our mocked messages
         config.class_labels = ['frogs', 'lizards', 'toads']
 
         a = AddScoresStage(config)

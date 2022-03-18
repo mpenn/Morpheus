@@ -20,6 +20,7 @@ from unittest import mock
 
 import pytest
 
+from morpheus.config import Config
 from morpheus.pipeline.inference import inference_stage
 from morpheus.utils.producer_consumer_queue import Closed
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
@@ -44,6 +45,9 @@ class TestInferenceWorker(BaseMorpheusTest):
         class TestIW(inference_stage.InferenceWorker):
             def calc_output_dims(self, _):
                 return (1, 2)
+
+        config = Config.get()
+        config.use_cpp = False # C++ doesn't like our mocked messages
 
         pq = ProducerConsumerQueue()
         iw = TestIW(pq)

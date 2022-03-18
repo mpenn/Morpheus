@@ -21,10 +21,10 @@
 #include <morpheus/messages.hpp>
 #include <morpheus/type_utils.hpp>
 
-#include <pyneo/node.hpp>
 #include <neo/core/segment_object.hpp>
 #include <neo/forward.hpp>
 #include <neo/utils/type_utils.hpp>
+#include <pyneo/node.hpp>
 
 #include <cudf/column/column_factories.hpp>
 #include <cudf/detail/utilities/vector_factories.hpp>
@@ -57,8 +57,6 @@
 #include <regex>
 #include <sstream>
 #include <utility>
-
-
 
 namespace morpheus {
 
@@ -956,9 +954,9 @@ class PreprocessFILStage
                         for (auto c : bad_cols)
                         {
                             df[pybind11::str(c)] = df[pybind11::str(c)]
-                                                 .attr("str")
-                                                 .attr("extract")(pybind11::str(regex), "expand"_a = true)
-                                                 .attr("astype")(pybind11::str("float32"));
+                                                       .attr("str")
+                                                       .attr("extract")(pybind11::str(regex), "expand"_a = true)
+                                                       .attr("astype")(pybind11::str("float32"));
                         }
 
                         // Now re-get the meta
@@ -1049,7 +1047,8 @@ class InferenceClientStage
   : public neo::pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>
 {
   public:
-    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>;
+    using base_t =
+        neo::pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>;
     using base_t::operator_fn_t;
     using base_t::reader_type_t;
     using base_t::writer_type_t;
@@ -1303,32 +1302,34 @@ class InferenceClientStage
                             std::static_pointer_cast<MultiResponseProbsMessage>(response->get_slice(start, stop));
 
                         // Iterate on the model inputs in case the model takes less than what tensors are available
-                        std::vector<std::pair<std::shared_ptr<triton::client::InferInput>, std::vector<uint8_t>>> saved_inputs =
-                            foreach_map(m_model_inputs, [this, &mini_batch_input](auto const& model_input) {
-                                DCHECK(mini_batch_input->memory->has_input(model_input.mapped_name))
-                                    << "Model input '" << model_input.mapped_name << "' not found in InferenceMemory";
+                        std::vector<std::pair<std::shared_ptr<triton::client::InferInput>, std::vector<uint8_t>>>
+                            saved_inputs =
+                                foreach_map(m_model_inputs, [this, &mini_batch_input](auto const& model_input) {
+                                    DCHECK(mini_batch_input->memory->has_input(model_input.mapped_name))
+                                        << "Model input '" << model_input.mapped_name
+                                        << "' not found in InferenceMemory";
 
-                                auto const& inp_tensor = mini_batch_input->get_input(model_input.mapped_name);
+                                    auto const& inp_tensor = mini_batch_input->get_input(model_input.mapped_name);
 
-                                // Convert to the right type. Make shallow if necessary
-                                auto final_tensor = inp_tensor.as_type(model_input.datatype);
+                                    // Convert to the right type. Make shallow if necessary
+                                    auto final_tensor = inp_tensor.as_type(model_input.datatype);
 
-                                std::vector<uint8_t> inp_data = final_tensor.get_host_data();
+                                    std::vector<uint8_t> inp_data = final_tensor.get_host_data();
 
-                                // Test
-                                triton::client::InferInput* inp_ptr;
+                                    // Test
+                                    triton::client::InferInput* inp_ptr;
 
-                                triton::client::InferInput::Create(&inp_ptr,
-                                                       model_input.name,
-                                                       {inp_tensor.shape(0), inp_tensor.shape(1)},
-                                                       model_input.datatype.triton_str());
-                                std::shared_ptr<triton::client::InferInput> inp_shared;
-                                inp_shared.reset(inp_ptr);
+                                    triton::client::InferInput::Create(&inp_ptr,
+                                                                       model_input.name,
+                                                                       {inp_tensor.shape(0), inp_tensor.shape(1)},
+                                                                       model_input.datatype.triton_str());
+                                    std::shared_ptr<triton::client::InferInput> inp_shared;
+                                    inp_shared.reset(inp_ptr);
 
-                                inp_ptr->AppendRaw(inp_data);
+                                    inp_ptr->AppendRaw(inp_data);
 
-                                return std::make_pair(inp_shared, std::move(inp_data));
-                            });
+                                    return std::make_pair(inp_shared, std::move(inp_data));
+                                });
 
                         std::vector<std::shared_ptr<const triton::client::InferRequestedOutput>> saved_outputs =
                             foreach_map(m_model_outputs, [this](auto const& model_output) {
@@ -1415,6 +1416,293 @@ class InferenceClientStage
     std::vector<TritonInOut> m_model_outputs;
     triton::client::InferOptions m_options;
     int m_max_batch_size{-1};
+};
+
+class FilterDetectionsStage : public neo::pyneo::PythonNode<std::shared_ptr<MultiResponseProbsMessage>,
+                                                            std::shared_ptr<MultiResponseProbsMessage>>
+{
+  public:
+    using base_t =
+        neo::pyneo::PythonNode<std::shared_ptr<MultiResponseProbsMessage>, std::shared_ptr<MultiResponseProbsMessage>>;
+    using base_t::operator_fn_t;
+    using base_t::reader_type_t;
+    using base_t::writer_type_t;
+
+    FilterDetectionsStage(const neo::Segment& parent, const std::string& name, float threshold) :
+      neo::SegmentObject(parent, name),
+      PythonNode(parent, name, build_operator()),
+      m_threshold(threshold)
+    {}
+
+  private:
+    operator_fn_t build_operator()
+    {
+        return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
+            return input.subscribe(neo::make_observer<reader_type_t>(
+                [this, &output](reader_type_t&& x) {
+                    const auto& probs  = x->get_probs();
+                    const auto& shape  = probs.get_shape();
+                    const auto& stride = probs.get_stride();
+
+                    CHECK(probs.rank() == 2)
+                        << "C++ impl of the FilterDetectionsStage currently only supports two dimensional arrays";
+
+                    const std::size_t num_rows    = shape[0];
+                    const std::size_t num_columns = shape[1];
+
+                    // A bit ugly, but we cant get access to the rmm::device_buffer here. So make a copy
+                    auto tmp_buffer = std::make_shared<rmm::device_buffer>(probs.count() * probs.dtype_size(),
+                                                                           rmm::cuda_stream_per_thread);
+
+                    NEO_CHECK_CUDA(
+                        cudaMemcpy(tmp_buffer->data(), probs.data(), tmp_buffer->size(), cudaMemcpyDeviceToDevice));
+
+                    // Depending on the input the stride is given in bytes or elements,
+                    // divide the stride elements by the smallest item to ensure tensor_stride is defined in
+                    // terms of elements
+                    std::vector<neo::TensorIndex> tensor_stride(stride.size());
+                    auto min_stride = std::min_element(stride.cbegin(), stride.cend());
+
+                    std::transform(stride.cbegin(),
+                                   stride.cend(),
+                                   tensor_stride.begin(),
+                                   std::bind(std::divides<>(), std::placeholders::_1, *min_stride));
+
+                    // Now call the threshold function
+                    auto thresh_bool_buffer =
+                        threshold(DevMemInfo{probs.count(), probs.dtype().type_id(), tmp_buffer, 0},
+                                  num_rows,
+                                  num_columns,
+                                  tensor_stride,
+                                  m_threshold,
+                                  true);
+
+                    std::vector<uint8_t> host_bool_values(num_rows);
+
+                    // Copy bools back to host
+                    NEO_CHECK_CUDA(cudaMemcpy(host_bool_values.data(),
+                                              thresh_bool_buffer->data(),
+                                              thresh_bool_buffer->size(),
+                                              cudaMemcpyDeviceToHost));
+
+                    // We are slicing by rows, using num_rows as our marker for undefined
+                    std::size_t slice_start = num_rows;
+                    for (std::size_t row = 0; row < num_rows; ++row)
+                    {
+                        bool above_threshold = host_bool_values[row];
+
+                        if (above_threshold && slice_start == num_rows)
+                        {
+                            slice_start = row;
+                        }
+                        else if (!above_threshold && slice_start != num_rows)
+                        {
+                            output.on_next(x->get_slice(slice_start, row));
+                            slice_start = num_rows;
+                        }
+                    }
+
+                    if (slice_start != num_rows)
+                    {
+                        // Last row was above the threshold
+                        output.on_next(x->get_slice(slice_start, num_rows));
+                    }
+                },
+                [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
+                [&]() { output.on_completed(); }));
+        };
+    }
+
+    float m_threshold;
+};
+
+class AddClassificationsStage : public neo::pyneo::PythonNode<std::shared_ptr<MultiResponseProbsMessage>,
+                                                              std::shared_ptr<MultiResponseProbsMessage>>
+{
+  public:
+    using base_t =
+        neo::pyneo::PythonNode<std::shared_ptr<MultiResponseProbsMessage>, std::shared_ptr<MultiResponseProbsMessage>>;
+    using base_t::operator_fn_t;
+    using base_t::reader_type_t;
+    using base_t::writer_type_t;
+
+    AddClassificationsStage(const neo::Segment& parent,
+                            const std::string& name,
+                            float threshold,
+                            std::size_t num_class_labels,
+                            std::map<std::size_t, std::string> idx2label) :
+      neo::SegmentObject(parent, name),
+      PythonNode(parent, name, build_operator()),
+      m_threshold(threshold),
+      m_num_class_labels(num_class_labels),
+      m_idx2label(std::move(idx2label))
+    {
+        CHECK(m_idx2label.size() <= m_num_class_labels) << "idx2label should represent a subset of the class_labels";
+    }
+
+  private:
+    operator_fn_t build_operator()
+    {
+        return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
+            return input.subscribe(neo::make_observer<reader_type_t>(
+                [this, &output](reader_type_t&& x) {
+                    const auto& probs  = x->get_probs();
+                    const auto& shape  = probs.get_shape();
+                    const auto& stride = probs.get_stride();
+
+                    CHECK(shape.size() == 2 && shape[1] == m_num_class_labels)
+                        << "Label count does not match output of model. Label count: " << m_num_class_labels
+                        << ", Model output: " << shape[1];
+
+                    const std::size_t num_rows    = shape[0];
+                    const std::size_t num_columns = shape[1];
+
+                    // A bit ugly, but we cant get access to the rmm::device_buffer here. So make a copy
+                    auto tmp_buffer = std::make_shared<rmm::device_buffer>(probs.bytes(), rmm::cuda_stream_per_thread);
+
+                    NEO_CHECK_CUDA(
+                        cudaMemcpy(tmp_buffer->data(), probs.data(), tmp_buffer->size(), cudaMemcpyDeviceToDevice));
+
+                    // Depending on the input the stride is given in bytes or elements,
+                    // divide the stride elements by the smallest item to ensure tensor_stride is defined in
+                    // terms of elements
+                    std::vector<neo::TensorIndex> tensor_stride(stride.size());
+                    auto min_stride = std::min_element(stride.cbegin(), stride.cend());
+
+                    std::transform(stride.cbegin(),
+                                   stride.cend(),
+                                   tensor_stride.begin(),
+                                   std::bind(std::divides<>(), std::placeholders::_1, *min_stride));
+
+                    // Now call the threshold function
+                    auto thresh_bool_buffer =
+                        threshold(DevMemInfo{probs.count(), probs.dtype().type_id(), tmp_buffer, 0},
+                                  num_rows,
+                                  num_columns,
+                                  tensor_stride,
+                                  m_threshold,
+                                  false);
+
+                    auto tensor_obj = Tensor::create(thresh_bool_buffer,
+                                                     DType::create<bool>(),
+                                                     std::vector<neo::TensorIndex>{static_cast<long long>(shape[0]),
+                                                                                   static_cast<long long>(shape[1])},
+                                                     tensor_stride);
+
+                    std::vector<std::string> columns(m_idx2label.size());
+                    std::vector<neo::TensorObject> tensors(m_idx2label.size());
+
+                    std::size_t i = 0;
+                    for (const auto& [column_num, column_name] : m_idx2label)
+                    {
+                        columns[i] = column_name;
+                        tensors[i] = tensor_obj.slice(
+                            std::vector<neo::TensorIndex>{0, static_cast<neo::TensorIndex>(column_num)},
+                            std::vector<neo::TensorIndex>{static_cast<neo::TensorIndex>(num_rows),
+                                                          static_cast<neo::TensorIndex>(column_num + 1)});
+
+                        ++i;
+                    }
+
+                    x->set_meta(columns, tensors);
+
+                    output.on_next(x);
+                },
+                [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
+                [&]() { output.on_completed(); }));
+        };
+    }
+
+    float m_threshold;
+    std::size_t m_num_class_labels;
+    std::map<std::size_t, std::string> m_idx2label;
+};
+
+class AddScoresStage : public neo::pyneo::PythonNode<std::shared_ptr<MultiResponseProbsMessage>,
+                                                     std::shared_ptr<MultiResponseProbsMessage>>
+{
+  public:
+    using base_t =
+        neo::pyneo::PythonNode<std::shared_ptr<MultiResponseProbsMessage>, std::shared_ptr<MultiResponseProbsMessage>>;
+    using base_t::operator_fn_t;
+    using base_t::reader_type_t;
+    using base_t::writer_type_t;
+
+    AddScoresStage(const neo::Segment& parent,
+                   const std::string& name,
+                   std::size_t num_class_labels,
+                   std::map<std::size_t, std::string> idx2label) :
+      neo::SegmentObject(parent, name),
+      PythonNode(parent, name, build_operator()),
+      m_num_class_labels(num_class_labels),
+      m_idx2label(std::move(idx2label))
+    {
+        CHECK(m_idx2label.size() <= m_num_class_labels) << "idx2label should represent a subset of the class_labels";
+    }
+    operator_fn_t build_operator()
+    {
+        return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
+            return input.subscribe(neo::make_observer<reader_type_t>(
+                [this, &output](reader_type_t&& x) {
+                    const auto& probs  = x->get_probs();
+                    const auto& shape  = probs.get_shape();
+                    const auto& stride = probs.get_stride();
+
+                    CHECK(shape.size() == 2 && shape[1] == m_num_class_labels)
+                        << "Label count does not match output of model. Label count: " << m_num_class_labels
+                        << ", Model output: " << shape[1];
+
+                    const std::size_t num_rows    = shape[0];
+                    const std::size_t num_columns = shape[1];
+
+                    auto tmp_buffer = std::make_shared<rmm::device_buffer>(probs.bytes(), rmm::cuda_stream_per_thread);
+
+                    NEO_CHECK_CUDA(
+                        cudaMemcpy(tmp_buffer->data(), probs.data(), tmp_buffer->size(), cudaMemcpyDeviceToDevice));
+
+                    // Depending on the input the stride is given in bytes or elements,
+                    // divide the stride elements by the smallest item to ensure tensor_stride is defined in
+                    // terms of elements
+                    std::vector<neo::TensorIndex> tensor_stride(stride.size());
+                    auto min_stride = std::min_element(stride.cbegin(), stride.cend());
+
+                    std::transform(stride.cbegin(),
+                                   stride.cend(),
+                                   tensor_stride.begin(),
+                                   std::bind(std::divides<>(), std::placeholders::_1, *min_stride));
+
+                    auto tensor_obj = Tensor::create(tmp_buffer,
+                                                     probs.dtype(),
+                                                     std::vector<neo::TensorIndex>{static_cast<long long>(shape[0]),
+                                                                                   static_cast<long long>(shape[1])},
+                                                     tensor_stride);
+
+                    std::vector<std::string> columns(m_idx2label.size());
+                    std::vector<neo::TensorObject> tensors(m_idx2label.size());
+
+                    std::size_t i = 0;
+                    for (const auto& [column_num, column_name] : m_idx2label)
+                    {
+                        columns[i] = column_name;
+                        tensors[i] = tensor_obj.slice(
+                            std::vector<neo::TensorIndex>{0, static_cast<neo::TensorIndex>(column_num)},
+                            std::vector<neo::TensorIndex>{static_cast<neo::TensorIndex>(num_rows),
+                                                          static_cast<neo::TensorIndex>(column_num + 1)});
+
+                        ++i;
+                    }
+
+                    x->set_meta(columns, tensors);
+
+                    output.on_next(x);
+                },
+                [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
+                [&]() { output.on_completed(); }));
+        };
+    }
+
+    std::size_t m_num_class_labels;
+    std::map<std::size_t, std::string> m_idx2label;
 };
 
 }  // namespace morpheus

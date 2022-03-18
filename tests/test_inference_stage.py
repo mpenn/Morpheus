@@ -25,7 +25,6 @@ from morpheus.config import Config
 from morpheus.pipeline.inference import inference_stage
 from morpheus.pipeline.messages import ResponseMemory
 from morpheus.pipeline.messages import ResponseMemoryProbs
-from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
 
@@ -101,6 +100,7 @@ class TestInferenceStage(BaseMorpheusTest):
 
         config = Config.get()
         config.num_threads = 17
+        config.use_cpp = False # C++ doesn't like our mocked messages
         inf_stage = InferenceStage(config)
         inf_stage._build_single(mock_segment, mock_input_stream)
 
@@ -129,7 +129,7 @@ class TestInferenceStage(BaseMorpheusTest):
         IW.process = mock.MagicMock()
 
         config = Config.get()
-        config.use_cpp = False
+        config.use_cpp = False # C++ doesn't like our mocked messages
         inf_stage = InferenceStage(config)
         inf_stage._build_single(mock_segment, mock_input_stream)
 

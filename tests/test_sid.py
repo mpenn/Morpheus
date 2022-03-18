@@ -20,7 +20,6 @@ from unittest import mock
 
 import numpy as np
 import pytest
-import tritonclient.grpc
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
@@ -130,7 +129,7 @@ class TestSid(BaseMorpheusTest):
 
         pipe.run()
         results = self._calc_error_val(results_file_name)
-        self.assertLess(results.error_pct, 70)
+        self.assertEqual(results.diff_rows, 1333)
 
     @pytest.mark.slow
     def test_minibert_cpp(self):
@@ -198,7 +197,7 @@ class TestSid(BaseMorpheusTest):
 
         pipe.run()
         results = self._calc_error_val(results_file_name)
-        self.assertLess(results.error_pct, 65)
+        self.assertEqual(results.diff_rows, 1204)
 
 
 if __name__ == '__main__':

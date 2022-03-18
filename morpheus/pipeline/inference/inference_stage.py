@@ -135,6 +135,7 @@ class InferenceStage(MultiMessageStage):
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         super().__init__(c)
 

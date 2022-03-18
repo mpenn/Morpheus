@@ -60,6 +60,8 @@ class CloudTrailSourceStage(SingleOutputSource):
         Supported extensions: 'json', 'csv'
     repeat: int, default = 1
         How many times to repeat the dataset. Useful for extending small datasets in debugging.
+    sort_glob : bool, default = False
+        If true the list of files matching `input_glob` will be processed in sorted order.
     """
     def __init__(self,
                  c: Config,
@@ -67,11 +69,13 @@ class CloudTrailSourceStage(SingleOutputSource):
                  watch_directory: bool = False,
                  max_files: int = -1,
                  file_type: FileTypes = FileTypes.Auto,
-                 repeat: int = 1):
+                 repeat: int = 1,
+                 sort_glob: bool = False):
 
         super().__init__(c)
 
         self._input_glob = input_glob
+        self._sort_glob = sort_glob
         self._file_type = file_type
         self._max_files = max_files
 
@@ -195,6 +199,8 @@ class CloudTrailSourceStage(SingleOutputSource):
 
         # Load the glob once and return
         file_list = glob.glob(self._input_glob)
+        if self._sort_glob:
+            file_list = sorted(file_list)
 
         if (self._max_files > 0):
             file_list = file_list[:self._max_files]
