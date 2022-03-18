@@ -15,7 +15,15 @@
  * limitations under the License.
  */
 
-#include "morpheus/messages.hpp"
+
+#include <morpheus/messages.hpp>
+
+#include <neo/channel/channel.hpp>
+#include <cudf/io/csv.hpp>
+#include <cudf/io/json.hpp>
+#include <cudf_helpers_api.h>
+#include <pyneo/utils.hpp>
+
 #include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -24,16 +32,10 @@
 #include <memory>
 #include <vector>
 
-#include <cudf/io/csv.hpp>
-#include <cudf/io/json.hpp>
-#include "cudf_helpers_api.h"
-#include "pybind11/pybind11.h"
-#include "pyneo/utils.hpp"
-#include "trtlab/neo/channels/channel.h"
 
 namespace morpheus {
 
-namespace neo = trtlab::neo;
+namespace fs  = std::filesystem;
 namespace py  = pybind11;
 
 cudf::io::table_with_metadata load_table(const std::string& filename)
@@ -76,17 +78,17 @@ PYBIND11_MODULE(messages, m)
     // Load the cudf helpers
     load_cudf_helpers();
 
-    pyneo::import(m, "cupy");
-    pyneo::import(m, "morpheus._lib.common");
+    neo::pyneo::import(m, "cupy");
+    neo::pyneo::import(m, "morpheus._lib.common");
 
     // Required for SegmentObject
-    pyneo::import(m, "neo.core.node");
+    neo::pyneo::import(m, "neo.core.node");
 
     // Allows python objects to keep DataTable objects alive
     py::class_<IDataTable, std::shared_ptr<IDataTable>>(m, "DataTable");
 
-    neo::EdgeConnector<std::shared_ptr<MessageMeta>, py::object>::register_converter();
-    neo::EdgeConnector<py::object, std::shared_ptr<MessageMeta>>::register_converter();
+    neo::node::EdgeConnector<std::shared_ptr<MessageMeta>, py::object>::register_converter();
+    neo::node::EdgeConnector<py::object, std::shared_ptr<MessageMeta>>::register_converter();
 
     py::class_<MessageMeta, std::shared_ptr<MessageMeta>>(m, "MessageMeta")
         .def(py::init<>([](py::object df) { return MessageMeta::create_from_python(std::move(df)); }), py::arg("df"))
@@ -112,8 +114,8 @@ PYBIND11_MODULE(messages, m)
             return MessageMeta::create_from_cpp(std::move(df_with_meta));
         });
 
-    neo::EdgeConnector<std::shared_ptr<MultiMessage>, py::object>::register_converter();
-    neo::EdgeConnector<py::object, std::shared_ptr<MultiMessage>>::register_converter();
+    neo::node::EdgeConnector<std::shared_ptr<MultiMessage>, py::object>::register_converter();
+    neo::node::EdgeConnector<py::object, std::shared_ptr<MultiMessage>>::register_converter();
 
     py::class_<MultiMessage, std::shared_ptr<MultiMessage>>(m, "MultiMessage")
         .def(py::init<>([](std::shared_ptr<MessageMeta> meta, cudf::size_type mess_offset, cudf::size_type mess_count) {
@@ -285,8 +287,8 @@ PYBIND11_MODULE(messages, m)
                 return self.set_seq_ids(cupy_to_tensor(cupy_value));
             });
 
-    neo::EdgeConnector<std::shared_ptr<MultiInferenceMessage>, py::object>::register_converter();
-    neo::EdgeConnector<py::object, std::shared_ptr<MultiInferenceMessage>>::register_converter();
+    neo::node::EdgeConnector<std::shared_ptr<MultiInferenceMessage>, py::object>::register_converter();
+    neo::node::EdgeConnector<py::object, std::shared_ptr<MultiInferenceMessage>>::register_converter();
 
     py::class_<MultiInferenceMessage, MultiMessage, std::shared_ptr<MultiInferenceMessage>>(m, "MultiInferenceMessage")
         .def(py::init<>([](std::shared_ptr<MessageMeta> meta,
@@ -439,8 +441,8 @@ PYBIND11_MODULE(messages, m)
                 return self.set_probs(cupy_to_tensor(cupy_value));
             });
 
-    neo::EdgeConnector<std::shared_ptr<MultiResponseMessage>, py::object>::register_converter();
-    neo::EdgeConnector<py::object, std::shared_ptr<MultiResponseMessage>>::register_converter();
+    neo::node::EdgeConnector<std::shared_ptr<MultiResponseMessage>, py::object>::register_converter();
+    neo::node::EdgeConnector<py::object, std::shared_ptr<MultiResponseMessage>>::register_converter();
 
     py::class_<MultiResponseMessage, MultiMessage, std::shared_ptr<MultiResponseMessage>>(m, "MultiResponseMessage")
         .def(py::init<>([](std::shared_ptr<MessageMeta> meta,

@@ -18,8 +18,6 @@ function(find_and_configure_rdkafka)
 
   list(APPEND CMAKE_MESSAGE_CONTEXT "rdkafka")
 
-  include(get_cpm)
-
   rapids_find_generate_module(RDKAFKA
     HEADER_NAMES rdkafkacpp.h
     INCLUDE_SUFFIXES librdkafka

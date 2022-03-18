@@ -1,5 +1,6 @@
 #=============================================================================
-# Copyright (c) 2020, NVIDIA CORPORATION.
+# SPDX-FileCopyrightText: Copyright (c) 2020-2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,30 +15,26 @@
 # limitations under the License.
 #=============================================================================
 
-function(find_and_configure_cudf version)
+function(find_and_configure_pybind11 version)
 
-  list(APPEND CMAKE_MESSAGE_CONTEXT "cudf")
+  list(APPEND CMAKE_MESSAGE_CONTEXT "pybind11")
 
-  # Need to set CUB_DIR since cuDF doesnt work well with CUB/Thrust dependencies
-  rapids_cpm_find(cudf ${version}
+  # Needs a patch to change the internal tracker to use fiber specific storage instead of TSS
+  rapids_cpm_find(pybind11 ${version}
     GLOBAL_TARGETS
-      cudf cudf::cudf
+      pybind11 pybind11::pybind11
     BUILD_EXPORT_SET
       ${PROJECT_NAME}-exports
     INSTALL_EXPORT_SET
       ${PROJECT_NAME}-exports
     CPM_ARGS
-      GIT_REPOSITORY  https://github.com/rapidsai/cudf
-      GIT_TAG         branch-${CUDF_VERSION}
+      GIT_REPOSITORY  https://github.com/pybind/pybind11.git
+      GIT_TAG         "v${version}"
       GIT_SHALLOW     TRUE
-      SOURCE_SUBDIR   cpp
-      PATCH_COMMAND   git checkout -- . && git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/cudf.patch
-      OPTIONS         "CUDF_ENABLE_ARROW_S3 OFF"
-                      #"BUILD_PER_THREAD_DEFAULT_STREAM ON"
-                      "BUILD_TESTS OFF"
-                      "CUB_DIR ${CUDAToolkit_INCLUDE_DIRS}/cub/cmake"
+      PATCH_COMMAND   git checkout -- . && git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/pybind11.patch
+      OPTIONS         "PYBIND11_INSTALL OFF"
+                      "PYBIND11_TEST OFF"
   )
-
 endfunction()
 
-find_and_configure_cudf(${CUDF_VERSION})
+find_and_configure_pybind11(${PYBIND11_VERSION})

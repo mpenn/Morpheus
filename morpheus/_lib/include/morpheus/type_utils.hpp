@@ -17,13 +17,14 @@
 
 #pragma once
 
-#include <memory>
-#include <stdexcept>
+#include <neo/utils/type_utils.hpp>
 
 #include <cudf/types.hpp>
 #include <cudf/utilities/traits.hpp>
 
-#include <trtlab/neo/util/type_utils.hpp>
+#include <memory>
+#include <stdexcept>
+
 
 namespace rmm {
 class device_buffer;
@@ -31,10 +32,12 @@ class device_buffer;
 
 namespace morpheus {
 
-struct DType : trtlab::neo::DataType  // NOLINT
+#pragma GCC visibility push(default)
+
+struct DType : neo::DataType  // NOLINT
 {
-    DType(const trtlab::neo::DataType& dtype);
-    DType(trtlab::neo::TypeId tid);
+    DType(const neo::DataType& dtype);
+    DType(neo::TypeId tid);
 
     // Cudf representation
     cudf::type_id cudf_type_id() const;
@@ -46,7 +49,7 @@ struct DType : trtlab::neo::DataType  // NOLINT
     template <typename T>
     static DType create()
     {
-        return DType(trtlab::neo::DataType::create<T>());
+        return DType(neo::DataType::create<T>());
     }
 
     // From cudf

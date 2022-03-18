@@ -17,14 +17,17 @@
 
 #pragma once
 
-#include <cstddef>
-#include <memory>
+#include <neo/utils/type_utils.hpp>
 
 // #include <cudf/types.hpp>
 #include <rmm/device_buffer.hpp>
-#include <trtlab/neo/util/type_utils.hpp>
+
+#include <cstddef>
+#include <memory>
 
 namespace morpheus {
+
+#pragma GCC visibility push(default)
 
 // Simple object that just holds 4 things: element count, element dtype, device_buffer, and bytes_offset
 struct DevMemInfo
@@ -32,7 +35,7 @@ struct DevMemInfo
     // Number of elements in the buffer
     size_t element_count;
     // Type of elements in the buffer
-    trtlab::neo::TypeId type_id;
+    neo::TypeId type_id;
     // Buffer of data
     std::shared_ptr<rmm::device_buffer> buffer;
     // Offset from head of data in bytes
@@ -45,7 +48,7 @@ struct DevMemInfo
 };
 
 // Convert one device_buffer type to another
-std::shared_ptr<rmm::device_buffer> cast(const DevMemInfo& input, trtlab::neo::TypeId output_type);
+std::shared_ptr<rmm::device_buffer> cast(const DevMemInfo& input, neo::TypeId output_type);
 
 // Calculate logits on device_buffer
 std::shared_ptr<rmm::device_buffer> logits(const DevMemInfo& input);
@@ -54,6 +57,6 @@ std::shared_ptr<rmm::device_buffer> logits(const DevMemInfo& input);
 std::shared_ptr<rmm::device_buffer> transpose(const DevMemInfo& input, size_t rows, size_t cols);
 
 // Builds an Nx3 segment ID matrix
-std::shared_ptr<rmm::device_buffer> create_seg_ids(size_t row_count, size_t fea_len, trtlab::neo::TypeId output_type);
+std::shared_ptr<rmm::device_buffer> create_seg_ids(size_t row_count, size_t fea_len, neo::TypeId output_type);
 
 }  // namespace morpheus

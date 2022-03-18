@@ -18,9 +18,9 @@ function(find_and_configure_neo version branch)
 
   list(APPEND CMAKE_MESSAGE_CONTEXT "neo")
 
-  rapids_cpm_find(trtlab ${version}
+  rapids_cpm_find(neo ${version}
     GLOBAL_TARGETS
-      trtlab::neo trtlab::pyneo
+      neo::neo neo::pyneo
     BUILD_EXPORT_SET
       ${PROJECT_NAME}-exports
     INSTALL_EXPORT_SET
@@ -31,10 +31,14 @@ function(find_and_configure_neo version branch)
       GIT_SHALLOW     TRUE
       OPTIONS         "NEO_BUILD_EXAMPLES OFF"
                       "NEO_BUILD_TESTS OFF"
+                      "NEO_BUILD_BENCHMARKS OFF"
                       "NEO_BUILD_PYTHON ON"
+                      "NEO_ENABLE_XTENSOR ON"
+                      "NEO_ENABLE_MATX ON"
+                      "NEO_USE_CONDA ${MORPHEUS_USE_CONDA}"
                       "NEO_USE_CCACHE ${MORPHEUS_USE_CCACHE}"
                       "NEO_USE_CLANG_TIDY ${MORPHEUS_USE_CLANG_TIDY}"
-                      "NEO_PYTHON_INPLACE_BUILD OFF"
+                      "NEO_PYTHON_INPLACE_BUILD ${MORPHEUS_PYTHON_INPLACE_BUILD}"
   )
 
   # Now ensure its installed
@@ -52,17 +56,16 @@ function(find_and_configure_neo version branch)
   endif()
 
   add_custom_command(
-    OUTPUT ${trtlab_BINARY_DIR}/trtlab/neo/python/neo.egg-info/PKG-INFO
-    COMMAND ${Python3_EXECUTABLE} -m pip install ${_pip_args} ${trtlab_BINARY_DIR}/trtlab/neo/python
+    OUTPUT ${neo_BINARY_DIR}/python/neo.egg-info/PKG-INFO
+    COMMAND ${Python3_EXECUTABLE} -m pip install ${_pip_args} ${neo_BINARY_DIR}/python
     DEPENDS neo_python_rebuild
     COMMENT "Installing neo python package"
   )
 
   add_custom_target(
     install_neo_python ALL
-    DEPENDS ${trtlab_BINARY_DIR}/trtlab/neo/python/neo.egg-info/PKG-INFO
+    DEPENDS ${neo_BINARY_DIR}/python/neo.egg-info/PKG-INFO
   )
-
 endfunction()
 
 find_and_configure_neo(${NEO_VERSION} ${NEO_BRANCH})

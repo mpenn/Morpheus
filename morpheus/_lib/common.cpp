@@ -37,6 +37,8 @@
 #include "pyneo/utils.hpp"
 
 namespace morpheus {
+namespace py = pybind11;
+namespace pyneo = neo::pyneo;
 
 class FiberQueue
 {

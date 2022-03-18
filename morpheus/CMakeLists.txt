@@ -15,7 +15,8 @@
 
 list(APPEND CMAKE_MESSAGE_CONTEXT "_lib")
 
-option(MORPHEUS_PYTHON_INPLACE_BUILD "Whether or not to copy built python modules back to the source tree for debug purposes." OFF)
+option(MORPHEUS_PYTHON_INPLACE_BUILD
+        "Whether or not to copy built python modules back to the source tree for debug purposes." OFF)
 
 set(Python3_FIND_VIRTUALENV "FIRST")
 find_package(Python3 REQUIRED COMPONENTS Development Interpreter NumPy)
@@ -28,10 +29,10 @@ else()
 endif()
 
 # Now we can find dependencies
-find_package(pybind11 REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 find_package(Cython REQUIRED)
-find_package(trtlab REQUIRED)
+find_package(neo REQUIRED)
+find_package(pybind11 REQUIRED)
 
 set(CYTHON_FLAGS "--directive binding=True,boundscheck=False,wraparound=False,embedsignature=True,always_allow_keywords=True" CACHE STRING "The directives for Cython compilation.")
 
@@ -101,7 +102,7 @@ macro(morpheus_add_python_module source_file)
   file(REAL_PATH ${source_file} cpp_file)
 
   # Set the link libraries
-  set(link_libs trtlab::pyneo)
+  set(link_libs pyneo)
 
   # Auto determine the module name
   morpheus_get_python_module_name(${cpp_file}

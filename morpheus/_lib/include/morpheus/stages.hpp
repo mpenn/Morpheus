@@ -17,6 +17,33 @@
 
 #pragma once
 
+#include <morpheus/common.hpp>
+#include <morpheus/messages.hpp>
+#include <morpheus/type_utils.hpp>
+
+#include <pyneo/node.hpp>
+#include <neo/core/segment_object.hpp>
+#include <neo/forward.hpp>
+#include <neo/utils/type_utils.hpp>
+
+#include <cudf/column/column_factories.hpp>
+#include <cudf/detail/utilities/vector_factories.hpp>
+#include <cudf/io/csv.hpp>
+#include <cudf/io/json.hpp>
+#include <cudf/strings/replace.hpp>
+#include <cudf/types.hpp>
+#include <cudf/unary.hpp>
+#include <nvtext/subword_tokenize.hpp>
+
+#include <glog/logging.h>
+#include <http_client.h>
+#include <librdkafka/rdkafkacpp.h>
+#include <pybind11/gil.h>
+#include <pybind11/pytypes.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <boost/fiber/recursive_mutex.hpp>
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -31,40 +58,11 @@
 #include <sstream>
 #include <utility>
 
-#include "morpheus/common.hpp"
-#include "morpheus/messages.hpp"
-#include "morpheus/type_utils.hpp"
 
-#include <glog/logging.h>
-#include <http_client.h>
-#include <librdkafka/rdkafkacpp.h>
-#include <pybind11/gil.h>
-#include <pybind11/pytypes.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <boost/fiber/recursive_mutex.hpp>
-#include <nlohmann/json.hpp>
-
-#include <cudf/column/column_factories.hpp>
-#include <cudf/detail/utilities/vector_factories.hpp>
-#include <cudf/io/csv.hpp>
-#include <cudf/io/json.hpp>
-#include <cudf/strings/replace.hpp>
-#include <cudf/types.hpp>
-#include <cudf/unary.hpp>
-#include <nvtext/subword_tokenize.hpp>
-
-#include "pyneo/node.hpp"
-#include "trtlab/neo/core/segment_object.hpp"
-#include "trtlab/neo/neo_fwd.hpp"
-#include "trtlab/neo/util/type_utils.hpp"
 
 namespace morpheus {
 
 using namespace pybind11::literals;
-
-namespace fs = std::filesystem;
-namespace tc = triton::client;
-using json   = nlohmann::json;
 
 template <typename FuncT, typename SeqT>
 auto foreach_map(const SeqT& seq, FuncT func)
@@ -92,10 +90,10 @@ auto foreach_map2(const SeqT& seq, FuncT func)
     return result;
 }
 
-class FileSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
+class FileSourceStage : public neo::pyneo::PythonSource<std::shared_ptr<MessageMeta>>
 {
   public:
-    using base_t = pyneo::PythonSource<std::shared_ptr<MessageMeta>>;
+    using base_t = neo::pyneo::PythonSource<std::shared_ptr<MessageMeta>>;
     using base_t::source_type_t;
 
     FileSourceStage(const neo::Segment& parent, const std::string& name, std::string filename, int repeat = 1) :
@@ -143,14 +141,14 @@ class FileSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
             {
                 // Clone the previous meta object
                 {
-                    py::gil_scoped_acquire gil;
+                    pybind11::gil_scoped_acquire gil;
 
                     // Use the copy function
                     auto df = meta->get_py_table().attr("copy")();
 
-                    py::int_ df_len = py::len(df);
+                    pybind11::int_ df_len = pybind11::len(df);
 
-                    py::object index = df.attr("index");
+                    pybind11::object index = df.attr("index");
 
                     df.attr("index") = index + df_len;
 
@@ -167,7 +165,7 @@ class FileSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
   private:
     cudf::io::table_with_metadata load_table()
     {
-        auto file_path = fs::path(m_filename);
+        auto file_path = std::filesystem::path(m_filename);
 
         if (file_path.extension() == ".json" || file_path.extension() == ".jsonlines")
         {
@@ -227,10 +225,10 @@ class FileSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
         }                                                                                                      \
     }
 
-class KafkaSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>>
+class KafkaSourceStage : public neo::pyneo::PythonSource<std::shared_ptr<MessageMeta>>
 {
   public:
-    using base_t = pyneo::PythonSource<std::shared_ptr<MessageMeta>>;
+    using base_t = neo::pyneo::PythonSource<std::shared_ptr<MessageMeta>>;
     using base_t::source_type_t;
 
     KafkaSourceStage(const neo::Segment& parent,
@@ -305,7 +303,7 @@ class KafkaSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>
         this->concurrency(1);
 
         // Call the default start
-        pyneo::PythonSource<std::shared_ptr<MessageMeta>>::start();
+        neo::pyneo::PythonSource<std::shared_ptr<MessageMeta>>::start();
     }
 
     class Rebalancer : public RdKafka::RebalanceCb
@@ -509,7 +507,7 @@ class KafkaSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>
         std::function<bool(std::vector<std::unique_ptr<RdKafka::Message>>&)> m_process_fn;
         boost::fibers::recursive_mutex m_mutex;
         bool m_is_rebalanced{false};
-        trtlab::neo::SharedFuture<bool> m_partition_future;
+        neo::SharedFuture<bool> m_partition_future;
     };
 
     std::unique_ptr<RdKafka::Conf> build_kafka_conf(const std::map<std::string, std::string>& config_in)
@@ -555,9 +553,9 @@ class KafkaSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>
         return std::move(kafka_conf);
     }
 
-    trtlab::neo::SharedFuture<bool> launch_tasks(std::vector<std::function<bool()>>&& tasks)
+    neo::SharedFuture<bool> launch_tasks(std::vector<std::function<bool()>>&& tasks)
     {
-        std::vector<trtlab::neo::SharedFuture<bool>> partition_futures;
+        std::vector<neo::SharedFuture<bool>> partition_futures;
 
         // Loop over tasks enqueuing onto saved fiber queues
         for (size_t i = 0; i < tasks.size(); ++i)
@@ -716,15 +714,15 @@ class KafkaSourceStage : public pyneo::PythonSource<std::shared_ptr<MessageMeta>
     bool m_disable_commit{false};
 
     bool m_requires_commit{false};  // Whether or not manual committing is required
-    std::vector<std::shared_ptr<neo::TaskQueue<neo::PriorityMetaData>>> m_task_queues;
+    std::vector<std::shared_ptr<neo::TaskQueue<neo::FiberMetaData>>> m_task_queues;
 
     friend Rebalancer;
 };
 
-class DeserializeStage : public pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MultiMessage>>
+class DeserializeStage : public neo::pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MultiMessage>>
 {
   public:
-    using base_t = pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MultiMessage>>;
+    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MultiMessage>>;
     using base_t::operator_fn_t;
     using base_t::reader_type_t;
     using base_t::writer_type_t;
@@ -761,10 +759,10 @@ class DeserializeStage : public pyneo::PythonNode<std::shared_ptr<MessageMeta>, 
 };
 
 class PreprocessNLPStage
-  : public pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>
+  : public neo::pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>
 {
   public:
-    using base_t = pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>;
+    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>;
     using base_t::operator_fn_t;
     using base_t::reader_type_t;
     using base_t::writer_type_t;
@@ -874,10 +872,10 @@ class PreprocessNLPStage
 };
 
 class PreprocessFILStage
-  : public pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>
+  : public neo::pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>
 {
   public:
-    using base_t = pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>;
+    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiInferenceMessage>>;
     using base_t::operator_fn_t;
     using base_t::reader_type_t;
     using base_t::writer_type_t;
@@ -949,18 +947,18 @@ class PreprocessFILStage
                     // this workflow
                     if (!bad_cols.empty())
                     {
-                        py::gil_scoped_acquire gil;
+                        pybind11::gil_scoped_acquire gil;
 
-                        py::object df = x->meta->get_py_table();
+                        pybind11::object df = x->meta->get_py_table();
 
                         std::string regex = R"((\d+))";
 
                         for (auto c : bad_cols)
                         {
-                            df[py::str(c)] = df[py::str(c)]
+                            df[pybind11::str(c)] = df[pybind11::str(c)]
                                                  .attr("str")
-                                                 .attr("extract")(py::str(regex), "expand"_a = true)
-                                                 .attr("astype")(py::str("float32"));
+                                                 .attr("extract")(pybind11::str(regex), "expand"_a = true)
+                                                 .attr("astype")(pybind11::str("float32"));
                         }
 
                         // Now re-get the meta
@@ -1008,7 +1006,7 @@ class PreprocessFILStage
                                                    0);
 
                     auto seg_ids = Tensor::create(
-                        create_seg_ids(x->mess_count, fea_cols.size(), trtlab::neo::TypeId::UINT32),
+                        create_seg_ids(x->mess_count, fea_cols.size(), neo::TypeId::UINT32),
                         DType::create<uint32_t>(),
                         std::vector<neo::TensorIndex>{static_cast<long long>(x->mess_count), static_cast<int>(3)},
                         std::vector<neo::TensorIndex>{},
@@ -1030,7 +1028,7 @@ class PreprocessFILStage
     std::string m_vocab_file;
 };
 
-void __checkTritonErrors(tc::Error status,
+void __checkTritonErrors(triton::client::Error status,
                          const std::string& methodName,
                          const std::string& filename,
                          const int& lineNumber)
@@ -1048,10 +1046,10 @@ void __checkTritonErrors(tc::Error status,
 #define CHECK_TRITON(method) __checkTritonErrors(method, #method, __FILE__, __LINE__);
 
 class InferenceClientStage
-  : public pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>
+  : public neo::pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>
 {
   public:
-    using base_t = pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>;
+    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MultiInferenceMessage>, std::shared_ptr<MultiResponseMessage>>;
     using base_t::operator_fn_t;
     using base_t::reader_type_t;
     using base_t::writer_type_t;
@@ -1115,14 +1113,14 @@ class InferenceClientStage
     {
         std::string server_url = m_server_url;
 
-        std::unique_ptr<tc::InferenceServerHttpClient> client;
+        std::unique_ptr<triton::client::InferenceServerHttpClient> client;
 
-        auto result = tc::InferenceServerHttpClient::Create(&client, server_url, false);
+        auto result = triton::client::InferenceServerHttpClient::Create(&client, server_url, false);
 
         // Now load the input/outputs for the model
         bool is_server_live = false;
 
-        tc::Error status = client->IsServerLive(&is_server_live);
+        triton::client::Error status = client->IsServerLive(&is_server_live);
 
         if (!status.IsOk())
         {
@@ -1133,9 +1131,9 @@ class InferenceClientStage
                                 "InferenceClientStage uses HTTP protocol. Retrying with default HTTP port (8000)";
 
                 // We are using the default gRPC port, try the default HTTP
-                std::unique_ptr<tc::InferenceServerHttpClient> unique_client;
+                std::unique_ptr<triton::client::InferenceServerHttpClient> unique_client;
 
-                auto result = tc::InferenceServerHttpClient::Create(&unique_client, server_url, false);
+                auto result = triton::client::InferenceServerHttpClient::Create(&unique_client, server_url, false);
 
                 client = std::move(unique_client);
 
@@ -1178,12 +1176,12 @@ class InferenceClientStage
         std::string model_metadata_json;
         CHECK_TRITON(client->ModelMetadata(&model_metadata_json, this->m_model_name));
 
-        auto model_metadata = json::parse(model_metadata_json);
+        auto model_metadata = nlohmann::json::parse(model_metadata_json);
 
         std::string model_config_json;
         CHECK_TRITON(client->ModelConfig(&model_config_json, this->m_model_name));
 
-        auto model_config = json::parse(model_config_json);
+        auto model_config = nlohmann::json::parse(model_config_json);
 
         if (model_config.contains("max_batch_size"))
         {
@@ -1256,9 +1254,9 @@ class InferenceClientStage
     operator_fn_t build_operator()
     {
         return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
-            std::unique_ptr<tc::InferenceServerHttpClient> client;
+            std::unique_ptr<triton::client::InferenceServerHttpClient> client;
 
-            CHECK_TRITON(tc::InferenceServerHttpClient::Create(&client, m_server_url, false));
+            CHECK_TRITON(triton::client::InferenceServerHttpClient::Create(&client, m_server_url, false));
 
             return input.subscribe(neo::make_observer<reader_type_t>(
                 [this, &output, &client](reader_type_t&& x) {
@@ -1294,7 +1292,7 @@ class InferenceClientStage
 
                     for (size_t i = 0; i < x->count; i += m_max_batch_size)
                     {
-                        tc::InferInput* input1;
+                        triton::client::InferInput* input1;
 
                         size_t start = i;
                         size_t stop  = std::min(i + m_max_batch_size, x->count);
@@ -1305,7 +1303,7 @@ class InferenceClientStage
                             std::static_pointer_cast<MultiResponseProbsMessage>(response->get_slice(start, stop));
 
                         // Iterate on the model inputs in case the model takes less than what tensors are available
-                        std::vector<std::pair<std::shared_ptr<tc::InferInput>, std::vector<uint8_t>>> saved_inputs =
+                        std::vector<std::pair<std::shared_ptr<triton::client::InferInput>, std::vector<uint8_t>>> saved_inputs =
                             foreach_map(m_model_inputs, [this, &mini_batch_input](auto const& model_input) {
                                 DCHECK(mini_batch_input->memory->has_input(model_input.mapped_name))
                                     << "Model input '" << model_input.mapped_name << "' not found in InferenceMemory";
@@ -1318,13 +1316,13 @@ class InferenceClientStage
                                 std::vector<uint8_t> inp_data = final_tensor.get_host_data();
 
                                 // Test
-                                tc::InferInput* inp_ptr;
+                                triton::client::InferInput* inp_ptr;
 
-                                tc::InferInput::Create(&inp_ptr,
+                                triton::client::InferInput::Create(&inp_ptr,
                                                        model_input.name,
                                                        {inp_tensor.shape(0), inp_tensor.shape(1)},
                                                        model_input.datatype.triton_str());
-                                std::shared_ptr<tc::InferInput> inp_shared;
+                                std::shared_ptr<triton::client::InferInput> inp_shared;
                                 inp_shared.reset(inp_ptr);
 
                                 inp_ptr->AppendRaw(inp_data);
@@ -1332,27 +1330,27 @@ class InferenceClientStage
                                 return std::make_pair(inp_shared, std::move(inp_data));
                             });
 
-                        std::vector<std::shared_ptr<const tc::InferRequestedOutput>> saved_outputs =
+                        std::vector<std::shared_ptr<const triton::client::InferRequestedOutput>> saved_outputs =
                             foreach_map(m_model_outputs, [this](auto const& model_output) {
                                 // Generate the outputs to be requested.
-                                tc::InferRequestedOutput* out_ptr;
+                                triton::client::InferRequestedOutput* out_ptr;
 
-                                tc::InferRequestedOutput::Create(&out_ptr, model_output.name);
-                                std::shared_ptr<const tc::InferRequestedOutput> out_shared;
+                                triton::client::InferRequestedOutput::Create(&out_ptr, model_output.name);
+                                std::shared_ptr<const triton::client::InferRequestedOutput> out_shared;
                                 out_shared.reset(out_ptr);
 
                                 return out_shared;
                             });
 
-                        std::vector<tc::InferInput*> inputs =
+                        std::vector<triton::client::InferInput*> inputs =
                             foreach_map(saved_inputs, [](auto x) { return x.first.get(); });
 
-                        std::vector<const tc::InferRequestedOutput*> outputs =
+                        std::vector<const triton::client::InferRequestedOutput*> outputs =
                             foreach_map(saved_outputs, [](auto x) { return x.get(); });
 
                         // this->segment().resources().fiber_pool().enqueue([client, output](){});
 
-                        tc::InferResult* results;
+                        triton::client::InferResult* results;
 
                         CHECK_TRITON(client->Infer(&results, m_options, inputs, outputs));
 
@@ -1412,10 +1410,10 @@ class InferenceClientStage
     std::map<std::string, std::string> m_inout_mapping;
 
     // Below are settings created during handshake with server
-    // std::shared_ptr<tc::InferenceServerHttpClient> m_client;
+    // std::shared_ptr<triton::client::InferenceServerHttpClient> m_client;
     std::vector<TritonInOut> m_model_inputs;
     std::vector<TritonInOut> m_model_outputs;
-    tc::InferOptions m_options;
+    triton::client::InferOptions m_options;
     int m_max_batch_size{-1};
 };
 

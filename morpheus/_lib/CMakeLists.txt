@@ -14,41 +14,59 @@
 
 # Create the utils library first
 add_library(utils SHARED
-  src/matx_functions.cu
-  src/type_utils.cu
+    src/matx_functions.cu
+    src/type_utils.cu
 )
 
 target_include_directories(utils
-  PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
 target_link_libraries(utils
-  PUBLIC
-    trtlab::pyneo matx::matx cudf::cudf Python3::NumPy
+    PUBLIC
+      pyneo
+      matx::matx
+      cudf::cudf
+      Python3::NumPy
 )
 
-set_target_properties(utils PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_utils)
+set_target_properties(utils
+    PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_utils
+)
 
 # Cudf_helpers needs to come first
 morpheus_add_cython_libraries(./cudf_helpers.pyx
-  LINK_TARGETS utils
-  OUTPUT_TARGET cudf_helpers_target
+    LINK_TARGETS utils
+    OUTPUT_TARGET cudf_helpers_target
 )
 
 morpheus_add_pybind11_module(./common.cpp
-  LINK_TARGETS ${cudf_helpers_target} utils
+    LINK_TARGETS
+      ${cudf_helpers_target}
+      utils
 )
 
-morpheus_add_pybind11_module(./messages.cpp LINK_TARGETS ${cudf_helpers_target} utils)
-morpheus_add_pybind11_module(./stages.cpp LINK_TARGETS ${cudf_helpers_target} TritonClient::httpclient utils RDKAFKA::RDKAFKA)
+morpheus_add_pybind11_module(./messages.cpp
+    LINK_TARGETS
+      ${cudf_helpers_target}
+      utils
+)
 
-install(
-  TARGETS utils
-  EXPORT ${PROJECT_NAME}-targets
+morpheus_add_pybind11_module(./stages.cpp
+    LINK_TARGETS
+      ${cudf_helpers_target}
+      TritonClient::httpclient
+      utils
+      RDKAFKA::RDKAFKA
 )
 
 install(
-  DIRECTORY include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    TARGETS utils
+    EXPORT ${PROJECT_NAME}-targets
+)
+
+install(
+    DIRECTORY include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )

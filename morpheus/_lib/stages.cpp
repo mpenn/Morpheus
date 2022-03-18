@@ -15,16 +15,22 @@
  * limitations under the License.
  */
 
-#include "morpheus/stages.hpp"
+#include <morpheus/cudf_helpers.hpp>
+#include <morpheus/stages.hpp>
+
+#include <neo/core/segment.hpp>
+#include <pyneo/utils.hpp>
+
 #include <pybind11/cast.h>
 
 #include <memory>
 #include <vector>
 
-#include "morpheus/cudf_helpers.hpp"
-#include "pyneo/utils.hpp"
-
 namespace morpheus {
+
+namespace pyneo = neo::pyneo;
+namespace py    = pybind11;
+namespace fs    = std::filesystem;
 
 cudf::io::table_with_metadata load_table(const std::string& filename)
 {
@@ -74,7 +80,7 @@ PYBIND11_MODULE(stages, m)
         .def(py::init<>([](neo::Segment& parent, const std::string& name, std::string filename, int repeat = 1) {
                  auto stage = std::make_shared<FileSourceStage>(parent, name, filename, repeat);
 
-                 parent.register_node<FileSourceStage::source_type_t, FileSourceStage::source_type_t>(stage);
+                 parent.register_node<FileSourceStage>(stage);
 
                  return stage;
              }),
@@ -95,7 +101,7 @@ PYBIND11_MODULE(stages, m)
                  auto stage = std::make_shared<KafkaSourceStage>(
                      parent, name, max_batch_size, topic, batch_timeout_ms, config, disable_commits);
 
-                 parent.register_node<FileSourceStage::source_type_t, FileSourceStage::source_type_t>(stage);
+                 parent.register_node<KafkaSourceStage>(stage);
 
                  return stage;
              }),
@@ -110,9 +116,9 @@ PYBIND11_MODULE(stages, m)
     py::class_<DeserializeStage, neo::SegmentObject, std::shared_ptr<DeserializeStage>>(
         m, "DeserializeStage", py::multiple_inheritance())
         .def(py::init<>([](neo::Segment& parent, const std::string& name, size_t batch_size) {
-                 auto stage = std::make_shared<DeserializeStage>(parent, name, batch_size);
+                 auto stage      = std::make_shared<DeserializeStage>(parent, name, batch_size);
 
-                 parent.register_node<DeserializeStage::sink_type_t, DeserializeStage::source_type_t>(stage);
+                 parent.register_node<DeserializeStage>(stage);
 
                  return stage;
              }),
@@ -130,7 +136,7 @@ PYBIND11_MODULE(stages, m)
                            bool do_lower_case,
                            bool add_special_token,
                            int stride = -1) {
-                 auto stage = std::make_shared<PreprocessNLPStage>(parent,
+                 auto stage      = std::make_shared<PreprocessNLPStage>(parent,
                                                                    name,
                                                                    vocab_hash_file,
                                                                    sequence_length,
@@ -139,7 +145,7 @@ PYBIND11_MODULE(stages, m)
                                                                    add_special_token,
                                                                    stride);
 
-                 parent.register_node<PreprocessNLPStage::sink_type_t, PreprocessNLPStage::source_type_t>(stage);
+                 parent.register_node<PreprocessNLPStage>(stage);
 
                  return stage;
              }),
@@ -155,9 +161,9 @@ PYBIND11_MODULE(stages, m)
     py::class_<PreprocessFILStage, neo::SegmentObject, std::shared_ptr<PreprocessFILStage>>(
         m, "PreprocessFILStage", py::multiple_inheritance())
         .def(py::init<>([](neo::Segment& parent, const std::string& name) {
-                 auto stage = std::make_shared<PreprocessFILStage>(parent, name);
+                 auto stage      = std::make_shared<PreprocessFILStage>(parent, name);
 
-                 parent.register_node<PreprocessFILStage::sink_type_t, PreprocessFILStage::source_type_t>(stage);
+                 parent.register_node<PreprocessFILStage>(stage);
 
                  return stage;
              }),
@@ -183,7 +189,7 @@ PYBIND11_MODULE(stages, m)
                                                                      needs_logits,
                                                                      inout_mapping);
 
-                 parent.register_node<InferenceClientStage::sink_type_t, InferenceClientStage::source_type_t>(stage);
+                 parent.register_node<InferenceClientStage>(stage);
 
                  return stage;
              }),

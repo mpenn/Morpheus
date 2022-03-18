@@ -24,7 +24,7 @@ NVIDIA Morpheus is an open AI application framework that provides cybersecurity 
 
 #### Pre-built container
 
-Pre-built Morpheus containers can be downloaded from NGC. To download the Morpeus SDK CLI container, run the following command:
+Pre-built Morpheus containers can be downloaded from NGC. To download the Morpheus SDK CLI container, run the following command:
 
 ```bash
 docker pull nvcr.io/ea-nvidia-morpheus/morpheus-sdk-cli:latest
@@ -47,7 +47,7 @@ Note: The commands to run Morpheus in the container or locally are the same. See
 
 #### Building locally (outside a container)
 
-To build Morpheus outside of a container, all of the necessary dependencies will need to be installed locally or in a virtual environment. Due to the increased complexity of installing outside of a container, this section has been moved to the `CONTRIBUTING.md`. Please see the "Build in a Conda Environment" section for more information.
+To build Morpheus outside a container, all the necessary dependencies will need to be installed locally or in a virtual environment. Due to the increased complexity of installing outside of a container, this section has been moved to the `CONTRIBUTING.md`. Please see the "Build in a Conda Environment" section for more information.
 
 Note: Once `morpheus` CLI is installed, shell command completion can be installed with:
 ```bash
@@ -63,12 +63,12 @@ Depending on your configuration, it may be necessary to start additional service
    - Requires a running Kafka cluster
    - See the Quick Launch Kafka section.
  - `inf-triton`
-   - Requires a running Trion server
+   - Requires a running Triton server
    - See the launching Triton section.
 
 ### Quick Launch Kafka Cluster
 
-Launching a full production Kafka cluster is outside of the scope of this project. However, if a quick cluster is needed for testing or development, one can be quickly launched via Docker Compose. The following commands outline that process. See [this](https://medium.com/big-data-engineering/hello-kafka-world-the-complete-guide-to-kafka-with-docker-and-python-f788e2588cfc) guide for more in depth information:
+Launching a full production Kafka cluster is outside the scope of this project. However, if a quick cluster is needed for testing or development, one can be quickly launched via Docker Compose. The following commands outline that process. See [this](https://medium.com/big-data-engineering/hello-kafka-world-the-complete-guide-to-kafka-with-docker-and-python-f788e2588cfc) guide for more in depth information:
 
 1. Install `docker-compose` if not already installed:
    ```bash
@@ -108,7 +108,7 @@ Launching a full production Kafka cluster is outside of the scope of this projec
    ```
    Replace `<INPUT_TOPIC_NAME>` with the input name of your choice. If you are using `to-kafka` ensure your output topic is also created.
 
-8. Generage input messages
+8. Generate input messages
    1.  In order for Morpheus to read from Kafka, messages need to be published to the cluster. For debugging/testing purposes, the following container can be used:
 
          ```bash
@@ -119,7 +119,7 @@ Launching a full production Kafka cluster is outside of the scope of this projec
          # Run the producer container
          docker run --rm -it -e KAFKA_BROKER_SERVERS=$(broker-list.sh) -e INPUT_FILE_NAME=$MY_INPUT_FILE -e TOPIC_NAME=$MY_INPUT_TOPIC_NAME --mount src="$PWD,target=/app/data/,type=bind" kafka-producer:1
          ```
-         In order for this to work, your input file must be accessable from `$PWD`.
+         In order for this to work, your input file must be accessible from `$PWD`.
    2. You can view the messages with:
          ```bash
          ./start-kafka-shell.sh $KAFKA_ADVERTISED_HOST_NAME
@@ -167,7 +167,7 @@ Commands:
   run    Run one of the available pipelines
   tools  Run a utility tool
 ```
-Each command in the CLI has it's own help information. Use `morpheus [command] [...sub-command] --help` to get instructions for each command and sub command. For example:
+Each command in the CLI has its own help information. Use `morpheus [command] [...sub-command] --help` to get instructions for each command and sub command. For example:
 ```bash
 $ morpheus run pipeline-nlp inf-triton --help
 Configuring Pipeline via CLI

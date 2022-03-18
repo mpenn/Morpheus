@@ -17,27 +17,28 @@
 
 #pragma once
 
-#include <cstdint>
+
+#include <morpheus/matx_functions.hpp>
+#include <morpheus/type_utils.hpp>
+
+#include <neo/core/tensor.hpp>
+#include <pyneo/node.hpp>
+
 #include <cudf/types.hpp>
-#include <memory>
+
 #include <rmm/device_uvector.hpp>
-#include <string>
-#include <vector>
+#include <rmm/device_buffer.hpp>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
-#include <rmm/device_buffer.hpp>
-#include <trtlab/neo/core/tensor.hpp>
-#include "pyneo/node.hpp"
 
-#include "morpheus/matx_functions.hpp"
-#include "morpheus/type_utils.hpp"
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 
 namespace morpheus {
-
-namespace neo   = trtlab::neo;
-namespace py    = pybind11;
-namespace pyneo = trtlab::neo::pyneo;
 
 template <typename IterT>
 std::string join(IterT begin, IterT end, std::string const& separator)
@@ -72,7 +73,7 @@ class RMMTensor : public neo::ITensor
     {
         if (m_stride.empty())
         {
-            trtlab::neo::detail::validate_stride(this->m_shape, this->m_stride);
+            neo::detail::validate_stride(this->m_shape, this->m_stride);
         }
 
         DCHECK(m_offset + this->bytes() <= m_md->size())
@@ -95,7 +96,7 @@ class RMMTensor : public neo::ITensor
         return m_shape.size();
     }
 
-    trtlab::neo::DataType dtype() const override
+    neo::DataType dtype() const override
     {
         return m_dtype;
     }
@@ -110,25 +111,25 @@ class RMMTensor : public neo::ITensor
         return count() * m_dtype.item_size();
     }
 
-    neo::TensorIndex shape(std::uint32_t idx) const final
+    std::size_t shape(std::size_t idx) const final
     {
         DCHECK_LT(idx, m_shape.size());
         return m_shape.at(idx);
     }
 
-    neo::TensorIndex stride(std::uint32_t idx) const final
+    std::size_t stride(std::size_t idx) const final
     {
         DCHECK_LT(idx, m_stride.size());
         return m_stride.at(idx);
     }
 
-    void get_shape(std::vector<neo::TensorIndex>& s) const final
+    void get_shape(std::vector<neo::TensorIndex>& s) const
     {
         s.resize(rank());
         std::copy(m_shape.begin(), m_shape.end(), s.begin());
     }
 
-    void get_stride(std::vector<neo::TensorIndex>& s) const final
+    void get_stride(std::vector<neo::TensorIndex>& s) const
     {
         s.resize(rank());
         std::copy(m_stride.begin(), m_stride.end(), s.begin());
@@ -285,7 +286,7 @@ class Tensor
 };
 
 // Before using this, cupy must be loaded into the module with `pyneo::import(m, "cupy")`
-py::object tensor_to_cupy(const neo::TensorObject& tensor, const py::module_& mod)
+pybind11::object tensor_to_cupy(const neo::TensorObject& tensor, const pybind11::module_& mod)
 {
     // These steps follow the cupy._convert_object_with_cuda_array_interface function shown here:
     // https://github.com/cupy/cupy/blob/a5b24f91d4d77fa03e6a4dd2ac954ff9a04e21f4/cupy/core/core.pyx#L2478-L2514
@@ -293,15 +294,15 @@ py::object tensor_to_cupy(const neo::TensorObject& tensor, const py::module_& mo
     auto cuda    = cp.attr("cuda");
     auto ndarray = cp.attr("ndarray");
 
-    auto py_tensor = py::cast(tensor);
+    auto py_tensor = pybind11::cast(tensor);
 
     auto ptr    = (uintptr_t)tensor.data();
     auto nbytes = tensor.bytes();
     auto owner  = py_tensor;
     int dev_id  = -1;
 
-    py::list shape_list;
-    py::list stride_list;
+    pybind11::list shape_list;
+    pybind11::list stride_list;
 
     for (auto& idx : tensor.get_shape())
     {
@@ -313,27 +314,27 @@ py::object tensor_to_cupy(const neo::TensorObject& tensor, const py::module_& mo
         stride_list.append(idx * tensor.dtype_size());
     }
 
-    py::object mem    = cuda.attr("UnownedMemory")(ptr, nbytes, owner, dev_id);
-    py::object dtype  = cp.attr("dtype")(tensor.get_numpy_typestr());
-    py::object memptr = cuda.attr("MemoryPointer")(mem, 0);
+    pybind11::object mem    = cuda.attr("UnownedMemory")(ptr, nbytes, owner, dev_id);
+    pybind11::object dtype  = cp.attr("dtype")(tensor.get_numpy_typestr());
+    pybind11::object memptr = cuda.attr("MemoryPointer")(mem, 0);
 
     // TODO(MDD): Sync on stream
 
-    return ndarray(py::cast<py::tuple>(shape_list), dtype, memptr, py::cast<py::tuple>(stride_list));
+    return ndarray(pybind11::cast<pybind11::tuple>(shape_list), dtype, memptr, pybind11::cast<pybind11::tuple>(stride_list));
 }
 
-neo::TensorObject cupy_to_tensor(py::object cupy_array)
+neo::TensorObject cupy_to_tensor(pybind11::object cupy_array)
 {
     // Convert inputs from cupy to Tensor
-    py::dict arr_interface = cupy_array.attr("__cuda_array_interface__");
+    pybind11::dict arr_interface = cupy_array.attr("__cuda_array_interface__");
 
-    py::tuple shape_tup = arr_interface["shape"];
+    pybind11::tuple shape_tup = arr_interface["shape"];
 
     auto shape = shape_tup.cast<std::vector<neo::TensorIndex>>();
 
     std::string typestr = arr_interface["typestr"].cast<std::string>();
 
-    py::tuple data_tup = arr_interface["data"];
+    pybind11::tuple data_tup = arr_interface["data"];
 
     uintptr_t data_ptr = data_tup[0].cast<uintptr_t>();
 
@@ -341,7 +342,7 @@ neo::TensorObject cupy_to_tensor(py::object cupy_array)
 
     if (arr_interface.contains("strides") && !arr_interface["strides"].is_none())
     {
-        py::tuple strides_tup = arr_interface["strides"];
+        pybind11::tuple strides_tup = arr_interface["strides"];
 
         strides = strides_tup.cast<std::vector<neo::TensorIndex>>();
     }

@@ -13,7 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set(RAPIDS_CMAKE_VERSION "21.10" CACHE STRING "Version of rapids-cmake to use")
+
+# 21.10 is currently required because we pull in private cuDF functionality that has changed in 21.12+
+set(RAPIDS_VERSION "21.10" CACHE STRING "Global default version for all Rapids project dependencies")
+# RAPIDS_CMAKE 21.12 is required for libcudacxx.cmake
+set(RAPIDS_CMAKE_VERSION "21.12" CACHE STRING "Version of rapids-cmake to use")
 
 # Download and load the repo according to the rapids-cmake instructions if it does not exist
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/RAPIDS.cmake)

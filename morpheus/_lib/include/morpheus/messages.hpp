@@ -17,77 +17,73 @@
 
 #pragma once
 
-#include <filesystem>
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
 
-#include "morpheus/common.hpp"
-#include "morpheus/cudf_helpers.hpp"
-#include "morpheus/table_info.hpp"
+#include <morpheus/common.hpp>
+#include <morpheus/cudf_helpers.hpp>
+#include <morpheus/table_info.hpp>
+
+#include <cudf/copying.hpp>
+#include <cudf/io/types.hpp>
+#include <cudf/table/table.hpp>
+#include <cudf/types.hpp>
 
 #include <pybind11/cast.h>
 #include <pybind11/gil.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
-#include <cudf/copying.hpp>
-#include <cudf/io/types.hpp>
-#include <cudf/table/table.hpp>
-#include <cudf/types.hpp>
+
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 
 namespace morpheus {
-
-namespace neo   = trtlab::neo;
-namespace py    = pybind11;
-namespace pyneo = trtlab::neo::pyneo;
-namespace fs    = std::filesystem;
-// using json      = nlohmann::json;
-
 struct PyDataTable : public IDataTable
 {
-    PyDataTable(py::object&& py_table) : m_py_table(std::move(py_table)) {}
+    PyDataTable(pybind11::object&& py_table) : m_py_table(std::move(py_table)) {}
 
     ~PyDataTable()
     {
         if (m_py_table)
         {
-            py::gil_scoped_acquire gil;
+            pybind11::gil_scoped_acquire gil;
 
             // Clear out the python object
-            m_py_table = py::object();
+            m_py_table = pybind11::object();
         }
     }
 
     cudf::size_type count() const override
     {
-        py::gil_scoped_acquire gil;
+        pybind11::gil_scoped_acquire gil;
         return m_py_table.attr("_num_rows").cast<cudf::size_type>();
     }
 
     TableInfo get_info() const override
     {
-        py::gil_scoped_acquire gil;
+        pybind11::gil_scoped_acquire gil;
 
         auto info = make_table_info_from_table((PyTable*)m_py_table.ptr(), this->shared_from_this());
 
         return info;
     }
 
-    const py::object& get_py_object() const override
+    const pybind11::object& get_py_object() const override
     {
         return m_py_table;
     }
 
   private:
-    py::object m_py_table;
+    pybind11::object m_py_table;
 };
 
 class MessageMeta
 {
   public:
-    py::object get_py_table() const
+    pybind11::object get_py_table() const
     {
         return m_data->get_py_object();
     }
@@ -102,7 +98,7 @@ class MessageMeta
         return this->m_data->get_info();
     }
 
-    static std::shared_ptr<MessageMeta> create_from_python(py::object&& data_table)
+    static std::shared_ptr<MessageMeta> create_from_python(pybind11::object&& data_table)
     {
         auto data = std::make_unique<PyDataTable>(std::move(data_table));
 
@@ -113,7 +109,7 @@ class MessageMeta
                                                         int index_col_count = 0)
     {
         // Convert to py first
-        py::object py_dt = cpp_to_py(std::move(data_table), index_col_count);
+        pybind11::object py_dt = cpp_to_py(std::move(data_table), index_col_count);
 
         auto data = std::make_unique<PyDataTable>(std::move(py_dt));
 
@@ -123,24 +119,24 @@ class MessageMeta
   private:
     struct MessageMetaImpl
     {
-        virtual py::object get_py_table() const = 0;
+        virtual pybind11::object get_py_table() const = 0;
         virtual TableInfo get_info() const      = 0;
     };
 
     MessageMeta(std::shared_ptr<IDataTable> data) : m_data(std::move(data)) {}
 
-    static py::object cpp_to_py(cudf::io::table_with_metadata&& table, int index_col_count = 0)
+    static pybind11::object cpp_to_py(cudf::io::table_with_metadata&& table, int index_col_count = 0)
     {
-        py::gil_scoped_acquire gil;
+        pybind11::gil_scoped_acquire gil;
 
         // Now convert to a python TableInfo object
-        auto converted_table = py::reinterpret_steal<py::object>(
+        auto converted_table = pybind11::reinterpret_steal<pybind11::object>(
             (PyObject*)make_table_from_table_with_metadata(std::move(table), index_col_count));
 
         // VLOG(10) << "Table. Num Col: " << converted_table.attr("_num_columns").str().cast<std::string>()
         //          << ", Num Ind: " << converted_table.attr("_num_columns").cast<std::string>()
         //          << ", Rows: " << converted_table.attr("_num_rows").cast<std::string>();
-        // py::print("Table Created. Num Rows: {}, Num Cols: {}, Num Ind: {}",
+        // pybind11::print("Table Created. Num Rows: {}, Num Cols: {}, Num Ind: {}",
         //           converted_table.attr("_num_rows"),
         //           converted_table.attr("_num_columns"),
         //           converted_table.attr("_num_indices"));
@@ -150,38 +146,38 @@ class MessageMeta
 
     // struct MessageMetaPyImpl : public MessageMetaImpl
     // {
-    //     MessageMetaPyImpl(py::object&& pydf) : m_pydf(std::move(pydf)) {}
+    //     MessageMetaPyImpl(pybind11::object&& pydf) : m_pydf(std::move(pydf)) {}
 
     //     MessageMetaPyImpl(cudf::io::table_with_metadata&& table) : m_pydf(std::move(cpp_to_py(std::move(table)))) {}
 
-    //     py::object get_py_table() const override
+    //     pybind11::object get_py_table() const override
     //     {
     //         return m_pydf;
     //     }
 
     //     TableInfo get_info() const override
     //     {
-    //         py::gil_scoped_acquire gil;
+    //         pybind11::gil_scoped_acquire gil;
 
     //         return make_table_info_from_table((PyTable*)this->m_pydf.ptr());
     //     }
 
-    //     py::object m_pydf;
+    //     pybind11::object m_pydf;
     // };
 
     // struct MessageMetaCppImpl : public MessageMetaImpl
     // {
     //     MessageMetaCppImpl(cudf::io::table_with_metadata&& table) : m_table(std::move(table)) {}
 
-    //     py::object get_py_table() const override
+    //     pybind11::object get_py_table() const override
     //     {
-    //         py::gil_scoped_acquire gil;
+    //         pybind11::gil_scoped_acquire gil;
 
     //         // Get a python object from this data table
-    //         py::object py_datatable = py::cast(m_data_table);
+    //         pybind11::object py_datatable = pybind11::cast(m_data_table);
 
     //         // Now convert to a python TableInfo object
-    //         auto converted_table = py::reinterpret_steal<py::object>(
+    //         auto converted_table = pybind11::reinterpret_steal<pybind11::object>(
     //             (PyObject*)make_table_from_datatable(m_data_table, (PyObject*)py_datatable.ptr()));
 
     //         return converted_table;
