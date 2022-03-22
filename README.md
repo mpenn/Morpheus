@@ -6,54 +6,72 @@ NVIDIA Morpheus is an open AI application framework that provides cybersecurity 
 
 ### Prerequisites
 
+- Pascal architecture or better
+- NVIDIA driver `450.80.02` or higher
 - [Docker](https://docs.docker.com/get-docker/)
 - [The NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker)
-- `conda` or `mamba`
-  - Conda is only necessary when building outside of the container.
-  - See the [Getting Started Guide](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) if `conda` is not already installed
-  - [Optional] Install `mamba` to speed up the package solver (highly recommended):
-
-      ```bash
-      conda activate base
-      conda install -c conda-forge mamba
-      ```
-
-  - **Note:** `mamba` should only be installed once in the base environment
+- [Git LFS](https://git-lfs.github.com/)
 
 ### Installation
 
-#### Pre-built container
+#### Ensure Git LFS is Installed
 
-Pre-built Morpheus containers can be downloaded from NGC. To download the Morpheus SDK CLI container, run the following command:
+The large model and data files in this repo are stored using [Git Large File Storage (LFS)](https://git-lfs.github.com/). These files will be required for running the training/validation scripts and example pipelines for the Morpheus pre-trained models.
 
+If `Git LFS` is not installed before cloning the repository, the large files will not be pulled. If this is the case, follow the instructions for installing `Git LFS` from [here](https://git-lfs.github.com/), and then run the following command.
 ```bash
-docker pull nvcr.io/ea-nvidia-morpheus/morpheus-sdk-cli:latest
+git lfs install
 ```
 
-**Note:** You must be enrolled in the Morpheus Early Access program to download the Morpheus SDK CLI image.
-
-#### Building locally (inside a container)
-
-To manually build the container, run the following from the repo root:
+#### Clone the Repository
 
 ```bash
-./docker/build_container_dev.sh
+MORPHEUS_HOME=$(pwd)/morpheus
+git clone https://gitlab-master.nvidia.com/morpheus/morpheus.git $MORPHEUS_HOME
+cd $MORPHEUS_HOME
 ```
 
-This will create the `morpheus:YYMMDD` where `YYMMDD` is the current 2 digit year, month and day respectively. See the `CONTRIBUTING.md` guide for more information on building the container and available options.
+**Note:** If the repository was cloned before `Git LFS` was installed, you can ensure you have downloaded the LFS files with the command:
 
-
-Note: The commands to run Morpheus in the container or locally are the same. See the [Running Morpheus](#running-morpheus) section for more info.
-
-#### Building locally (outside a container)
-
-To build Morpheus outside a container, all the necessary dependencies will need to be installed locally or in a virtual environment. Due to the increased complexity of installing outside of a container, this section has been moved to the `CONTRIBUTING.md`. Please see the "Build in a Conda Environment" section for more information.
-
-Note: Once `morpheus` CLI is installed, shell command completion can be installed with:
 ```bash
-morpheus tools autocomplete install
+git lfs pull
 ```
-This will autodetermine your shell and the proper install location. See `morpheus tools autocomplete install --help` for more info on options and available shells.
+
+#### Pre-built `runtime` Docker image
+
+Pre-built Morpheus Docker images can be downloaded from NGC. The `runtime` image includes pre-installed Morpheus and dependencies:
+
+```bash
+docker pull nvcr.io/ea-nvidia-morpheus/morpheus:runtime-v0.2-latest
+```
+
+**Note:** You must be enrolled in the Morpheus Early Access program to download the Morpheus image.
+
+Run the pre-built `runtime` container:
+
+```bash
+DOCKER_IMAGE_TAG=runtime-v0.2-latest ./docker/run_container_release.sh
+```
+
+#### Manually build `runtime` Docker image
+
+The Morpheus `runtime` image can also be manually built. This allows you to use a Morpheus build from the development branch or other branch/tag.
+To manually build the `runtime` image, run the following from the repo root:
+
+```bash
+./docker/build_container_release.sh
+```
+This will create an image named `nvcr.io/ea-nvidia-morpheus/morpheus:latest`.
+
+Run the manually built `runtime` container:
+
+```bash
+./docker/run_container_release.sh
+```
+
+#### Build from source
+
+Build instructions for developers and contributors can be found in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Running Morpheus
 
@@ -130,7 +148,14 @@ Launching a full production Kafka cluster is outside the scope of this project. 
 
 To launch Triton server, use the following command:
 ```bash
-docker run --gpus=all --rm -p8000:8000 -p8001:8001 -p8002:8002 -v$PWD/triton_models:/models nvcr.io/ea-nvidia-morpheus/tritonserver:21.10-trt-8.2.1.3 tritonserver --model-repository=/models --model-control-mode=poll --repository-poll-secs=1
+docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 -v $PWD/models:/models \
+  nvcr.io/nvidia/tritonserver:21.12-py3 \
+    tritonserver --model-repository=/models/triton-model-repo \
+                 --exit-on-error=false \
+                 --model-control-mode=explicit \
+                 --load-model abp-nvsmi-xgb \
+                 --load-model sid-minibert-onnx \
+                 --load-model phishing-bert-onnx
 ```
 This will launch Triton using the port 8001 for the GRPC server. This needs to match the Morpheus configuration.
 
@@ -142,7 +167,7 @@ The Morpheus pipeline can be configured in two ways:
 
 ### Starting the Pipeline (via Manual Python Config)
 
-See the `./examples` directory for examples on how to config via Python. More detailed instructions will be provided in the future.
+See the `./examples` directory for examples on how to configure a pipeline via Python.
 
 ### Starting the Pipeline (via CLI)
 
@@ -326,39 +351,8 @@ Note: The available commands for different types of pipelines are not the same. 
 
 To verify that all pipelines are working correctly, validation scripts have been added at `${MORPHEUS_ROOT}/scripts/validation`. There are scripts for each of the main workflows: Anomalous Behavioral Profilirun_container_release.shng (ABP), Humans-as-Machines-Machines-as-Humans (HAMMAH), Phishing Detection (Phishing), and Sensitive Information Detection (SID).
 
-Note: This assumes you have a copy of the Morpheus Models repo. If building from source, you can ensure the Models repo is downloaded by running `git submodule update --init --recursive`. When working with a pre-built container, the Models repo will need to be downloaded and mounted manually.
+To run all of the validation workflow scripts, use the following commands:
 
-To run all of the validation workflow scripts, use the follownig commands:
-
-Build the latest container (Not necessary if using a pre-built container):
-```bash
-DOCKER_TARGET=build ./docker/build_container_release.sh
-```
-
-Launch Triton to serve the models:
-```bash
-# Serve all workflow models via Triton
-docker run --rm -ti --gpus=all -p8000:8000 -p8001:8001 -p8002:8002 -v $PWD/models:/models \
-  nvcr.io/ea-nvidia-morpheus/tritonserver:21.10-trt-8.2.1.3 \
-    tritonserver --model-repository=/models/triton-model-repo \
-                 --exit-on-error=false \
-                 --model-control-mode=explicit \
-                 --load-model abp-nvsmi-xgb \
-                 --load-model sid-minibert-onnx \
-                 --load-model phishing-bert-onnx
-```
-
-Launch the Morpheus container:
-```bash
-# Launch the Morpheus container (If built from source)
-./docker/run_container_dev.sh
-
-# Launch the Morpheus container (If using a pre-built container)
-export DOCKER_IMAGE_TAG="latest" # Only needed if using a tag other than 'latest'
-./docker/run_container_release.sh
-```
-
-Run the validation scripts:
 ```bash
 # Install utils for checking output
 apt update && apt install -y jq bc

@@ -101,8 +101,7 @@ python publish_model_to_mlflow.py \
 
 ## Deployments
 
-The Triton `mlflow-triton-plugin` is installed on this container and can be used to deploy your models from MLflow to Triton Inference Server. The following
-are examples of how the plugin is used with the `sid-minibert-onnx` model that we published to MLflow above. For more information about the
+The Triton `mlflow-triton-plugin` is installed on this container and can be used to deploy your models from MLflow to Triton Inference Server. The following are examples of how the plugin is used with the `sid-minibert-onnx` model that we published to MLflow above. For more information about the
 `mlflow-triton-plugin`, please see Triton's [documentation](https://github.com/triton-inference-server/server/tree/r21.12/deploy/mlflow-triton-plugin)
 
 ### Create Deployment

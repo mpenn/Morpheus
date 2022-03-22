@@ -1,23 +1,13 @@
 # Morpheus Models
 
-Pretrained models for Morpheus as well as accompanying documentation.
-
-## Git LFS
-
-The large model files in this repo are stored using [Git Large File Storage (LFS)](https://git-lfs.github.com/). Before cloning this repos, you must install the Git LFS command extension:
-```
-# apt update
-# apt install git-lfs
-```
+Pretrained models for Morpheus with corresponding training/validation scripts and datasets.
 
 ## Repo Structure
-Every Morpheus use case has a subfolder, named by the use case. These subfolders contain the model files for the use cases.  
+Every Morpheus use case has a subfolder, **`<use-case>-models`**, that contains the model files for the use case. Training and validation datasets and scripts are also provided in [datasets](./datasets/), [training-tuning-scripts](./training-tuning-scripts/), and [validation-inference-scripts](./validation-inference-scripts/). Jupyter notebook (`.ipynb`) version of the training and fine-tuning scripts are also provided.
 
 The `triton_model_repo` contains the necessary directory structure and configuration files in order to run the Morpheus Models in Triton Inference Server. This includes symlinks to the above-mentioned model files along with corresponding Triton config files (`.pbtxt`). More information on how to deploy this repository to Triton can be found in the [README](./triton-model-repo/README.md).
 
-Models can also be published to an [MLflow](https://mlflow.org/) server and deployed to Triton using the included deployment plugin in `mlflow-triton-plugin`. More information on configuration and usage can be found [here](./mlflow-triton-plugin/README.md).
-
-There is also a directory named `training-tuning-scripts` that contains training and fine-tuning scripts (`.py`) for the available pre-built use cases as well as a Jupyter notebook (`.ipynb`) version of the script.
+Models can also be published to an [MLflow](https://mlflow.org/) server and deployed to Triton using the [MLflow Triton plugin](https://github.com/triton-inference-server/server/tree/main/deploy/mlflow-triton-plugin). The [mlflow](./mlflow/README.md) directory contains information on how to set up a Docker container to run an MLflow server for publishing Morpheus models and deploying them to Triton.
 
 In the root directory, the file `model-information.csv` contains the following information for each model:
 
@@ -56,5 +46,3 @@ This use case is currently implemeted to differentiate between phishing and non-
 
 ### Humans-As-Machines-Machines-As-Humans Detection
 This use case is currently implemeted to detect changes in users' behavior that incate a change from a human to a machines or a machine to a human. The model is an ensemble of an autoencoder and fast fourier transform reconstruction.
-
-
