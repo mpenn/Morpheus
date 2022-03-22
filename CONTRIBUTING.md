@@ -58,9 +58,30 @@ All of the following instructions assume several variables have been set:
  - `RAPIDS_VER`: The desired RAPIDS version for all RAPIDS libraries including cuDF and RMM. This is also used for Triton.
  - `CUDA_VER`: The desired CUDA version to use.
 
+### Clone the repository and pull large file data from Git LFS
+
+```bash
+MORPHEUS_HOME=$(pwd)/morpheus
+git clone https://gitlab-master.nvidia.com/morpheus/morpheus.git $MORPHEUS_HOME
+cd $MORPHEUS_HOME
+```
+The large model and data files in this repo are stored using [Git Large File Storage (LFS)](https://git-lfs.github.com/). These files will be required for running the training/validation scripts and example pipelines for the Morpheus pre-trained models.
+
+If `Git LFS` is not installed before cloning the repository, the large files will not be pulled. If this is the case, follow the instructions for installing `Git LFS` from [here](https://git-lfs.github.com/), and then run the following command.
+```bash
+git lfs pull
+```
+
 ### Build in Docker Container
 
-This workflow utilizes a docker container to setup most dependencies ensuring a consistent environement.
+This workflow utilizes a docker container to set up most dependencies ensuring a consistent environment.
+
+#### Prerequisites
+
+- Pascal architecture or better
+- NVIDIA driver `450.80.02` or higher
+- [Docker](https://docs.docker.com/get-docker/)
+- [The NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker)
 
 1. Build the development container
    ```bash
@@ -72,12 +93,17 @@ This workflow utilizes a docker container to setup most dependencies ensuring a 
       ```
       Would build the container `morpheus:my_tag`.
    1. Note: This does not build any Morpheus or Neo code and defers building the code until the entire repo can be mounted into a running container. This allows for faster incremental builds during development.
-2. Run the development container
+2. Set up `ssh-agent` to allow container to pull from private repos
+   ```bash
+   eval `ssh-agent -s`
+   ssh-add
+   ```
+3. Run the development container
    ```bash
    ./docker/run_container_dev.sh
    ```
    1. The container tag follows the same rules as `build_container_dev.sh` and will default to the current `YYMMDD`. Specify the desired tag with `DOCKER_IMAGE_TAG`. i.e. `DOCKER_IMAGE_TAG=my_tag ./docker/run_container_dev.sh`
-   2. This will automatically mount the current working directory to `/workspace`. In addition, this script sets up `SSH_AUTH_SOCK` to allow docker containers to pull from private repos.
+   2. This will automatically mount the current working directory to `/workspace`.
    3. Some of the validation tests require launching a triton docker container within the morpheus container. To enable this you will need to grant the morpheus contrainer access to your host OS's docker socket file with:
       ```bash
       DOCKER_EXTRA_ARGS="-v /var/run/docker.sock:/var/run/docker.sock" ./docker/run_container_dev.sh
@@ -87,17 +113,17 @@ This workflow utilizes a docker container to setup most dependencies ensuring a 
       ./docker/install_docker.sh
       ```
 
-3. Compile Morpheus
+4. Compile Morpheus
    ```bash
    ./scripts/compile.sh
    ```
    This script will run both CMake Configure with default options and CMake build.
-4. Install Morpheus
+5. Install Morpheus
    ```bash
    pip install -e /workspace
    ```
    Once Morpheus has been built, it can be installed into the current virtual environment.
-5. Run Morpheus
+6. [Run Morpheus](./README.md#running-morpheus)
    ```bash
    morpheus run pipeline-nlp ...
    ```
@@ -108,6 +134,22 @@ This workflow utilizes a docker container to setup most dependencies ensuring a 
 If a Conda environment on the host machine is preferred over Docker, it is relatively easy to install the necessary dependencies (In reality, the Docker workflow creates a Conda environment inside the container).
 
 Note: These instructions assume the user is using `mamba` instead of `conda` since it's improved solver speed is very helpful when working with a large number of dependencies. If you are not familiar with `mamba` you can install it with `conda install -n base -c conda-forge mamba` (Make sure to only install into the base environment). `mamba` is a drop in replacement for `conda` and all conda commands are compatible between the two.
+
+#### Prerequisites
+
+- Pascal architecture or better
+- NVIDIA driver `450.80.02` or higher
+- [CUDA 11.0+](https://developer.nvidia.com/cuda-downloads)
+- `conda` or `mamba`
+  - See the [Getting Started Guide](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) if `conda` is not already installed
+  - [Optional] Install `mamba` to speed up the package solver (highly recommended):
+
+      ```bash
+      conda activate base
+      conda install -c conda-forge mamba
+      ```
+
+  - **Note:** `mamba` should only be installed once in the base environment
 
 1. Create a new Conda environment
    ```bash
@@ -132,7 +174,7 @@ Note: These instructions assume the user is using `mamba` instead of `conda` sin
    ./scripts/compile.sh
    ```
    This script will run both CMake Configure with default options and CMake build.
-4. Insteall Morpheus
+4. Install Morpheus
    ```bash
    pip install -e ${MORPHEUS_ROOT}
    ```
