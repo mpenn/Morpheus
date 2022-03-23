@@ -1,14 +1,15 @@
 ARG FROM_IMAGE=gpuci/miniconda-cuda
 ARG CUDA_VER=11.4
-ARG LINUX_VER=ubuntu18.04
-ARG TRITON_VER=r21.12
+ARG LINUX_VER=ubuntu20.04
+ARG TRITON_VER=r22.02
 FROM ${FROM_IMAGE}:${CUDA_VER}-runtime-${LINUX_VER} AS base
 
 WORKDIR /mlflow
 
 COPY . ./
 
-RUN apt-get update && apt-get install -y procps vim
+# need to do an upgrade in case gpuci is stale for whatever reason
+RUN apt-get update && apt upgrade -y && apt-get install -y procps vim
 RUN /opt/conda/bin/conda env create -f docker/conda/environment.yml
 RUN sed -i 's/conda activate base/conda activate mlflow/g' ~/.bashrc
 
