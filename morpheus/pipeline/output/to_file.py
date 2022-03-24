@@ -22,6 +22,7 @@ import typing_utils
 
 import cudf
 
+import morpheus._lib.stages as neos
 from morpheus.config import Config
 from morpheus.pipeline.file_types import FileTypes
 from morpheus.pipeline.file_types import determine_file_type
@@ -80,6 +81,10 @@ class WriteToFileStage(SinglePortStage):
         """
         return (typing.List[str], pd.DataFrame, cudf.DataFrame)
 
+    @classmethod
+    def supports_cpp_node(cls):
+        return True
+
     def _convert_to_strings(self, x: typing.Union[pd.DataFrame, cudf.DataFrame]):
 
         # Convert here to pandas since this will persist after the message is done
@@ -128,7 +133,13 @@ class WriteToFileStage(SinglePortStage):
             stream = to_string
 
         # Sink to file
-        to_file = seg.make_node(self.unique_name, self._write_str_to_file)
+        if (self._build_cpp_node()):
+            to_file = neos.WriteToFileStage(seg,
+                                            self.unique_name,
+                                            self._output_file, ("w+" if self._overwrite else "w"))
+        else:
+            to_file = seg.make_node(self.unique_name, self._write_str_to_file)
+
         seg.make_edge(stream, to_file)
         stream = to_file
 
