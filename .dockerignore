@@ -1,5 +1,5 @@
 # Folders to ignore
-./.git*
+#./.git*
 .vscode
 **/__pycache__
 **/*.ipynb_checkpoints
