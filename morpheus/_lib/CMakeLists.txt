@@ -25,7 +25,7 @@ target_include_directories(utils
 
 target_link_libraries(utils
     PUBLIC
-      pyneo
+      neo::pyneo
       matx::matx
       cudf::cudf
       Python3::NumPy
@@ -62,8 +62,13 @@ morpheus_add_pybind11_module(./stages.cpp
 )
 
 install(
-    TARGETS utils
+    TARGETS utils pyneo
     EXPORT ${PROJECT_NAME}-targets
+)
+
+install(
+    TARGETS pyneo
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 install(

@@ -22,23 +22,6 @@ ARG CUDA_VER=11.4
 ARG LINUX_DISTRO=ubuntu
 ARG LINUX_VER=20.04
 
-# Stage 0 - Vcpkg build
-# Builds vcpkg so dependencies can be easily installed on the command line
-FROM ${LINUX_DISTRO}:${LINUX_VER} as vcpkg_build
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=America/Denver
-
-RUN apt update && apt -y install build-essential cmake git curl unzip tar zip
-
-RUN git clone https://github.com/Microsoft/vcpkg.git /opt/vcpkg
-
-WORKDIR /opt/vcpkg
-
-# Build vcpkg and delete any data in packages/buildtrees/downloads
-RUN ./bootstrap-vcpkg.sh -disableMetrics &&\
-    rm -rf "/opt/vcpkg/packages" "/opt/vcpkg/buildtrees" "/opt/vcpkg/downloads"
-
 # Stage 1 - Dependencies
 FROM ${FROM_IMAGE}:${CUDA_VER}-devel-${LINUX_DISTRO}${LINUX_VER} AS base
 
@@ -59,20 +42,6 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y \
       build-essential pkg-config curl unzip tar zip openssh-client bc jq libxml2 \
     && rm -rf /var/lib/apt/lists/*
-
-# Vcpkg Install
-COPY --from=vcpkg_build /opt/vcpkg/ /opt/vcpkg/
-ENV VCPKG_ROOT=/opt/vcpkg
-
-# Run the install and bash integrate scripts. Also add VCPKG_BUILD_TYPE
-RUN mkdir -p $HOME/.vcpkg && \
-    /opt/vcpkg/vcpkg integrate install && \
-    /opt/vcpkg/vcpkg integrate bash && \
-    echo 'export PATH=$PATH:/opt/vcpkg' >>~/.bashrc &&\
-    echo 'export VCPKG_ROOT="/opt/vcpkg/"' >>~/.bashrc
-
-# Set the default cache to be in the work folder. Ensure it exists
-ENV VCPKG_DEFAULT_BINARY_CACHE=/workspace/.cache/vcpkg
 
 # Enables "source activate conda"
 SHELL ["/bin/bash", "-c"]
@@ -167,7 +136,7 @@ RUN source activate morpheus && \
     pip install . && \
     cd /workspace/.cache/install/workspace/build &&\
     python setup.py bdist_wheel --dist-dir /workspace/.cache/dist && \
-    cd /workspace/.cache/install/workspace/build/_deps/trtlab-build/trtlab/neo/python/ && \
+    cd /workspace/.cache/install/workspace/build/_deps/neo-build/python/ && \
     python setup.py bdist_wheel --dist-dir /workspace/.cache/dist && \
     cd /workspace
 

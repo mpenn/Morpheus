@@ -21,6 +21,7 @@ channels:
     - conda-forge
 dependencies:
 ### Morpheus Dependencies ##############
+    - automake=1.16.5
     - benchmark=1.6.1
     - boost=1.77
     - boost-cpp=1.77
@@ -28,7 +29,6 @@ dependencies:
     - ccache>=3.7
     - cmake=3.22.1
     - cudatoolkit=11.4.1
-    - cudatoolkit-dev=11.4.0
     - cupy=9.3.0
     - cython=0.29.24
     - docker-compose=1.29.2
