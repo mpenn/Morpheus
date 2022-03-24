@@ -122,16 +122,10 @@ class SerializeStage(SinglePortStage):
 
         df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
 
-        str_buf = StringIO()
-
         # Convert to list of json string objects
-        df.to_json(str_buf, orient="records", lines=True)
+        output_strs = df.to_json(orient="records", lines=True).split("\n")
 
-        # Start from beginning
-        str_buf.seek(0)
-
-        # Return list of strs to write out
-        return str_buf.readlines()
+        return output_strs
 
     @staticmethod
     def convert_to_csv(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):

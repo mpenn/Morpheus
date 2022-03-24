@@ -50,12 +50,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <numeric>
 #include <regex>
 #include <sstream>
+#include <string>
 #include <utility>
 
 namespace morpheus {
@@ -1703,6 +1705,58 @@ class AddScoresStage : public neo::pyneo::PythonNode<std::shared_ptr<MultiRespon
 
     std::size_t m_num_class_labels;
     std::map<std::size_t, std::string> m_idx2label;
+};
+
+class WriteToFileStage : public neo::pyneo::PythonNode<std::vector<std::string>, std::vector<std::string>>
+{
+  public:
+    using base_t = neo::pyneo::PythonNode<std::vector<std::string>, std::vector<std::string>>;
+    using base_t::operator_fn_t;
+    using base_t::reader_type_t;
+    using base_t::writer_type_t;
+
+    WriteToFileStage(const neo::Segment& parent,
+                     const std::string& name,
+                     const std::string& filename,
+                     std::ios::openmode mode = std::ios::out) :
+      neo::SegmentObject(parent, name),
+      PythonNode(parent, name, build_operator()),
+      m_fstream(filename, mode)
+    {}
+
+  private:
+    void close()
+    {
+        if (m_fstream.is_open())
+        {
+            m_fstream.close();
+        }
+    }
+
+    operator_fn_t build_operator()
+    {
+        return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
+            return input.subscribe(neo::make_observer<reader_type_t>(
+                [this, &output](reader_type_t&& strings) {
+                    for (const auto& s : strings)
+                    {
+                        m_fstream << s << "\n";
+                    }
+
+                    output.on_next(std::move(strings));
+                },
+                [&](std::exception_ptr error_ptr) {
+                    this->close();
+                    output.on_error(error_ptr);
+                },
+                [&]() {
+                    this->close();
+                    output.on_completed();
+                }));
+        };
+    }
+
+    std::fstream m_fstream;
 };
 
 }  // namespace morpheus

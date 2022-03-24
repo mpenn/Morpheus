@@ -15,13 +15,12 @@
  * limitations under the License.
  */
 
-
 #include <morpheus/messages.hpp>
 
-#include <neo/channel/channel.hpp>
+#include <cudf_helpers_api.h>
 #include <cudf/io/csv.hpp>
 #include <cudf/io/json.hpp>
-#include <cudf_helpers_api.h>
+#include <neo/channel/channel.hpp>
 #include <pyneo/utils.hpp>
 
 #include <pybind11/cast.h>
@@ -32,11 +31,10 @@
 #include <memory>
 #include <vector>
 
-
 namespace morpheus {
 
-namespace fs  = std::filesystem;
-namespace py  = pybind11;
+namespace fs = std::filesystem;
+namespace py = pybind11;
 
 cudf::io::table_with_metadata load_table(const std::string& filename)
 {
@@ -86,6 +84,9 @@ PYBIND11_MODULE(messages, m)
 
     // Allows python objects to keep DataTable objects alive
     py::class_<IDataTable, std::shared_ptr<IDataTable>>(m, "DataTable");
+
+    neo::node::EdgeConnector<std::vector<std::string>, py::object>::register_converter();
+    neo::node::EdgeConnector<py::object, std::vector<std::string>>::register_converter();
 
     neo::node::EdgeConnector<std::shared_ptr<MessageMeta>, py::object>::register_converter();
     neo::node::EdgeConnector<py::object, std::shared_ptr<MessageMeta>>::register_converter();

@@ -22,12 +22,15 @@
 #include <pyneo/utils.hpp>
 
 #include <pybind11/cast.h>
+#include <pybind11/pytypes.h>
 
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace morpheus {
 
+using namespace std::literals;
 namespace pyneo = neo::pyneo;
 namespace py    = pybind11;
 namespace fs    = std::filesystem;
@@ -54,6 +57,11 @@ cudf::io::table_with_metadata load_table(const std::string& filename)
         LOG(FATAL) << "Unknown extension for file: " << filename;
         throw std::runtime_error("Unknown extension");
     }
+}
+
+bool str_contains(const std::string& str, const std::string& search_str)
+{
+    return str.find(search_str) != std::string::npos;
 }
 
 // Define the pybind11 module m, as 'pipeline'.
@@ -251,6 +259,61 @@ PYBIND11_MODULE(stages, m)
              py::arg("name"),
              py::arg("num_class_labels"),
              py::arg("idx2label"));
+
+    py::class_<WriteToFileStage, neo::SegmentObject, std::shared_ptr<WriteToFileStage>>(
+        m, "WriteToFileStage", py::multiple_inheritance())
+        .def(py::init<>([](neo::Segment& parent,
+                           const std::string& name,
+                           const std::string& filename,
+                           const std::string& mode = "w") {
+                 std::ios::openmode fsmode;
+
+                 if (str_contains(mode, "r"))
+                 {
+                     // Dont support reading
+                     throw std::invalid_argument("Read mode ('r') is not supported by WriteToFileStage. Mode: " + mode);
+                 }
+                 if (str_contains(mode, "b"))
+                 {
+                     // Dont support binary
+                     throw std::invalid_argument("Binary mode ('b') is not supported by WriteToFileStage. Mode: " +
+                                                 mode);
+                 }
+
+                 // Default is write
+                 if (mode.empty() || str_contains(mode, "w"))
+                 {
+                     fsmode |= std::ios::out;
+                 }
+
+                 // Check for appending
+                 if (str_contains(mode, "a"))
+                 {
+                     fsmode |= (std::ios::app | std::ios::out);
+                 }
+
+                 // Check for truncation
+                 if (str_contains(mode, "+"))
+                 {
+                     fsmode |= (std::ios::trunc | std::ios::out);
+                 }
+
+                 // Ensure something was set
+                 if (fsmode == std::ios::openmode())
+                 {
+                     throw std::runtime_error("Unsupported file mode: "s + mode);
+                 }
+
+                 auto stage = std::make_shared<WriteToFileStage>(parent, name, filename, fsmode);
+
+                 parent.register_node<WriteToFileStage>(stage);
+
+                 return stage;
+             }),
+             py::arg("parent"),
+             py::arg("name"),
+             py::arg("filename"),
+             py::arg("mode") = "w");
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);
