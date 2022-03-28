@@ -19,6 +19,7 @@ channels:
     - nvidia
     - rapidsai-nightly
     - conda-forge
+    - stellargraph
 dependencies:
 ### Morpheus Dependencies ##############
     - automake=1.16.5
@@ -30,6 +31,7 @@ dependencies:
     - cmake=3.22.1
     - cudatoolkit=11.4.1
     - cupy=9.3.0
+    - cuml
     - cython=0.29.24
     - docker-compose=1.29.2
     - docker-py=5.0.3
@@ -53,6 +55,7 @@ dependencies:
     - rapidjson=1.1.0
     - sphinx
     - sphinx_rtd_theme
+    - tensorflow
     - tqdm
 ### cuDF Dependencies #################
     - arrow-cpp=5.0.0=py38h0002f4e_26_cuda
