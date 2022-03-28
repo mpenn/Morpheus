@@ -686,6 +686,26 @@ def dropna(ctx: click.Context, **kwargs):
     return stage
 
 
+@click.command(short_help="Buffer data until previous stage has completed",
+               help=("This stage will buffer all inputs until the source stage is complete. At that point all messages "
+                     "will be dumped into downstream stages. Useful for testing performance of one stage at a time."),
+               **command_kwargs)
+@prepare_command(False)
+def trigger(ctx: click.Context, **kwargs):
+
+    from morpheus.pipeline import LinearPipeline
+
+    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+
+    from morpheus.pipeline.general_stages import TriggerStage
+
+    stage = TriggerStage(Config.get(), **kwargs)
+
+    p.add_stage(stage)
+
+    return stage
+
+
 @click.command(short_help="Delay results for a certain duration", deprecated=True, **command_kwargs)
 @click.option('--duration', type=str, help="Time to delay messages in the pipeline. Follows the pandas interval format")
 @prepare_command(False)
