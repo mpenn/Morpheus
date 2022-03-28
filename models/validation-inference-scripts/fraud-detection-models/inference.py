@@ -4,19 +4,22 @@ python inference.py --graph-data train_data.csv --validation-data val_data.csv -
 
 """
 
-import numpy as np
-import xgboost as xgb
-import cudf
-from cuml import ForestInference
-from sklearn.metrics import f1_score
 import argparse
+
+import networkx as nx
+import numpy as np
 import pandas as pd
 import tensorflow as tf
-#from components.GraphConstruction import GraphConstruction
-from stellargraph.layer import HinSAGE    
-from stellargraph.mapper import HinSAGENodeGenerator
+import xgboost as xgb
+from sklearn.metrics import f1_score
 from stellargraph import StellarGraph
-import networkx as nx 
+#from components.GraphConstruction import GraphConstruction
+from stellargraph.layer import HinSAGE
+from stellargraph.mapper import HinSAGENodeGenerator
+
+import cudf
+from cuml import ForestInference
+
 
 def graph_construction(nodes, edges, node_features):
     g_nx = nx.Graph()
@@ -52,25 +55,25 @@ def inductive_step_hinsage(S, trained_model, inductive_node_identifiers, batch_s
     # The mapper feeds data from sampled subgraph to HinSAGE model
     generator = HinSAGENodeGenerator(S, batch_size, num_samples, head_node_type="transaction")
     test_gen_not_shuffled = generator.flow(inductive_node_identifiers, shuffle=False )
-    
+
     inductive_emb = trained_model.predict(test_gen_not_shuffled, verbose=1)
     inductive_emb = pd.DataFrame(inductive_emb, index=inductive_node_identifiers)
 
-    return inductive_emb 
+    return inductive_emb
 
 def infer(model_xgb, model_hinsage, graph_data, node_identifier, output):
 
-    # Build graph structure. 
-   
+    # Build graph structure.
+
     graph = build_graph_features(graph_data)
 
 
     # Load XGBoost & GraphSAGE model
     xgb_model = ForestInference.load(model_xgb, output_class=True)
     hgs_model = tf.keras.models.load_model(model_hinsage)
-    
+
     inductive_embedding = inductive_step_hinsage(graph, hgs_model, node_identifier, batch_size=5)
-   
+
     # prediction
     prediction = xgb_model.predict_proba(inductive_embedding)[:,1]
     result = pd.DataFrame(node_identifier, columns=['node_id'])
@@ -84,11 +87,11 @@ def main():
     val_data = pd.read_csv(args.validation_data)
     graph_data = pd.concat([graph_data, val_data])
     graph_data = graph_data.set_index(graph_data['index'])
-      
+
     # import IPython;IPython.embed();exit(1)
     infer(args.model_xgb, args.model_hinsage, graph_data=graph_data, node_identifier=list(val_data['index']), output=args.output)
-    
-    
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validation-data", required=False,help="Labelled data in CSV format")
@@ -99,4 +102,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 main()
-
