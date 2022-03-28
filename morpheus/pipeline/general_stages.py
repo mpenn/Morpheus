@@ -157,7 +157,7 @@ class TriggerStage(SinglePortStage):
             input.pipe(ops.to_list(), ops.flatten()).subscribe(output)
 
         node = seg.make_node_full(self.unique_name, node_fn)
-        seg.make_edge(input_stream[0])
+        seg.make_edge(input_stream[0], node)
 
         return node, input_stream[1]
 
