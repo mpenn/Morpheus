@@ -594,5 +594,4 @@ class TimeSeriesStage(SinglePortStage):
 
         seg.make_edge(input_stream[0], stream)
 
-        stream = input_stream[0]
         return stream, out_type
