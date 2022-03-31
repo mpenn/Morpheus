@@ -18,3 +18,5 @@ filterwarnings = [
    # Warning coming from mlflow's usage of numpy
    'ignore:`np.object` is a deprecated alias for the builtin `object`. To silence this warning, use `object` by itself. Doing this will not modify any behavior and is safe',
 ]
+
+addopts = "--cov=morpheus --cov-report term-missing"
