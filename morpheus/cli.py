@@ -532,7 +532,7 @@ def from_file(ctx: click.Context, **kwargs):
     from morpheus.pipeline.input.from_file import FileTypes
 
     if ("file_type" in kwargs):
-        kwargs["file_type"] = FileTypes(kwargs["file_type"])
+        kwargs["file_type"] = getattr(FileTypes, kwargs["file_type"].title())
 
     stage = FileSourceStage(Config.get(), **kwargs)
 
@@ -1031,7 +1031,7 @@ def filter(ctx: click.Context, **kwargs):
     return stage
 
 
-@click.command(short_help="Serializes messages into a text format", **command_kwargs)
+@click.command(short_help="Include & exclude columns from messages", **command_kwargs)
 @click.option('--include',
               type=str,
               default=tuple(),
@@ -1046,11 +1046,6 @@ def filter(ctx: click.Context, **kwargs):
               required=True,
               help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
                     "Resulting ignored columns is the intersection of all regex. Include applied before exclude"))
-@click.option('--output_type',
-              type=click.Choice(["pandas", "cudf", "json", "csv"], case_sensitive=False),
-              default="pandas",
-              help=("Indicates the format to serialize the message in. Most output stages can handle the default type. "
-                    "Use 'json' for kafka outputs."))
 @prepare_command(False)
 def serialize(ctx: click.Context, **kwargs):
 

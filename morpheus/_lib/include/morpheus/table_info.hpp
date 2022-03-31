@@ -137,6 +137,21 @@ struct TableInfo
         return this->m_table_view.num_rows();
     }
 
+    pybind11::object as_py_object() const
+    {
+        const auto offset = m_table_view.column(0).offset();
+        const auto stop   = offset + this->num_rows();
+
+        {
+            namespace py = pybind11;
+            py::gil_scoped_acquire gil;
+
+            auto df          = this->get_parent_table();
+            auto index_slice = py::slice(py::int_(offset), py::int_(stop), py::none());
+            return df.attr("loc")[py::make_tuple(df.attr("index")[index_slice], m_column_names)];
+        }
+    }
+
     const cudf::column_view& get_column(cudf::size_type idx) const
     {
         if (idx < 0 || idx >= this->m_table_view.num_columns())

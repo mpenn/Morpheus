@@ -18,7 +18,10 @@
 #pragma once
 
 #include <morpheus/common.hpp>
+#include <morpheus/file_types.hpp>
 #include <morpheus/messages.hpp>
+#include <morpheus/serializers.hpp>
+#include <morpheus/table_info.hpp>
 #include <morpheus/type_utils.hpp>
 
 #include <neo/core/segment_object.hpp>
@@ -63,6 +66,10 @@
 namespace morpheus {
 
 using namespace pybind11::literals;
+using namespace std::literals;
+
+constexpr std::regex_constants::syntax_option_type regex_options =
+    std::regex_constants::ECMAScript | std::regex_constants::icase;
 
 template <typename FuncT, typename SeqT>
 auto foreach_map(const SeqT& seq, FuncT func)
@@ -112,8 +119,7 @@ class FileSourceStage : public neo::pyneo::PythonSource<std::shared_ptr<MessageM
             if (data_table.metadata.column_names.size() >= 1 &&
                 data_table.tbl->get_column(0).type().id() == cudf::type_id::INT64)
             {
-                std::regex index_regex(R"((unnamed: 0|id))",
-                                       std::regex_constants::ECMAScript | std::regex_constants::icase);
+                std::regex index_regex(R"((unnamed: 0|id))", regex_options);
 
                 // Get the column name
                 auto col_name = data_table.metadata.column_names[0];
@@ -1707,10 +1713,113 @@ class AddScoresStage : public neo::pyneo::PythonNode<std::shared_ptr<MultiRespon
     std::map<std::size_t, std::string> m_idx2label;
 };
 
-class WriteToFileStage : public neo::pyneo::PythonNode<std::vector<std::string>, std::vector<std::string>>
+class SerializeStage : public neo::pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MessageMeta>>
 {
   public:
-    using base_t = neo::pyneo::PythonNode<std::vector<std::string>, std::vector<std::string>>;
+    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MessageMeta>>;
+    using base_t::operator_fn_t;
+    using base_t::reader_type_t;
+    using base_t::writer_type_t;
+
+    SerializeStage(const neo::Segment& parent,
+                   const std::string& name,
+                   const std::vector<std::string>& include,
+                   const std::vector<std::string>& exclude,
+                   bool fixed_columns = true) :
+      neo::SegmentObject(parent, name),
+      PythonNode(parent, name, build_operator()),
+      m_fixed_columns{fixed_columns}
+    {
+        make_regex_objs(include, m_include);
+        make_regex_objs(exclude, m_exclude);
+    }
+
+  private:
+    void make_regex_objs(const std::vector<std::string>& regex_strs, std::vector<std::regex>& regex_objs)
+    {
+        for (const auto& s : regex_strs)
+        {
+            regex_objs.emplace_back(std::regex{s, regex_options});
+        }
+    }
+
+    bool match_column(const std::vector<std::regex>& patterns, const std::string& column) const
+    {
+        for (const auto& re : patterns)
+        {
+            if (std::regex_match(column, re))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool include_column(const std::string& column) const
+    {
+        if (m_include.empty())
+        {
+            return true;
+        }
+        else
+        {
+            return match_column(m_include, column);
+        }
+    }
+
+    bool exclude_column(const std::string& column) const
+    {
+        return match_column(m_exclude, column);
+    }
+
+    TableInfo get_meta(reader_type_t& msg)
+    {
+        // If none of the columns match the include regex patterns or are all are excluded this has the effect
+        // of including all of the rows since calling msg->get_meta({}) will return a view with all columns.
+        // The Python impl appears to have the same behavior.
+        if (!m_fixed_columns || m_column_names.empty())
+        {
+            m_column_names.clear();
+            for (const auto& c : msg->get_meta().get_column_names())
+            {
+                if (include_column(c) && !exclude_column(c))
+                {
+                    m_column_names.push_back(c);
+                }
+            }
+        }
+
+        return msg->get_meta(m_column_names);
+    }
+
+    operator_fn_t build_operator()
+    {
+        return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
+            return input.subscribe(neo::make_observer<reader_type_t>(
+                [this, &output](reader_type_t&& msg) {
+                    auto table_info = this->get_meta(msg);
+                    std::shared_ptr<MessageMeta> meta;
+                    {
+                        pybind11::gil_scoped_acquire gil;
+                        meta = MessageMeta::create_from_python(std::move(table_info.as_py_object()));
+                    }
+                    output.on_next(std::move(meta));
+                },
+                [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
+                [&]() { output.on_completed(); }));
+        };
+    }
+
+    bool m_fixed_columns;
+    std::vector<std::regex> m_include;
+    std::vector<std::regex> m_exclude;
+    std::vector<std::string> m_column_names;
+};
+
+class WriteToFileStage : public neo::pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MessageMeta>>
+{
+  public:
+    using base_t = neo::pyneo::PythonNode<std::shared_ptr<MessageMeta>, std::shared_ptr<MessageMeta>>;
     using base_t::operator_fn_t;
     using base_t::reader_type_t;
     using base_t::writer_type_t;
@@ -1718,11 +1827,34 @@ class WriteToFileStage : public neo::pyneo::PythonNode<std::vector<std::string>,
     WriteToFileStage(const neo::Segment& parent,
                      const std::string& name,
                      const std::string& filename,
-                     std::ios::openmode mode = std::ios::out) :
+                     std::ios::openmode mode = std::ios::out,
+                     FileTypes file_type     = FileTypes::Auto) :
       neo::SegmentObject(parent, name),
       PythonNode(parent, name, build_operator()),
-      m_fstream(filename, mode)
-    {}
+      m_is_first(true)
+    {
+        if (file_type == FileTypes::Auto)
+        {
+            file_type = determine_file_type(filename);
+        }
+
+        using std::placeholders::_1;
+        if (file_type == FileTypes::CSV)
+        {
+            m_write_func = [this](auto&& PH1) { write_csv(std::forward<decltype(PH1)>(PH1)); };
+        }
+        else if (file_type == FileTypes::JSON)
+        {
+            m_write_func = [this](auto&& PH1) { write_json(std::forward<decltype(PH1)>(PH1)); };
+        }
+        else  // FileTypes::AUTO
+        {
+            LOG(FATAL) << "Unknown extension for file: " << filename;
+            throw std::runtime_error("Unknown extension");
+        }
+
+        m_fstream.open(filename, mode);
+    }
 
   private:
     void close()
@@ -1733,17 +1865,26 @@ class WriteToFileStage : public neo::pyneo::PythonNode<std::vector<std::string>,
         }
     }
 
+    void write_json(reader_type_t& msg)
+    {
+        // Call df_to_json passing our fstream
+        df_to_json(msg->get_info(), m_fstream);
+    }
+
+    void write_csv(reader_type_t& msg)
+    {
+        // Call df_to_csv passing our fstream
+        df_to_csv(msg->get_info(), m_fstream, m_is_first);
+    }
+
     operator_fn_t build_operator()
     {
         return [this](neo::Observable<reader_type_t>& input, neo::Subscriber<writer_type_t>& output) {
             return input.subscribe(neo::make_observer<reader_type_t>(
-                [this, &output](reader_type_t&& strings) {
-                    for (const auto& s : strings)
-                    {
-                        m_fstream << s << "\n";
-                    }
-
-                    output.on_next(std::move(strings));
+                [this, &output](reader_type_t&& msg) {
+                    this->m_write_func(msg);
+                    m_is_first = false;
+                    output.on_next(std::move(msg));
                 },
                 [&](std::exception_ptr error_ptr) {
                     this->close();
@@ -1756,7 +1897,9 @@ class WriteToFileStage : public neo::pyneo::PythonNode<std::vector<std::string>,
         };
     }
 
+    bool m_is_first;
     std::fstream m_fstream;
+    std::function<void(reader_type_t&)> m_write_func;
 };
 
 }  // namespace morpheus

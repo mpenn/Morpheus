@@ -22,6 +22,17 @@ import pytest
 from morpheus.config import Config
 from morpheus.config import ConfigAutoEncoder
 from morpheus.config import PipelineModes
+from morpheus.pipeline import LinearPipeline
+from morpheus.pipeline.general_stages import AddScoresStage
+from morpheus.pipeline.general_stages import MonitorStage
+from morpheus.pipeline.inference.inference_ae import AutoEncoderInferenceStage
+from morpheus.pipeline.input.from_cloudtrail import CloudTrailSourceStage
+from morpheus.pipeline.output.serialize import SerializeStage
+from morpheus.pipeline.output.to_file import WriteToFileStage
+from morpheus.pipeline.output.validation import ValidationStage
+from morpheus.pipeline.postprocess.timeseries import TimeSeriesStage
+from morpheus.pipeline.preprocess.autoencoder import PreprocessAEStage
+from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
 from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
@@ -48,18 +59,6 @@ class TestHammah(BaseMorpheusTest):
 
         with open(os.path.join(TEST_DIRS.data_dir, 'columns_ae.txt')) as fh:
             config.ae.feature_columns = [x.strip() for x in fh.readlines()]
-
-        from morpheus.pipeline import LinearPipeline
-        from morpheus.pipeline.general_stages import AddScoresStage
-        from morpheus.pipeline.general_stages import MonitorStage
-        from morpheus.pipeline.inference.inference_ae import AutoEncoderInferenceStage
-        from morpheus.pipeline.input.from_cloudtrail import CloudTrailSourceStage
-        from morpheus.pipeline.output.serialize import SerializeStage
-        from morpheus.pipeline.output.to_file import WriteToFileStage
-        from morpheus.pipeline.output.validation import ValidationStage
-        from morpheus.pipeline.postprocess.timeseries import TimeSeriesStage
-        from morpheus.pipeline.preprocess.autoencoder import PreprocessAEStage
-        from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
 
         temp_dir = self._mk_tmp_dir()
         input_glob = os.path.join(TEST_DIRS.validation_data_dir, "hammah-*.csv")
@@ -90,7 +89,7 @@ class TestHammah(BaseMorpheusTest):
                             index_col="_index_",
                             exclude=("event_dt", ),
                             rel_tol=0.15))
-        pipe.add_stage(SerializeStage(config, include=[], output_type="pandas"))
+        pipe.add_stage(SerializeStage(config, include=[]))
         pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
         pipe.run()
@@ -114,18 +113,6 @@ class TestHammah(BaseMorpheusTest):
 
         with open(os.path.join(TEST_DIRS.data_dir, 'columns_ae.txt')) as fh:
             config.ae.feature_columns = [x.strip() for x in fh.readlines()]
-
-        from morpheus.pipeline import LinearPipeline
-        from morpheus.pipeline.general_stages import AddScoresStage
-        from morpheus.pipeline.general_stages import MonitorStage
-        from morpheus.pipeline.inference.inference_ae import AutoEncoderInferenceStage
-        from morpheus.pipeline.input.from_cloudtrail import CloudTrailSourceStage
-        from morpheus.pipeline.output.serialize import SerializeStage
-        from morpheus.pipeline.output.to_file import WriteToFileStage
-        from morpheus.pipeline.output.validation import ValidationStage
-        from morpheus.pipeline.postprocess.timeseries import TimeSeriesStage
-        from morpheus.pipeline.preprocess.autoencoder import PreprocessAEStage
-        from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
 
         temp_dir = self._mk_tmp_dir()
         input_glob = os.path.join(TEST_DIRS.validation_data_dir, "hammah-*.csv")
@@ -156,7 +143,7 @@ class TestHammah(BaseMorpheusTest):
                             index_col="_index_",
                             exclude=("event_dt", ),
                             rel_tol=0.1))
-        pipe.add_stage(SerializeStage(config, include=[], output_type="pandas"))
+        pipe.add_stage(SerializeStage(config, include=[]))
         pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
         pipe.run()

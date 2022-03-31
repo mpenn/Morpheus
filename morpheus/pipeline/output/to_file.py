@@ -12,20 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
 import os
 import typing
 
 import neo
+import neo.core.operators as ops
 import pandas as pd
-import typing_utils
 
 import cudf
 
 import morpheus._lib.stages as neos
+from morpheus._lib.file_types import FileTypes
+from morpheus._lib.file_types import determine_file_type
 from morpheus.config import Config
-from morpheus.pipeline.file_types import FileTypes
-from morpheus.pipeline.file_types import determine_file_type
+from morpheus.pipeline.messages import MessageMeta
+from morpheus.pipeline.output import utils
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
 
@@ -45,6 +46,7 @@ class WriteToFileStage(SinglePortStage):
         Overwrite file if exists. Will generate an error otherwise
 
     """
+
     def __init__(self, c: Config, filename: str, overwrite: bool, file_type: FileTypes = FileTypes.Auto):
         super().__init__(c)
 
@@ -75,28 +77,20 @@ class WriteToFileStage(SinglePortStage):
 
         Returns
         -------
-        typing.Tuple[List[str], ]
+        typing.Tuple(morpheus.pipeline.messages.MessageMeta, )
             Accepted input types
 
         """
-        return (typing.List[str], pd.DataFrame, cudf.DataFrame)
+        return (MessageMeta, )
 
-    @classmethod
-    def supports_cpp_node(cls):
+    def supports_cpp_node(self):
         return True
 
-    def _convert_to_strings(self, x: typing.Union[pd.DataFrame, cudf.DataFrame]):
-
-        # Convert here to pandas since this will persist after the message is done
-        if (isinstance(x, cudf.DataFrame)):
-            x_pd = x.to_pandas()
-        else:
-            x_pd = x
-
-        if (self._file_type == FileTypes.Json):
-            output_strs = [json.dumps(y) for y in x_pd.to_dict(orient="records")]
-        elif (self._file_type == FileTypes.Csv):
-            output_strs = x_pd.to_csv(header=self._is_first).split("\n")
+    def _convert_to_strings(self, df: typing.Union[pd.DataFrame, cudf.DataFrame]):
+        if (self._file_type == FileTypes.JSON):
+            output_strs = utils.df_to_json(df)
+        elif (self._file_type == FileTypes.CSV):
+            output_strs = utils.df_to_csv(df, include_header=self._is_first)
             self._is_first = False
         else:
             raise NotImplementedError("Unknown file type: {}".format(self._file_type))
@@ -107,38 +101,36 @@ class WriteToFileStage(SinglePortStage):
 
         return output_strs
 
-    def _write_str_to_file(self, x: typing.List[str]):
-        """
-        Messages are written to a file using this function.
-
-        Parameters
-        ----------
-        x : typing.List[str]
-            Messages that should be written to a file.
-
-        """
-        with open(self._output_file, "a") as f:
-            f.writelines("\n".join(x))
-            f.write("\n")
-
-        return x
-
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         stream = input_stream[0]
-
-        if (typing_utils.issubtype(input_stream[1], typing.Union[pd.DataFrame, cudf.DataFrame])):
-            to_string = seg.make_node(self.unique_name + "-tostr", self._convert_to_strings)
-            seg.make_edge(stream, to_string)
-            stream = to_string
 
         # Sink to file
         if (self._build_cpp_node()):
             to_file = neos.WriteToFileStage(seg,
                                             self.unique_name,
-                                            self._output_file, ("w+" if self._overwrite else "w"))
+                                            self._output_file, ("w+" if self._overwrite else "w"),
+                                            self._file_type)
         else:
-            to_file = seg.make_node(self.unique_name, self._write_str_to_file)
+
+            def node_fn(input: neo.Observable, output: neo.Subscriber):
+
+                # Open up the file handle
+                with open(self._output_file, "a") as out_file:
+
+                    def write_to_file(x: MessageMeta):
+
+                        lines = self._convert_to_strings(x.df)
+
+                        out_file.writelines(lines)
+
+                        return x
+
+                    input.pipe(ops.map(write_to_file)).subscribe(output)
+
+                # File should be closed by here
+
+            to_file = seg.make_node_full(self.unique_name, node_fn)
 
         seg.make_edge(stream, to_file)
         stream = to_file

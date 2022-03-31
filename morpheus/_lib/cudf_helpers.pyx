@@ -89,19 +89,19 @@ cdef public api:
 
       return DataFrame._from_data(data, index)
 
-   Table make_series_from_table_info(TableInfo info, object owner):
+   # Table make_series_from_table_info(TableInfo info, object owner):
 
-      i_names = info.get_index_names()
-      c_names = info.get_column_names()
+   #    i_names = info.get_index_names()
+   #    c_names = info.get_column_names()
 
-      index_names = [x.decode() for x in i_names]
-      column_names = [x.decode() for x in c_names]
+   #    index_names = [x.decode() for x in i_names]
+   #    column_names = [x.decode() for x in c_names]
 
-      name = column_names[0]
+   #    name = column_names[0]
 
-      data, index = data_from_table_view(info.get_view(), owner, column_names=column_names, index_names=index_names)
+   #    data, index = data_from_table_view(info.get_view(), owner, column_names=column_names, index_names=index_names)
 
-      return Series._from_data(data, index, name)
+   #    return Series._from_data(data, index, name)
 
    # Table make_table_from_view_and_meta(table_view view, table_metadata meta):
 

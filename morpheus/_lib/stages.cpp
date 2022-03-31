@@ -260,12 +260,32 @@ PYBIND11_MODULE(stages, m)
              py::arg("num_class_labels"),
              py::arg("idx2label"));
 
+    py::class_<SerializeStage, neo::SegmentObject, std::shared_ptr<SerializeStage>>(
+        m, "SerializeStage", py::multiple_inheritance())
+        .def(py::init<>([](neo::Segment& parent,
+                           const std::string& name,
+                           const std::vector<std::string>& include,
+                           const std::vector<std::string>& exclude,
+                           bool fixed_columns) {
+                 auto stage = std::make_shared<SerializeStage>(parent, name, include, exclude, fixed_columns);
+
+                 parent.register_node<SerializeStage>(stage);
+
+                 return stage;
+             }),
+             py::arg("parent"),
+             py::arg("name"),
+             py::arg("include"),
+             py::arg("exclude"),
+             py::arg("fixed_columns") = true);
+
     py::class_<WriteToFileStage, neo::SegmentObject, std::shared_ptr<WriteToFileStage>>(
         m, "WriteToFileStage", py::multiple_inheritance())
         .def(py::init<>([](neo::Segment& parent,
                            const std::string& name,
                            const std::string& filename,
-                           const std::string& mode = "w") {
+                           const std::string& mode = "w",
+                           FileTypes file_type     = FileTypes::Auto) {
                  std::ios::openmode fsmode;
 
                  if (str_contains(mode, "r"))
@@ -313,7 +333,8 @@ PYBIND11_MODULE(stages, m)
              py::arg("parent"),
              py::arg("name"),
              py::arg("filename"),
-             py::arg("mode") = "w");
+             py::arg("mode")      = "w",
+             py::arg("file_type") = 0);  // Setting this to FileTypes::AUTO throws a conversion error at runtime
 
 #ifdef VERSION_INFO
     m.attr("__version__") = MACRO_STRINGIFY(VERSION_INFO);

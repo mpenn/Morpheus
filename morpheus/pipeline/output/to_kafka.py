@@ -21,6 +21,8 @@ import neo
 from neo.core import operators as ops
 
 from morpheus.config import Config
+from morpheus.pipeline.messages import MessageMeta
+from morpheus.pipeline.output import utils
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
 
@@ -60,11 +62,11 @@ class WriteToKafkaStage(SinglePortStage):
 
         Returns
         -------
-        typing.Tuple[list[str], ]
+        typing.Tuple(morpheus.pipeline.messages.MessageMeta, )
             Accepted input types
 
         """
-        return (typing.List[str], )
+        return (MessageMeta, )
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
@@ -93,7 +95,8 @@ class WriteToKafkaStage(SinglePortStage):
                                      msg.error())
                         output.on_error(msg.error())
 
-                for m in x:
+                records = utils.df_to_json(x.df, strip_newlines=True)
+                for m in records:
 
                     # Push all of the messages
                     while True:

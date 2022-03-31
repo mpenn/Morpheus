@@ -64,6 +64,8 @@ class BaseMorpheusTest(unittest.TestCase):
         tmp_dir = tempfile.mkdtemp(prefix='morpheus_test_')
         if os.environ.get('MORPHEUS_NO_TEST_CLEANUP') is None:
             self.addCleanup(shutil.rmtree, tmp_dir)
+        else:
+            print("Preserving output in {}".format(tmp_dir))
 
         return tmp_dir
 

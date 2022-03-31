@@ -23,6 +23,16 @@ import pytest
 
 from morpheus.config import Config
 from morpheus.config import PipelineModes
+from morpheus.pipeline import LinearPipeline
+from morpheus.pipeline.general_stages import AddClassificationsStage
+from morpheus.pipeline.general_stages import MonitorStage
+from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
+from morpheus.pipeline.input.from_file import FileSourceStage
+from morpheus.pipeline.output.serialize import SerializeStage
+from morpheus.pipeline.output.to_file import WriteToFileStage
+from morpheus.pipeline.output.validation import ValidationStage
+from morpheus.pipeline.preprocessing import DeserializeStage
+from morpheus.pipeline.preprocessing import PreprocessNLPStage
 from tests import TEST_DIRS
 from tests import BaseMorpheusTest
 
@@ -88,17 +98,6 @@ class TestSid(BaseMorpheusTest):
         config.edge_buffer_size = 128
         config.num_threads = 1
 
-        from morpheus.pipeline import LinearPipeline
-        from morpheus.pipeline.general_stages import AddClassificationsStage
-        from morpheus.pipeline.general_stages import MonitorStage
-        from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
-        from morpheus.pipeline.input.from_file import FileSourceStage
-        from morpheus.pipeline.output.serialize import SerializeStage
-        from morpheus.pipeline.output.to_file import WriteToFileStage
-        from morpheus.pipeline.output.validation import ValidationStage
-        from morpheus.pipeline.preprocessing import DeserializeStage
-        from morpheus.pipeline.preprocessing import PreprocessNLPStage
-
         val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'sid-validation-data.csv')
         vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
 
@@ -124,7 +123,7 @@ class TestSid(BaseMorpheusTest):
         pipe.add_stage(AddClassificationsStage(config, threshold=0.5, prefix="si_"))
         pipe.add_stage(
             ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
-        pipe.add_stage(SerializeStage(config, output_type="pandas"))
+        pipe.add_stage(SerializeStage(config))
         pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
         pipe.run()
@@ -156,17 +155,6 @@ class TestSid(BaseMorpheusTest):
         config.edge_buffer_size = 128
         config.num_threads = 1
 
-        from morpheus.pipeline import LinearPipeline
-        from morpheus.pipeline.general_stages import AddClassificationsStage
-        from morpheus.pipeline.general_stages import MonitorStage
-        from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
-        from morpheus.pipeline.input.from_file import FileSourceStage
-        from morpheus.pipeline.output.serialize import SerializeStage
-        from morpheus.pipeline.output.to_file import WriteToFileStage
-        from morpheus.pipeline.output.validation import ValidationStage
-        from morpheus.pipeline.preprocessing import DeserializeStage
-        from morpheus.pipeline.preprocessing import PreprocessNLPStage
-
         val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'sid-validation-data.csv')
         vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
 
@@ -192,7 +180,7 @@ class TestSid(BaseMorpheusTest):
         pipe.add_stage(AddClassificationsStage(config, threshold=0.5, prefix="si_"))
         pipe.add_stage(
             ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
-        pipe.add_stage(SerializeStage(config, output_type="pandas"))
+        pipe.add_stage(SerializeStage(config))
         pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
         pipe.run()

@@ -25,9 +25,9 @@ import pandas as pd
 from neo.core import operators as ops
 
 from morpheus._lib.common import FiberQueue
+from morpheus._lib.file_types import determine_file_type
 from morpheus.config import Config
 from morpheus.pipeline.file_types import FileTypes
-from morpheus.pipeline.file_types import determine_file_type
 from morpheus.pipeline.input.utils import read_file_to_df
 from morpheus.pipeline.messages import UserMessageMeta
 from morpheus.pipeline.pipeline import SingleOutputSource
@@ -63,6 +63,7 @@ class CloudTrailSourceStage(SingleOutputSource):
     sort_glob : bool, default = False
         If true the list of files matching `input_glob` will be processed in sorted order.
     """
+
     def __init__(self,
                  c: Config,
                  input_glob: str,
@@ -145,7 +146,7 @@ class CloudTrailSourceStage(SingleOutputSource):
         df = read_file_to_df(filename, file_type, df_type="pandas")
 
         # If reading the file only produced one line and we are a JSON file, try loading structured file
-        if (determine_file_type(filename) == FileTypes.Json and len(df) == 1 and list(df) == ["Records"]):
+        if (determine_file_type(filename) == FileTypes.JSON and len(df) == 1 and list(df) == ["Records"]):
 
             # Reread with lines=False
             df = read_file_to_df(filename, file_type, df_type="pandas", parser_kwargs={"lines": False})

@@ -77,14 +77,14 @@ class TestFilterDetectionsStagePipe(BaseMorpheusTest):
         pipe.add_stage(DeserializeStage(config))
         pipe.add_stage(ConvMsg(config))
         pipe.add_stage(FilterDetectionsStage(config, threshold=threshold))
-        pipe.add_stage(SerializeStage(config, output_type="csv"))
+        pipe.add_stage(SerializeStage(config))
         pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
         pipe.run()
 
         self.assertTrue(os.path.exists(out_file))
 
         input_data = np.loadtxt(input_file, delimiter=",", skiprows=1)
-        output_data = np.loadtxt(out_file, delimiter=",")
+        output_data = np.loadtxt(out_file, delimiter=",", skiprows=1)
 
         # The output data will contain an additional id column that we will need to slice off
         # also somehow 0.7 ends up being 0.7000000000000001
