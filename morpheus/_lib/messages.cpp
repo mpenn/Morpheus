@@ -131,80 +131,28 @@ PYBIND11_MODULE(messages, m)
         .def(
             "get_meta",
             [](MultiMessage& self) {
-                // Mimic this python code
-                // self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns] =
-                // value
-                auto df = self.meta->get_py_table();
+                // Get the column and convert to cudf
+                auto info = self.get_meta();
 
-                auto index_slice =
-                    py::slice(py::int_(self.mess_offset), py::int_(self.mess_offset + self.mess_count), py::none());
-
-                // Must do implicit conversion to py::object here!!!
-                py::object df_slice = df.attr("loc")[df.attr("index")[index_slice]];
-
-                return df_slice;
+                return info.as_py_object();
             },
             py::return_value_policy::move)
         .def(
             "get_meta",
-            [](MultiMessage& self, py::object col_name) {
-                // // Get the column and convert to cudf
-                // auto info = self.get_meta(col_name);
+            [](MultiMessage& self, std::string col_name) {
+                // Get the column and convert to cudf
+                auto info = self.get_meta(col_name);
 
-                // auto py_table_struct = make_series_from_table_info(info, (PyObject*)info.get_parent_table().ptr());
-
-                // if (!py_table_struct)
-                // {
-                //     throw py::error_already_set();
-                // }
-
-                // py::object py_table = py::reinterpret_steal<py::object>((PyObject*)py_table_struct);
-
-                // return py_table;
-
-                // Mimic this python code
-                // self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns] =
-                // value
-                auto df = self.meta->get_py_table();
-
-                auto index_slice =
-                    py::slice(py::int_(self.mess_offset), py::int_(self.mess_offset + self.mess_count), py::none());
-
-                // Must do implicit conversion to py::object here!!!
-                py::object df_slice = df.attr("loc")[py::make_tuple(df.attr("index")[index_slice], col_name)];
-
-                return df_slice;
+                return info.as_py_object();
             },
             py::return_value_policy::move)
         .def(
             "get_meta",
-            [](MultiMessage& self, py::object columns) {
-                // // Get the column and convert to cudf
-                // auto info = self.get_meta(columns);
+            [](MultiMessage& self, std::vector<std::string> columns) {
+                // Get the column and convert to cudf
+                auto info = self.get_meta(columns);
 
-                // auto py_table_struct = make_table_from_table_info(info, (PyObject*)info.get_parent_table().ptr());
-
-                // if (!py_table_struct)
-                // {
-                //     throw py::error_already_set();
-                // }
-
-                // py::object py_table = py::reinterpret_steal<py::object>((PyObject*)py_table_struct);
-
-                // return py_table;
-
-                // Mimic this python code
-                // self.meta.df.loc[self.meta.df.index[self.mess_offset:self.mess_offset + self.mess_count], columns] =
-                // value
-                auto df = self.meta->get_py_table();
-
-                auto index_slice =
-                    py::slice(py::int_(self.mess_offset), py::int_(self.mess_offset + self.mess_count), py::none());
-
-                // Must do implicit conversion to py::object here!!!
-                py::object df_slice = df.attr("loc")[py::make_tuple(df.attr("index")[index_slice], columns)];
-
-                return df_slice;
+                return info.as_py_object();
             },
             py::return_value_policy::move)
         .def(

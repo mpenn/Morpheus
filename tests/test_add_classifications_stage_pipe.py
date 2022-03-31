@@ -51,7 +51,7 @@ class ConvMsg(SinglePortStage):
         return (MultiMessage, )
 
     def _conv_message(self, m):
-        df = read_file_to_df(self._expected_data_file, FileTypes.Csv, df_type="cudf")
+        df = read_file_to_df(self._expected_data_file, FileTypes.CSV, df_type="cudf")
         probs = df.values
         memory = ResponseMemoryProbs(count=len(probs), probs=probs)
         return MultiResponseProbsMessage(m.meta, 0, len(probs), memory, 0, len(probs))

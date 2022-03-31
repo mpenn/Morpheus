@@ -198,7 +198,6 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(validation._rel_tol, 0.1)
 
         self.assertIsInstance(serialize, SerializeStage)
-        self.assertEqual(serialize._output_type, 'pandas')
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
@@ -284,7 +283,6 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(validation._rel_tol, 0.1)
 
         self.assertIsInstance(serialize, SerializeStage)
-        self.assertEqual(serialize._output_type, 'pandas')
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
@@ -351,8 +349,6 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(validation._rel_tol, 0.1)
 
         self.assertIsInstance(serialize, SerializeStage)
-        self.assertEqual(serialize._output_type, 'pandas')
-
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
 
@@ -468,7 +464,6 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(validation._rel_tol, 0.1)
 
         self.assertIsInstance(serialize, SerializeStage)
-        self.assertEqual(serialize._output_type, 'pandas')
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
@@ -552,7 +547,6 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(validation._rel_tol, 0.1)
 
         self.assertIsInstance(serialize, SerializeStage)
-        self.assertEqual(serialize._output_type, 'pandas')
 
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
@@ -678,8 +672,6 @@ class TestCli(BaseMorpheusTest):
         self.assertEqual(validation._rel_tol, 0.1)
 
         self.assertIsInstance(serialize, SerializeStage)
-        self.assertEqual(serialize._output_type, 'pandas')
-
         self.assertIsInstance(to_file, WriteToFileStage)
         self.assertEqual(to_file._output_file, 'out.csv')
 

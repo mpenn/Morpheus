@@ -15,6 +15,7 @@
 # Create the utils library first
 add_library(utils SHARED
     src/matx_functions.cu
+    src/serializers.cpp
     src/type_utils.cu
 )
 
@@ -29,6 +30,7 @@ target_link_libraries(utils
       matx::matx
       cudf::cudf
       Python3::NumPy
+      pybind11::pybind11
 )
 
 set_target_properties(utils
@@ -45,6 +47,9 @@ morpheus_add_pybind11_module(./common.cpp
     LINK_TARGETS
       ${cudf_helpers_target}
       utils
+)
+
+morpheus_add_pybind11_module(./file_types.cpp
 )
 
 morpheus_add_pybind11_module(./messages.cpp

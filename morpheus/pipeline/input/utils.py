@@ -20,8 +20,8 @@ from pandas.core.frame import DataFrame
 
 import cudf
 
-from morpheus.pipeline.file_types import FileTypes
-from morpheus.pipeline.file_types import determine_file_type
+from morpheus._lib.file_types import FileTypes
+from morpheus._lib.file_types import determine_file_type
 
 
 def filter_null_data(x: typing.Union[cudf.DataFrame, pd.DataFrame]):
@@ -84,10 +84,10 @@ def read_file_to_df(file_name: str,
         mode = determine_file_type(file_name)
 
     # Special args for JSON
-    if (mode == FileTypes.Json):
+    if (mode == FileTypes.JSON):
         kwargs = {"lines": True}
 
-    elif (mode == FileTypes.Csv):
+    elif (mode == FileTypes.CSV):
         kwargs = {}
 
     # Update with any args set by the user. User values overwrite defaults
@@ -95,7 +95,7 @@ def read_file_to_df(file_name: str,
 
     df_class = cudf if df_type == "cudf" else pd
 
-    if (mode == FileTypes.Json):
+    if (mode == FileTypes.JSON):
         df = df_class.read_json(file_name, **kwargs)
 
         if (filter_nulls):
@@ -105,7 +105,7 @@ def read_file_to_df(file_name: str,
             df = cudf_json_onread_cleanup(df)
 
         return df
-    elif (mode == FileTypes.Csv):
+    elif (mode == FileTypes.CSV):
         df: pd.DataFrame = df_class.read_csv(file_name, **kwargs)
 
         if (len(df.columns) > 1 and df.columns[0] == "Unnamed: 0" and df.iloc[:, 0].dtype == cudf.dtype(int)):

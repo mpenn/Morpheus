@@ -13,18 +13,15 @@
 # limitations under the License.
 
 import copy
-import json
 import re
 import typing
 from functools import partial
-from io import StringIO
 
 import neo
-import pandas as pd
 
-import cudf
-
+import morpheus._lib.stages as neos
 from morpheus.config import Config
+from morpheus.pipeline.messages import MessageMeta
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.pipeline.pipeline import SinglePortStage
 from morpheus.pipeline.pipeline import StreamPair
@@ -32,29 +29,33 @@ from morpheus.pipeline.pipeline import StreamPair
 
 class SerializeStage(SinglePortStage):
     """
-    This class converts a `MultiMessage` object into a list of strings for writing out to file or Kafka.
+    This class filters columns from a `MultiMessage` object emitting a `MessageMeta`.
 
     Parameters
     ----------
     c : morpheus.config.Config
         Pipeline configuration instance
-    include : list[str]
+    include : typing.List[str]
         Attributes that are required send to downstream stage.
     exclude : typing.List[str]
         Attributes that are not required send to downstream stage.
-
+    fixed_columns: bool
+        When `True` `SerializeStage` will assume that the Dataframe in all messages contain the same columns as the
+        first message received.
     """
+
     def __init__(self,
                  c: Config,
                  include: typing.List[str] = None,
                  exclude: typing.List[str] = [r'^ID$', r'^_ts_'],
-                 output_type: typing.Literal["pandas", "cudf", "json", "csv"] = "pandas"):
+                 fixed_columns: bool = True):
         super().__init__(c)
 
         # Make copies of the arrays to prevent changes after the Regex is compiled
         self._include_columns = copy.copy(include)
         self._exclude_columns = copy.copy(exclude)
-        self._output_type = output_type
+        self._fixed_columns = fixed_columns
+        self._columns = None
 
     @property
     def name(self) -> str:
@@ -72,8 +73,10 @@ class SerializeStage(SinglePortStage):
         """
         return (MultiMessage, )
 
-    @staticmethod
-    def convert_to_df(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
+    def convert_to_df(self,
+                      x: MultiMessage,
+                      include_columns: typing.Pattern,
+                      exclude_columns: typing.List[typing.Pattern]):
         """
         Converts dataframe to entries to JSON lines.
 
@@ -87,94 +90,51 @@ class SerializeStage(SinglePortStage):
             Columns that are not required send to downstream stage.
 
         """
-        columns: typing.List[str] = []
 
-        # First build up list of included. If no include regex is specified, select all
-        if (include_columns is None):
-            columns = list(x.meta.df.columns)
+        if self._fixed_columns and self._columns is not None:
+            columns = self._columns
         else:
-            columns = [y for y in list(x.meta.df.columns) if include_columns.match(y)]
+            columns: typing.List[str] = []
 
-        # Now remove by the ignore
-        for test in exclude_columns:
-            columns = [y for y in columns if not test.match(y)]
+            # Minimize access to x.meta.df
+            df_columns = list(x.meta.df.columns)
+
+            # First build up list of included. If no include regex is specified, select all
+            if (include_columns is None):
+                columns = df_columns
+            else:
+                columns = [y for y in df_columns if include_columns.match(y)]
+
+            # Now remove by the ignore
+            for test in exclude_columns:
+                columns = [y for y in columns if not test.match(y)]
+
+            self._columns = columns
 
         # Get metadata from columns
         df = x.get_meta(columns)
 
-        if (isinstance(df, cudf.DataFrame)):
-            df = df.to_pandas()
-
-        # def double_serialize(y: str):
-        #     try:
-        #         return json.dumps(json.dumps(json.loads(y)))
-        #     except:  # noqa: E722
-        #         return y
-
-        # # Special processing for the data column (need to double serialize to match input)
-        # if ("data" in df):
-        #     df["data"] = df["data"].apply(double_serialize)
-
-        return df
-
-    @staticmethod
-    def convert_to_json(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
-
-        df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
-
-        # Convert to list of json string objects
-        output_strs = df.to_json(orient="records", lines=True).split("\n")
-
-        return output_strs
-
-    @staticmethod
-    def convert_to_csv(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
-
-        df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
-
-        # Convert to list of json string objects
-        output_strs = df.to_csv(header=False).split("\n")
-
-        # Return list of strs to write out
-        return output_strs
-
-    @staticmethod
-    def convert_to_cudf(x: MultiMessage, include_columns: typing.Pattern, exclude_columns: typing.List[typing.Pattern]):
-
-        df = SerializeStage.convert_to_df(x, include_columns=include_columns, exclude_columns=exclude_columns)
-
-        return cudf.from_pandas(df)
+        return MessageMeta(df=df)
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
-
-        include_columns = None
-
-        if (self._include_columns is not None and len(self._include_columns) > 0):
-            include_columns = re.compile("({})".format("|".join(self._include_columns)))
-
-        exclude_columns = [re.compile(x) for x in self._exclude_columns]
-
-        fn = None
-        out_type = None
-
-        if (self._output_type == "pandas"):
-            fn = SerializeStage.convert_to_df
-            out_type = pd.DataFrame
-        elif (self._output_type == "cudf"):
-            fn = SerializeStage.convert_to_cudf
-            out_type = cudf.DataFrame
-        elif (self._output_type == "json"):
-            fn = SerializeStage.convert_to_json
-            out_type = typing.List[str]
-        elif (self._output_type == "csv"):
-            fn = SerializeStage.convert_to_csv
-            out_type = typing.List[str]
+        if (self._build_cpp_node()):
+            stream = neos.SerializeStage(seg,
+                                         self.unique_name,
+                                         self._include_columns or [],
+                                         self._exclude_columns,
+                                         self._fixed_columns)
         else:
-            raise NotImplementedError("Unknown output type: {}".format(self._output_type))
+            include_columns = None
 
-        stream = seg.make_node(self.unique_name,
-                               partial(fn, include_columns=include_columns, exclude_columns=exclude_columns))
+            if (self._include_columns is not None and len(self._include_columns) > 0):
+                include_columns = re.compile("({})".format("|".join(self._include_columns)))
+
+            exclude_columns = [re.compile(x) for x in self._exclude_columns]
+
+            stream = seg.make_node(
+                self.unique_name,
+                partial(self.convert_to_df, include_columns=include_columns, exclude_columns=exclude_columns))
 
         seg.make_edge(input_stream[0], stream)
 
-        return stream, out_type
+        return stream, MessageMeta
