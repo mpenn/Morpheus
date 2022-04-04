@@ -18,24 +18,27 @@ function(find_and_configure_cudf version)
 
   list(APPEND CMAKE_MESSAGE_CONTEXT "cudf")
 
-  # Need to set CUB_DIR since cuDF doesnt work well with CUB/Thrust dependencies
   rapids_cpm_find(cudf ${version}
-    GLOBAL_TARGETS
-      cudf cudf::cudf
-    BUILD_EXPORT_SET
-      ${PROJECT_NAME}-exports
-    INSTALL_EXPORT_SET
-      ${PROJECT_NAME}-exports
-    CPM_ARGS
-      GIT_REPOSITORY  https://github.com/rapidsai/cudf
-      GIT_TAG         branch-${CUDF_VERSION}
-      GIT_SHALLOW     TRUE
-      SOURCE_SUBDIR   cpp
-      PATCH_COMMAND   git checkout -- . && git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/cudf.patch
-      OPTIONS         "CUDF_ENABLE_ARROW_S3 OFF"
-                      #"BUILD_PER_THREAD_DEFAULT_STREAM ON"
-                      "BUILD_TESTS OFF"
-                      "CUB_DIR ${CUDAToolkit_INCLUDE_DIRS}/cub/cmake"
+      GLOBAL_TARGETS
+        cudf cudf::cudf
+      BUILD_EXPORT_SET
+        ${PROJECT_NAME}-exports
+      INSTALL_EXPORT_SET
+        ${PROJECT_NAME}-exports
+      CPM_ARGS
+        GIT_REPOSITORY    https://github.com/rapidsai/cudf
+        GIT_TAG           branch-${CUDF_VERSION}
+        DOWNLOAD_ONLY     TRUE # disable internal builds for now.
+        SOURCE_SUBDIR     cpp
+        PATCH_COMMAND     git checkout -- .
+              COMMAND     git apply --whitespace=fix ${PROJECT_SOURCE_DIR}/cmake/deps/patches/cudf.patch
+        OPTIONS           USE_NVTX ON
+                          BUILD_TESTS OFF
+                          BUILD_BENCHMARKS OFF
+                          DISABLE_DEPRECATION_WARNING OFF
+                          PER_THREAD_DEFAULT_STREAM ON
+                          CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE}
+                          CUDF_CMAKE_CUDA_ARCHITECTURES NATIVE
   )
 
 endfunction()

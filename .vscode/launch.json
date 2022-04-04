@@ -563,7 +563,7 @@
          ],
          "symbolLoadInfo": {
             "loadAll": false,
-            "exceptionList": "libtrtlab*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;stages.*;messages.*;common*.so"
+            "exceptionList": "libneo*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;stages.*;messages.*;common*.so"
          },
          "miDebuggerPath": "gdb",
          "sourceFileMap": {
@@ -657,7 +657,7 @@
          ],
          "symbolLoadInfo": {
             "loadAll": false,
-            "exceptionList": "libtrtlab*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;stages.*;messages.*;common*.so"
+            "exceptionList": "libneo*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;stages.*;messages.*;common*.so"
          },
          "miDebuggerPath": "gdb",
          "sourceFileMap": {
@@ -748,7 +748,7 @@
          ],
          "symbolLoadInfo": {
             "loadAll": false,
-            "exceptionList": "libtrtlab*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;stages.*;messages.*;common*.so"
+            "exceptionList": "libneo*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;stages.*;messages.*;common*.so"
          },
          "miDebuggerPath": "gdb",
          "sourceFileMap": {
@@ -789,7 +789,7 @@
          ],
          "symbolLoadInfo": {
             "loadAll": false,
-            "exceptionList": "libtrtlab*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;common.*;stages.*;messages.*"
+            "exceptionList": "libneo*.so;cudf_helpers.*;executor.*;morpheus.*;node.*;options.*;pipeline.*;segment.*;subscriber.*;common.*;stages.*;messages.*"
          },
          "miDebuggerPath": "gdb"
       },

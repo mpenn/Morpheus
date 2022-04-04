@@ -1,5 +1,5 @@
 # =============================================================================
-# Copyright (c) 2020, NVIDIA CORPORATION.
+# Copyright (c) 2020-2022, NVIDIA CORPORATION.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
 # in compliance with the License. You may obtain a copy of the License at
@@ -11,72 +11,69 @@
 # or implied. See the License for the specific language governing permissions and limitations under
 # the License.
 # =============================================================================
+find_package(pybind11 REQUIRED)
 
-# Create the utils library first
-add_library(utils SHARED
-    src/matx_functions.cu
-    src/serializers.cpp
-    src/type_utils.cu
-)
+if(MORPHEUS_PYTHON_INPLACE_BUILD)
+  message(STATUS "Performing inplace build for Python modules and library dependencies. Use `pip install -e .`\
+   from the root folder to install Morpheus.")
+endif()
 
-target_include_directories(utils
-    PUBLIC
-      "${CMAKE_CURRENT_SOURCE_DIR}/include"
-)
+########### morpheus ###########
+set(MORPHEUS_LIB_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(utils
-    PUBLIC
-      neo::pyneo
-      matx::matx
-      cudf::cudf
-      Python3::NumPy
-      pybind11::pybind11
-)
+#----------cuda_utils---------
+include(cmake/libraries/cuda_utils.cmake)
 
-set_target_properties(utils
-    PROPERTIES OUTPUT_NAME ${PROJECT_NAME}_utils
-)
+#----------cudf_helpers---------
+include(cmake/libraries/cudf_helpers.cmake)
 
-# Cudf_helpers needs to come first
-morpheus_add_cython_libraries(./cudf_helpers.pyx
-    LINK_TARGETS utils
-    OUTPUT_TARGET cudf_helpers_target
-)
+#----------lib_morpheus---------
+include(cmake/libraries/morpheus.cmake)
 
-morpheus_add_pybind11_module(./common.cpp
-    LINK_TARGETS
-      ${cudf_helpers_target}
-      utils
-)
+########### py_morpheus ########
+#----------morpheus._lib.stages---------
+include(cmake/python_modules/stages.cmake)
 
-morpheus_add_pybind11_module(./file_types.cpp
-)
+#----------morpheus._lib.messages---------
+include(cmake/python_modules/messages.cmake)
 
-morpheus_add_pybind11_module(./messages.cpp
-    LINK_TARGETS
-      ${cudf_helpers_target}
-      utils
-)
+#----------morpheus._lib.common---------
+include(cmake/python_modules/common.cmake)
 
-morpheus_add_pybind11_module(./stages.cpp
-    LINK_TARGETS
-      ${cudf_helpers_target}
-      TritonClient::httpclient
-      utils
-      RDKAFKA::RDKAFKA
+#----------morpheus._lib.file_types---------
+include(cmake/python_modules/file_types.cmake)
+
+##################################
+
+## TODO
+#set(MORPHEUS_PYTHON_INSTALL_FILES "")
+#list(PREPEND MORPHEUS_PYTHON_INSTALL_FILES
+#    "${CMAKE_SOURCE_DIR}/pyproject.toml"
+#    "${CMAKE_SOURCE_DIR}/setup.cfg"
+#    "${CMAKE_SOURCE_DIR}/setup.py"
+#    "${CMAKE_SOURCE_DIR}/versioneer.py"
+#)
+
+install(
+    TARGETS
+      cuda_utils
+      morpheus
+      pyneo
+    EXPORT
+      ${PROJECT_NAME}-targets
+
 )
 
 install(
-    TARGETS utils pyneo
-    EXPORT ${PROJECT_NAME}-targets
+    TARGETS
+      pyneo
+    LIBRARY DESTINATION
+      "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 install(
-    TARGETS pyneo
-    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
-)
-
-install(
-    DIRECTORY include/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    DIRECTORY
+      include/
+    DESTINATION
+      ${CMAKE_INSTALL_INCLUDEDIR}
 )

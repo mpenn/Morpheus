@@ -28,7 +28,7 @@ from cudf._lib.table cimport Table, table_view_from_table
 from cudf._lib.cpp.io.types cimport table_with_metadata, table_metadata
 from cudf._lib.utils cimport data_from_table_view, data_from_unique_ptr
 
-cdef extern from "morpheus/table_info.hpp" namespace "morpheus" nogil:
+cdef extern from "morpheus/objects/table_info.hpp" namespace "morpheus" nogil:
 
    cdef cppclass IDataTable:
       IDataTable()
