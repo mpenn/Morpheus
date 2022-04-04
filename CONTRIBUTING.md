@@ -153,7 +153,7 @@ Note: These instructions assume the user is using `mamba` instead of `conda` sin
 
 1. Create a new Conda environment
    ```bash
-   export -DCUDAToolkit_ROOT=/usr/local/cuda-{CUDA_VER}
+   export CUDAToolkit_ROOT=/usr/local/cuda-{CUDA_VER}
    mamba env create -n morpheus -f ./docker/conda/environments/dev_cuda${CUDA_VER}.yml
    conda activate morpheus
    ```

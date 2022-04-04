@@ -58,6 +58,11 @@ DOCKER_IMAGE_TAG=runtime-v0.2-latest ./docker/run_container_release.sh
 The Morpheus `runtime` image can also be manually built. This allows you to use a Morpheus build from the development branch or other branch/tag.
 To manually build the `runtime` image, run the following from the repo root:
 
+#### Building locally (outside a container)
+
+To build Morpheus outside a container, all the necessary dependencies will need to be installed locally or in a virtual environment. Due to the increased complexity of installing outside of a container, this section has been moved to the `CONTRIBUTING.md`. Please see the "Build in a Conda Environment" section for more information.
+
+Note: Once `morpheus` CLI is installed, shell command completion can be installed with:
 ```bash
 ./docker/build_container_release.sh
 ```
