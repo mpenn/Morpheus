@@ -14,42 +14,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
 from unittest import mock
 
 import pytest
 
-from morpheus.config import Config
 from morpheus.pipeline.general_stages import TriggerStage
-from tests import BaseMorpheusTest
 
 
-@pytest.mark.usefixtures("config_no_cpp")
-class TestTriggerStage(BaseMorpheusTest):
-    def test_constructor(self):
-        config = Config.get()
+def test_constructor(config):
+    ts = TriggerStage(config)
+    assert ts.name == "trigger"
 
-        ts = TriggerStage(config)
-        self.assertEqual(ts.name, "trigger")
-
-        # Just ensure that we get a valid non-empty tuple
-        accepted_types = ts.accepted_types()
-        self.assertIsInstance(accepted_types, tuple)
-        self.assertGreater(len(accepted_types), 0)
-
-    def test_build_single(self):
-        mock_stream = mock.MagicMock()
-        mock_segment = mock.MagicMock()
-        mock_segment.make_node.return_value = mock_stream
-        mock_input = mock.MagicMock()
-
-        config = Config.get()
-        ts = TriggerStage(config)
-        ts._build_single(mock_segment, mock_input)
-
-        mock_segment.make_node_full.assert_called_once()
-        mock_segment.make_edge.assert_called_once()
+    # Just ensure that we get a valid non-empty tuple
+    accepted_types = ts.accepted_types()
+    assert isinstance(accepted_types, tuple)
+    assert len(accepted_types) > 0
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.use_python
+def test_build_single(config):
+    mock_stream = mock.MagicMock()
+    mock_segment = mock.MagicMock()
+    mock_segment.make_node.return_value = mock_stream
+    mock_input = mock.MagicMock()
+
+    ts = TriggerStage(config)
+    ts._build_single(mock_segment, mock_input)
+
+    mock_segment.make_node_full.assert_called_once()
+    mock_segment.make_edge.assert_called_once()

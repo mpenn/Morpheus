@@ -14,56 +14,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
-import unittest
 from unittest import mock
 
 import pytest
 
-from morpheus.config import Config
 from morpheus.pipeline.inference import inference_stage
-from morpheus.utils.producer_consumer_queue import Closed
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
-from tests import BaseMorpheusTest
+from tests import IW
 
 
-@pytest.mark.usefixtures("config_no_cpp")
-class TestInferenceWorker(BaseMorpheusTest):
-    def test_constructor(self):
+def test_constructor():
+    pq = ProducerConsumerQueue()
+    iw = inference_stage.InferenceWorker(pq)
+    assert iw._inf_queue is pq
 
-        pq = ProducerConsumerQueue()
-        iw = inference_stage.InferenceWorker(pq)
-        self.assertIs(iw._inf_queue, pq)
-
-        # Call empty methods
-        iw.init()
-        iw.stop()
-
-    def test_build_output_message(self):
-        # build_output_message calls calc_output_dims which is abstract
-        # creating a subclass for the purpose of testing
-        class TestIW(inference_stage.InferenceWorker):
-            def calc_output_dims(self, _):
-                return (1, 2)
-
-        config = Config.get()
-        config.use_cpp = False # C++ doesn't like our mocked messages
-
-        pq = ProducerConsumerQueue()
-        iw = TestIW(pq)
-
-        mock_message = mock.MagicMock()
-        mock_message.count = 2
-        mock_message.mess_offset = 11
-        mock_message.mess_count = 10
-        mock_message.offset = 12
-
-        response = iw.build_output_message(mock_message)
-        self.assertEqual(response.count, 2)
-        self.assertEqual(response.mess_offset, 11)
-        self.assertEqual(response.mess_count, 10)
-        self.assertEqual(response.offset, 12)
+    # Call empty methods
+    iw.init()
+    iw.stop()
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.use_python
+def test_build_output_message(config):
+    pq = ProducerConsumerQueue()
+    iw = IW(pq)
+
+    mock_message = mock.MagicMock()
+    mock_message.count = 2
+    mock_message.mess_offset = 11
+    mock_message.mess_count = 10
+    mock_message.offset = 12
+
+    response = iw.build_output_message(mock_message)
+    assert response.count == 2
+    assert response.mess_offset == 11
+    assert response.mess_count == 10
+    assert response.offset == 12

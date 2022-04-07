@@ -1,4 +1,28 @@
+# SPDX-FileCopyrightText: Copyright (c) 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import importlib
+import logging
+import os
+import subprocess
+import time
+
 import pytest
+import requests
+
+from tests import TEST_DIRS
 
 
 def pytest_addoption(parser: pytest.Parser):
@@ -70,7 +94,9 @@ def config_only_cpp():
 
     config.use_cpp = True
 
-    return config
+    yield config
+
+    Config.reset()
 
 
 @pytest.fixture(scope="function")
@@ -86,7 +112,9 @@ def config_no_cpp():
 
     config.use_cpp = False
 
-    return config
+    yield config
+
+    Config.reset()
 
 
 @pytest.fixture(scope="function")
@@ -123,4 +151,106 @@ def config(request: pytest.FixtureRequest):
         else:
             config.use_cpp = False
 
-    return config
+    yield config
+
+    Config.reset()
+
+
+@pytest.fixture(scope="function")
+def restore_environ():
+    orig_vars = os.environ.copy()
+    yield os.environ
+
+    # Iterating over a copy of the keys as we will potentially be deleting keys in the loop
+    for key in list(os.environ.keys()):
+        orig_val = orig_vars.get(key)
+        if orig_val is not None:
+            os.environ[key] = orig_val
+        else:
+            del (os.environ[key])
+
+
+@pytest.fixture(scope="function")
+def reload_modules(request: pytest.FixtureRequest):
+    marker = request.node.get_closest_marker("reload_modules")
+    yield
+
+    if marker is not None:
+        modules = marker.args[0]
+        if not isinstance(modules, list):
+            modules = [modules]
+
+        for mod in modules:
+            importlib.reload(mod)
+
+
+def wait_for_camouflage(popen, root_dir, host="localhost", port=8000, timeout=5):
+    ready = False
+    elapsed_time = 0.0
+    sleep_time = 0.1
+    url = "http://{}:{}/ping".format(host, port)
+    while not ready and elapsed_time < timeout and popen.poll() is None:
+        try:
+            r = requests.get(url, timeout=1)
+            if r.status_code == 200:
+                ready = r.json()['message'] == 'I am alive.'
+        except Exception as e:
+            pass
+
+        if not ready:
+            time.sleep(sleep_time)
+            elapsed_time += sleep_time
+
+    if popen.poll() is not None:
+        raise RuntimeError("camouflage server exited with status code={} details in: {}".\
+            format(popen.poll(), os.path.join(root_dir, 'camouflage.log')))
+
+    return ready
+
+
+@pytest.fixture(scope="function")
+def launch_mock_triton():
+    """
+    Launches a mock triton server using camouflage (https://testinggospels.github.io/camouflage/) with a package
+    rooted at `root_dir` and configured with `config`.
+
+    This function will wait for up to `timeout` seconds for camoflauge to startup
+
+    This function is a no-op if the `MORPHEUS_NO_LAUNCH_CAMOUFLAGE` environment variable is defined, which can
+    be useful during test development to run camouflage by hand.
+    """
+    root_dir = TEST_DIRS.mock_triton_servers_dir
+    startup_timeout = 5
+    shutdown_timeout = 1
+
+    launch_camouflage = os.environ.get('MORPHEUS_NO_LAUNCH_CAMOUFLAGE') is None
+    if launch_camouflage:
+        popen = subprocess.Popen(["camouflage", "--config", "config.yml"],
+                                 cwd=root_dir,
+                                 stderr=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL)
+
+        logging.info("Launching camouflage in {} with pid: {}".format(root_dir, popen.pid))
+
+        if startup_timeout > 0:
+            if not wait_for_camouflage(popen, root_dir, timeout=startup_timeout):
+                raise RuntimeError("Failed to launch camouflage server")
+
+        yield
+
+        logging.info("killing pid {}".format(popen.pid))
+
+        elapsed_time = 0.0
+        sleep_time = 0.1
+        stopped = False
+
+        # It takes a little while to shutdown
+        while not stopped and elapsed_time < shutdown_timeout:
+            popen.kill()
+            stopped = (popen.poll() is not None)
+            if not stopped:
+                time.sleep(sleep_time)
+                elapsed_time += sleep_time
+
+    else:
+        yield

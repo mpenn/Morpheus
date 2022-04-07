@@ -15,13 +15,11 @@
 # limitations under the License.
 
 import os
-import unittest
 from unittest import mock
 
 import numpy as np
 import pytest
 
-from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.pipeline import LinearPipeline
 from morpheus.pipeline.general_stages import AddClassificationsStage
@@ -34,137 +32,122 @@ from morpheus.pipeline.output.validation import ValidationStage
 from morpheus.pipeline.preprocessing import DeserializeStage
 from morpheus.pipeline.preprocessing import PreprocessNLPStage
 from tests import TEST_DIRS
-from tests import BaseMorpheusTest
+from tests import calc_error_val
 
+#End-to-end test intended to imitate the Phishing validation test
 FEATURE_LENGTH = 128
 MODEL_MAX_BATCH_SIZE = 32
 
 
-class TestPhishing(BaseMorpheusTest):
-    """
-    End-to-end test intended to imitate the Phishing validation test
-    """
-    @pytest.mark.slow
-    @mock.patch('tritonclient.grpc.InferenceServerClient')
-    def test_email_no_cpp(self, mock_triton_client):
-        mock_metadata = {
-            "inputs": [{
-                "name": "input_ids", "datatype": "INT64", "shape": [-1, FEATURE_LENGTH]
-            }, {
-                "name": "attention_mask", "datatype": "INT64", "shape": [-1, FEATURE_LENGTH]
-            }],
-            "outputs": [{
-                "name": "output", "datatype": "FP32", "shape": [-1, 2]
-            }]
-        }
-        mock_model_config = {"config": {"max_batch_size": MODEL_MAX_BATCH_SIZE}}
+@pytest.mark.slow
+@pytest.mark.use_python
+@mock.patch('tritonclient.grpc.InferenceServerClient')
+def test_email_no_cpp(mock_triton_client, config, tmp_path):
+    mock_metadata = {
+        "inputs": [{
+            "name": "input_ids", "datatype": "INT64", "shape": [-1, FEATURE_LENGTH]
+        }, {
+            "name": "attention_mask", "datatype": "INT64", "shape": [-1, FEATURE_LENGTH]
+        }],
+        "outputs": [{
+            "name": "output", "datatype": "FP32", "shape": [-1, 2]
+        }]
+    }
+    mock_model_config = {"config": {"max_batch_size": MODEL_MAX_BATCH_SIZE}}
 
-        mock_triton_client.return_value = mock_triton_client
-        mock_triton_client.is_server_live.return_value = True
-        mock_triton_client.is_server_ready.return_value = True
-        mock_triton_client.is_model_ready.return_value = True
-        mock_triton_client.get_model_metadata.return_value = mock_metadata
-        mock_triton_client.get_model_config.return_value = mock_model_config
+    mock_triton_client.return_value = mock_triton_client
+    mock_triton_client.is_server_live.return_value = True
+    mock_triton_client.is_server_ready.return_value = True
+    mock_triton_client.is_model_ready.return_value = True
+    mock_triton_client.get_model_metadata.return_value = mock_metadata
+    mock_triton_client.get_model_config.return_value = mock_model_config
 
-        data = np.loadtxt(os.path.join(TEST_DIRS.expeced_data_dir, 'triton_phishing_inf_results.csv'), delimiter=',')
-        inf_results = self._partition_array(data, MODEL_MAX_BATCH_SIZE)
+    data = np.loadtxt(os.path.join(TEST_DIRS.expeced_data_dir, 'triton_phishing_inf_results.csv'), delimiter=',')
+    inf_results = np.split(data, range(MODEL_MAX_BATCH_SIZE, len(data), MODEL_MAX_BATCH_SIZE))
 
-        mock_infer_result = mock.MagicMock()
-        mock_infer_result.as_numpy.side_effect = inf_results
+    mock_infer_result = mock.MagicMock()
+    mock_infer_result.as_numpy.side_effect = inf_results
 
-        def async_infer(callback=None, **k):
-            callback(mock_infer_result, None)
+    def async_infer(callback=None, **k):
+        callback(mock_infer_result, None)
 
-        mock_triton_client.async_infer.side_effect = async_infer
+    mock_triton_client.async_infer.side_effect = async_infer
 
-        config = Config.get()
-        config.mode = PipelineModes.NLP
-        config.use_cpp = False
-        config.class_labels = ["score", "pred"]
-        config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
-        config.pipeline_batch_size = 1024
-        config.feature_length = FEATURE_LENGTH
-        config.edge_buffer_size = 128
-        config.num_threads = 1
+    config.mode = PipelineModes.NLP
+    config.class_labels = ["score", "pred"]
+    config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
+    config.pipeline_batch_size = 1024
+    config.feature_length = FEATURE_LENGTH
+    config.edge_buffer_size = 128
+    config.num_threads = 1
 
-        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'phishing-email-validation-data.jsonlines')
-        vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
+    val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'phishing-email-validation-data.jsonlines')
+    vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
+    out_file = os.path.join(tmp_path, 'results.csv')
+    results_file_name = os.path.join(tmp_path, 'results.json')
 
-        temp_dir = self._mk_tmp_dir()
-        out_file = os.path.join(temp_dir, 'results.csv')
-        results_file_name = os.path.join(temp_dir, 'results.json')
+    pipe = LinearPipeline(config)
+    pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
+    pipe.add_stage(DeserializeStage(config))
+    pipe.add_stage(
+        PreprocessNLPStage(config,
+                           vocab_hash_file=vocab_file_name,
+                           truncation=True,
+                           do_lower_case=True,
+                           add_special_tokens=False))
+    pipe.add_stage(
+        TritonInferenceStage(config, model_name='phishing-bert-onnx', server_url='test:0000',
+                             force_convert_inputs=True))
+    pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
+    pipe.add_stage(AddClassificationsStage(config, labels=["pred"], threshold=0.7))
+    pipe.add_stage(
+        ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
+    pipe.add_stage(SerializeStage(config))
+    pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
-        pipe = LinearPipeline(config)
-        pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
-        pipe.add_stage(DeserializeStage(config))
-        pipe.add_stage(
-            PreprocessNLPStage(config,
-                               vocab_hash_file=vocab_file_name,
-                               truncation=True,
-                               do_lower_case=True,
-                               add_special_tokens=False))
-        pipe.add_stage(
-            TritonInferenceStage(config,
-                                 model_name='phishing-bert-onnx',
-                                 server_url='test:0000',
-                                 force_convert_inputs=True))
-        pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
-        pipe.add_stage(AddClassificationsStage(config, labels=["pred"], threshold=0.7))
-        pipe.add_stage(
-            ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
-        pipe.add_stage(SerializeStage(config))
-        pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
-
-        pipe.run()
-        results = self._calc_error_val(results_file_name)
-        self.assertEqual(results.diff_rows, 774)
-
-    @pytest.mark.slow
-    def test_email_cpp(self):
-        self._launch_camouflage_triton()
-
-        config = Config.get()
-        config.mode = PipelineModes.NLP
-        config.use_cpp = True
-        config.class_labels = ["score", "pred"]
-        config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
-        config.pipeline_batch_size = 1024
-        config.feature_length = FEATURE_LENGTH
-        config.edge_buffer_size = 128
-        config.num_threads = 1
-
-        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'phishing-email-validation-data.jsonlines')
-        vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
-
-        temp_dir = self._mk_tmp_dir()
-        out_file = os.path.join(temp_dir, 'results.csv')
-        results_file_name = os.path.join(temp_dir, 'results.json')
-
-        pipe = LinearPipeline(config)
-        pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
-        pipe.add_stage(DeserializeStage(config))
-        pipe.add_stage(
-            PreprocessNLPStage(config,
-                               vocab_hash_file=vocab_file_name,
-                               truncation=True,
-                               do_lower_case=True,
-                               add_special_tokens=False))
-        pipe.add_stage(
-            TritonInferenceStage(config,
-                                 model_name='phishing-bert-onnx',
-                                 server_url='localhost:8001',
-                                 force_convert_inputs=True))
-        pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
-        pipe.add_stage(AddClassificationsStage(config, labels=["pred"], threshold=0.7))
-        pipe.add_stage(
-            ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
-        pipe.add_stage(SerializeStage(config))
-        pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
-
-        pipe.run()
-        results = self._calc_error_val(results_file_name)
-        self.assertEqual(results.diff_rows, 230)
+    pipe.run()
+    results = calc_error_val(results_file_name)
+    assert results.diff_rows == 774
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.slow
+@pytest.mark.use_cpp
+@pytest.mark.usefixtures("launch_mock_triton")
+def test_email_cpp(config, tmp_path):
+    config.mode = PipelineModes.NLP
+    config.class_labels = ["score", "pred"]
+    config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
+    config.pipeline_batch_size = 1024
+    config.feature_length = FEATURE_LENGTH
+    config.edge_buffer_size = 128
+    config.num_threads = 1
+
+    val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'phishing-email-validation-data.jsonlines')
+    vocab_file_name = os.path.join(TEST_DIRS.data_dir, 'bert-base-uncased-hash.txt')
+    out_file = os.path.join(tmp_path, 'results.csv')
+    results_file_name = os.path.join(tmp_path, 'results.json')
+
+    pipe = LinearPipeline(config)
+    pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
+    pipe.add_stage(DeserializeStage(config))
+    pipe.add_stage(
+        PreprocessNLPStage(config,
+                           vocab_hash_file=vocab_file_name,
+                           truncation=True,
+                           do_lower_case=True,
+                           add_special_tokens=False))
+    pipe.add_stage(
+        TritonInferenceStage(config,
+                             model_name='phishing-bert-onnx',
+                             server_url='localhost:8001',
+                             force_convert_inputs=True))
+    pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
+    pipe.add_stage(AddClassificationsStage(config, labels=["pred"], threshold=0.7))
+    pipe.add_stage(
+        ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
+    pipe.add_stage(SerializeStage(config))
+    pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
+
+    pipe.run()
+    results = calc_error_val(results_file_name)
+    assert results.diff_rows == 230

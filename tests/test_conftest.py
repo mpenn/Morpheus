@@ -29,6 +29,7 @@ def test_explicit_fixture_only_cpp(config_only_cpp: Config):
 
 
 class TestNoMarkerClass:
+
     def test_no_marker(self, config: Config):
         pass
 
@@ -47,6 +48,7 @@ class TestNoMarkerClass:
 
 @pytest.mark.use_python
 class TestPythonMarkerClass:
+
     def test_no_marker(self, config: Config):
         assert not config.use_cpp
 
@@ -57,6 +59,7 @@ class TestPythonMarkerClass:
 
 @pytest.mark.use_cpp
 class TestCppMarkerClass:
+
     def test_no_marker(self, config: Config):
         assert config.use_cpp
 
