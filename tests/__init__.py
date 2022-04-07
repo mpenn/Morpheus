@@ -15,23 +15,20 @@
 
 import collections
 import json
-import logging
 import os
-import shutil
-import subprocess
-import tempfile
-import time
-import unittest
-
-import mlflow
-import numpy as np
-import requests
-from mlflow.tracking import fluent
 
 from morpheus.config import Config
+from morpheus.pipeline.file_types import FileTypes
+from morpheus.pipeline.inference import inference_stage
+from morpheus.pipeline.input.utils import read_file_to_df
+from morpheus.pipeline.messages import MultiMessage
+from morpheus.pipeline.messages import MultiResponseProbsMessage
+from morpheus.pipeline.messages import ResponseMemoryProbs
+from morpheus.pipeline.pipeline import SinglePortStage
 
 
 class TestDirectories(object):
+
     def __init__(self, cur_file=__file__) -> None:
         self.tests_dir = os.path.dirname(cur_file)
         self.morpheus_root = os.environ.get('MORPHEUS_ROOT', os.path.dirname(self.tests_dir))
@@ -43,141 +40,68 @@ class TestDirectories(object):
         self.expeced_data_dir = os.path.join(self.tests_dir, 'expected_data')
         self.mock_triton_servers_dir = os.path.join(self.tests_dir, 'mock_triton_server')
 
+
 TEST_DIRS = TestDirectories()
 
-class BaseMorpheusTest(unittest.TestCase):
-    Results = collections.namedtuple('Results', ['total_rows', 'diff_rows', 'error_pct'])
 
-    def setUp(self) -> None:
-        super().setUp()
+class ConvMsg(SinglePortStage):
+    """
+    Simple test stage to convert a MultiMessage to a MultiResponseProbsMessage
+    Basically a cheap replacement for running an inference stage.
 
-    def tearDown(self) -> None:
-        super().tearDown()
-        # reset the config singleton
-        Config.reset()
+    Setting `expected_data_file` to the path of a cav/json file will cause the probs array to be read from file.
+    Setting `expected_data_file` to `None` causes the probs array to be a copy of the incoming dataframe.
+    """
 
-    def _mk_tmp_dir(self):
-        """
-        Creates a temporary directory for use by tests, directory is deleted after the test is run unless the
-        MORPHEUS_NO_TEST_CLEANUP environment variable is defined.
-        """
-        tmp_dir = tempfile.mkdtemp(prefix='morpheus_test_')
-        if os.environ.get('MORPHEUS_NO_TEST_CLEANUP') is None:
-            self.addCleanup(shutil.rmtree, tmp_dir)
+    def __init__(self, c: Config, expected_data_file: str = None):
+        super().__init__(c)
+        self._expected_data_file = expected_data_file
+
+    @property
+    def name(self):
+        return "test"
+
+    def accepted_types(self):
+        return (MultiMessage, )
+
+    def _conv_message(self, m):
+        if self._expected_data_file is not None:
+            df = read_file_to_df(self._expected_data_file, FileTypes.CSV, df_type="cudf")
         else:
-            print("Preserving output in {}".format(tmp_dir))
+            df = m.meta.df
 
-        return tmp_dir
+        probs = df.values
+        memory = ResponseMemoryProbs(count=len(probs), probs=probs)
+        return MultiResponseProbsMessage(m.meta, 0, len(probs), memory, 0, len(probs))
 
-    def _save_env_vars(self):
-        """
-        Save the current environment variables and restore them at the end of the test, removing any newly added values
-        """
-        orig_vars = os.environ.copy()
-        self.addCleanup(self._restore_env_vars, orig_vars)
+    def _build_single(self, seg, input_stream):
+        stream = seg.make_node(self.unique_name, self._conv_message)
+        seg.make_edge(input_stream[0], stream)
 
-    def _restore_env_vars(self, orig_vars):
-        # Iterating over a copy of the keys as we will potentially be deleting keys in the loop
-        for key in list(os.environ.keys()):
-            orig_val = orig_vars.get(key)
-            if orig_val is not None:
-                os.environ[key] = orig_val
-            else:
-                del (os.environ[key])
+        return stream, MultiResponseProbsMessage
 
-    def _calc_error_val(self, results_file):
-        """
-        Based on the calc_error_val function in val-utils.sh
-        """
-        with open(results_file) as fh:
-            results = json.load(fh)
 
-        total_rows = results['total_rows']
-        diff_rows = results['diff_rows']
-        return self.Results(total_rows=total_rows, diff_rows=diff_rows, error_pct=(diff_rows / total_rows) * 100)
+class IW(inference_stage.InferenceWorker):
+    """
+    Concrete impl class of `InferenceWorker` for the purposes of testing
+    """
 
-    def _partition_array(self, array, chunk_size):
-        return np.split(array, range(chunk_size, len(array), chunk_size))
+    def calc_output_dims(self, _):
+        # Intentionally calling the abc empty method for coverage
+        super().calc_output_dims(_)
+        return (1, 2)
 
-    def _wait_for_camouflage(self, popen, root_dir, host="localhost", port=8000, timeout=5):
-        ready = False
-        elapsed_time = 0.0
-        sleep_time = 0.1
-        url = "http://{}:{}/ping".format(host, port)
-        while not ready and elapsed_time < timeout and popen.poll() is None:
-            try:
-                r = requests.get(url, timeout=1)
-                if r.status_code == 200:
-                    ready = r.json()['message'] == 'I am alive.'
-            except Exception as e:
-                pass
 
-            if not ready:
-                time.sleep(sleep_time)
-                elapsed_time += sleep_time
+Results = collections.namedtuple('Results', ['total_rows', 'diff_rows', 'error_pct'])
 
-        if popen.poll() is not None:
-            raise RuntimeError("camouflage server exited with status code={} details in: {}".\
-                format(popen.poll(), os.path.join(root_dir, 'camouflage.log')))
 
-        return ready
+def calc_error_val(results_file):
+    """
+    Based on the calc_error_val function in val-utils.sh
+    """
+    with open(results_file) as fh:
+        results = json.load(fh)
 
-    def _kill_proc(self, proc, timeout=1):
-        logging.info("killing pid {}".format(proc.pid))
-
-        elapsed_time = 0.0
-        sleep_time = 0.1
-        stopped = False
-
-        # It takes a little while to shutdown
-        while not stopped and elapsed_time < timeout:
-            proc.kill()
-            stopped = (proc.poll() is not None)
-            if not stopped:
-                time.sleep(sleep_time)
-                elapsed_time += sleep_time
-
-    def _launch_camouflage_triton(self, root_dir=TEST_DIRS.mock_triton_servers_dir, config="config.yml", timeout=5):
-        """
-        Launches a mock triton server using camouflage (https://testinggospels.github.io/camouflage/) with a package
-        rooted at `root_dir` and configured with `config`.
-
-        This function will wait for up to `timeout` seconds for camoflauge to startup
-
-        This function is a no-op if the `MORPHEUS_NO_LAUNCH_CAMOUFLAGE` environment variable is defined, which can
-        be useful during test development to run camouflage by hand.
-        """
-        if os.environ.get('MORPHEUS_NO_LAUNCH_CAMOUFLAGE') is None:
-            popen = subprocess.Popen(["camouflage", "--config", config],
-                                     cwd=root_dir,
-                                     stderr=subprocess.DEVNULL,
-                                     stdout=subprocess.DEVNULL)
-
-            logging.info("Launching camouflage in {} with pid: {}".format(root_dir, popen.pid))
-            self.addCleanup(self._kill_proc, popen)
-
-            if timeout > 0:
-                if not self._wait_for_camouflage(popen, root_dir, timeout=timeout):
-                    raise RuntimeError("Failed to launch camouflage server")
-
-    def _shutdown_mlflow(self):
-        """
-        Shutdown all of the active mlflow runs prior to the tmp_dir being deleted
-        """
-        num_runs = len(fluent._active_run_stack)
-        for _ in range(num_runs):
-            mlflow.end_run()
-
-    def _get_mlflow_uri(self, experiment_name="Morpheus"):
-        tmp_dir = self._mk_tmp_dir()
-        uri = "file://{}".format(tmp_dir)
-        mlflow.set_tracking_uri(uri)
-        mlflow.create_experiment(experiment_name)
-        experiment = mlflow.get_experiment_by_name(experiment_name)
-        with mlflow.start_run(run_name="Model Drift",
-                              tags={"morpheus.type": "drift"},
-                              experiment_id=experiment.experiment_id):
-            pass
-
-        self.addCleanup(self._shutdown_mlflow)
-        return uri
+    total_rows = results['total_rows']
+    diff_rows = results['diff_rows']
+    return Results(total_rows=total_rows, diff_rows=diff_rows, error_pct=(diff_rows / total_rows) * 100)

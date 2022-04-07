@@ -14,17 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
 
-from tests import BaseMorpheusTest
-
-
-class TestPackage(BaseMorpheusTest):
-    def test_version(self):
-        import morpheus
-        self.assertIsNotNone(morpheus.__version__)
-        self.assertNotEqual(morpheus.__version__, "")
-
-
-if __name__ == '__main__':
-    unittest.main()
+def test_version():
+    import morpheus
+    assert morpheus.__version__ is not None
+    assert morpheus.__version__ != ""

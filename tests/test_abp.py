@@ -15,13 +15,11 @@
 # limitations under the License.
 
 import os
-import unittest
 from unittest import mock
 
 import numpy as np
 import pytest
 
-from morpheus.config import Config
 from morpheus.config import PipelineModes
 from morpheus.pipeline import LinearPipeline
 from morpheus.pipeline.general_stages import AddClassificationsStage
@@ -34,125 +32,108 @@ from morpheus.pipeline.output.validation import ValidationStage
 from morpheus.pipeline.preprocessing import DeserializeStage
 from morpheus.pipeline.preprocessing import PreprocessFILStage
 from tests import TEST_DIRS
-from tests import BaseMorpheusTest
+from tests import calc_error_val
 
+# End-to-end test intended to imitate the ABP validation test
 FEATURE_LENGTH = 29
 MODEL_MAX_BATCH_SIZE = 1024
 
 
-class TestABP(BaseMorpheusTest):
-    """
-    End-to-end test intended to imitate the ABP validation test
-    """
-    @pytest.mark.slow
-    @mock.patch('tritonclient.grpc.InferenceServerClient')
-    def test_abp_no_cpp(self, mock_triton_client):
-        mock_metadata = {
-            "inputs": [{
-                'name': 'input__0', 'datatype': 'FP32', "shape": [-1, FEATURE_LENGTH]
-            }],
-            "outputs": [{
-                'name': 'output__0', 'datatype': 'FP32', 'shape': ['-1', '1']
-            }]
-        }
-        mock_model_config = {"config": {"max_batch_size": MODEL_MAX_BATCH_SIZE}}
+@pytest.mark.slow
+@pytest.mark.use_python
+@mock.patch('tritonclient.grpc.InferenceServerClient')
+def test_abp_no_cpp(mock_triton_client, config, tmp_path):
+    mock_metadata = {
+        "inputs": [{
+            'name': 'input__0', 'datatype': 'FP32', "shape": [-1, FEATURE_LENGTH]
+        }],
+        "outputs": [{
+            'name': 'output__0', 'datatype': 'FP32', 'shape': ['-1', '1']
+        }]
+    }
+    mock_model_config = {"config": {"max_batch_size": MODEL_MAX_BATCH_SIZE}}
 
-        mock_triton_client.return_value = mock_triton_client
-        mock_triton_client.is_server_live.return_value = True
-        mock_triton_client.is_server_ready.return_value = True
-        mock_triton_client.is_model_ready.return_value = True
-        mock_triton_client.get_model_metadata.return_value = mock_metadata
-        mock_triton_client.get_model_config.return_value = mock_model_config
+    mock_triton_client.return_value = mock_triton_client
+    mock_triton_client.is_server_live.return_value = True
+    mock_triton_client.is_server_ready.return_value = True
+    mock_triton_client.is_model_ready.return_value = True
+    mock_triton_client.get_model_metadata.return_value = mock_metadata
+    mock_triton_client.get_model_config.return_value = mock_model_config
 
-        data = np.loadtxt(os.path.join(TEST_DIRS.expeced_data_dir, 'triton_abp_inf_results.csv'), delimiter=',')
-        inf_results = self._partition_array(data, MODEL_MAX_BATCH_SIZE)
+    data = np.loadtxt(os.path.join(TEST_DIRS.expeced_data_dir, 'triton_abp_inf_results.csv'), delimiter=',')
+    inf_results = np.split(data, range(MODEL_MAX_BATCH_SIZE, len(data), MODEL_MAX_BATCH_SIZE))
 
-        mock_infer_result = mock.MagicMock()
-        mock_infer_result.as_numpy.side_effect = inf_results
+    mock_infer_result = mock.MagicMock()
+    mock_infer_result.as_numpy.side_effect = inf_results
 
-        def async_infer(callback=None, **k):
-            callback(mock_infer_result, None)
+    def async_infer(callback=None, **k):
+        callback(mock_infer_result, None)
 
-        mock_triton_client.async_infer.side_effect = async_infer
+    mock_triton_client.async_infer.side_effect = async_infer
 
-        config = Config.get()
-        config.mode = PipelineModes.FIL
-        config.use_cpp = False
-        config.class_labels = ["mining"]
-        config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
-        config.pipeline_batch_size = 1024
-        config.feature_length = FEATURE_LENGTH
-        config.edge_buffer_size = 128
-        config.num_threads = 1
+    config.mode = PipelineModes.FIL
+    config.class_labels = ["mining"]
+    config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
+    config.pipeline_batch_size = 1024
+    config.feature_length = FEATURE_LENGTH
+    config.edge_buffer_size = 128
+    config.num_threads = 1
 
-        temp_dir = self._mk_tmp_dir()
-        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
+    val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
+    out_file = os.path.join(tmp_path, 'results.csv')
+    results_file_name = os.path.join(tmp_path, 'results.json')
 
-        out_file = os.path.join(temp_dir, 'results.csv')
-        results_file_name = os.path.join(temp_dir, 'results.json')
+    pipe = LinearPipeline(config)
+    pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
+    pipe.add_stage(DeserializeStage(config))
+    pipe.add_stage(PreprocessFILStage(config))
+    pipe.add_stage(
+        TritonInferenceStage(config, model_name='abp-nvsmi-xgb', server_url='test:0000', force_convert_inputs=True))
+    pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
+    pipe.add_stage(AddClassificationsStage(config))
+    pipe.add_stage(
+        ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
+    pipe.add_stage(SerializeStage(config))
+    pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
-        pipe = LinearPipeline(config)
-        pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
-        pipe.add_stage(DeserializeStage(config))
-        pipe.add_stage(PreprocessFILStage(config))
-        pipe.add_stage(
-            TritonInferenceStage(config, model_name='abp-nvsmi-xgb', server_url='test:0000', force_convert_inputs=True))
-        pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
-        pipe.add_stage(AddClassificationsStage(config))
-        pipe.add_stage(
-            ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
-        pipe.add_stage(SerializeStage(config))
-        pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
-
-        pipe.run()
-        results = self._calc_error_val(results_file_name)
-        self.assertEqual(results.diff_rows, 0)
-
-    @pytest.mark.slow
-    def test_abp_cpp(self):
-        self._launch_camouflage_triton()
-
-        config = Config.get()
-        config.mode = PipelineModes.FIL
-        config.use_cpp = True
-        config.class_labels = ["mining"]
-        config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
-        config.pipeline_batch_size = 1024
-        config.feature_length = FEATURE_LENGTH
-        config.edge_buffer_size = 128
-        config.num_threads = 1
+    pipe.run()
+    results = calc_error_val(results_file_name)
+    assert results.diff_rows == 0
 
 
+@pytest.mark.slow
+@pytest.mark.use_cpp
+@pytest.mark.usefixtures("launch_mock_triton")
+def test_abp_cpp(config, tmp_path):
+    config.mode = PipelineModes.FIL
+    config.class_labels = ["mining"]
+    config.model_max_batch_size = MODEL_MAX_BATCH_SIZE
+    config.pipeline_batch_size = 1024
+    config.feature_length = FEATURE_LENGTH
+    config.edge_buffer_size = 128
+    config.num_threads = 1
 
-        temp_dir = self._mk_tmp_dir()
-        val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
+    val_file_name = os.path.join(TEST_DIRS.validation_data_dir, 'abp-validation-data.jsonlines')
+    out_file = os.path.join(tmp_path, 'results.csv')
+    results_file_name = os.path.join(tmp_path, 'results.json')
 
-        out_file = os.path.join(temp_dir, 'results.csv')
-        results_file_name = os.path.join(temp_dir, 'results.json')
+    pipe = LinearPipeline(config)
+    pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
+    pipe.add_stage(DeserializeStage(config))
+    pipe.add_stage(PreprocessFILStage(config))
 
-        pipe = LinearPipeline(config)
-        pipe.set_source(FileSourceStage(config, filename=val_file_name, iterative=False))
-        pipe.add_stage(DeserializeStage(config))
-        pipe.add_stage(PreprocessFILStage(config))
+    # We are feeding TritonInferenceStage the port to the grpc server because that is what the validation tests do
+    # but the code under-the-hood replaces this with the port number of the http server
+    pipe.add_stage(
+        TritonInferenceStage(config, model_name='abp-nvsmi-xgb', server_url='localhost:8001',
+                             force_convert_inputs=True))
+    pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
+    pipe.add_stage(AddClassificationsStage(config))
+    pipe.add_stage(
+        ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
+    pipe.add_stage(SerializeStage(config))
+    pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
 
-        # We are feeding TritonInferenceStage the port to the grpc server because that is what the validation tests do
-        # but the code under-the-hood replaces this with the port number of the http server
-        pipe.add_stage(
-            TritonInferenceStage(config,
-                                 model_name='abp-nvsmi-xgb',
-                                 server_url='localhost:8001',
-                                 force_convert_inputs=True))
-        pipe.add_stage(MonitorStage(config, description="Inference Rate", smoothing=0.001, unit="inf"))
-        pipe.add_stage(AddClassificationsStage(config))
-        pipe.add_stage(
-            ValidationStage(config, val_file_name=val_file_name, results_file_name=results_file_name, rel_tol=0.05))
-        pipe.add_stage(SerializeStage(config))
-        pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
-
-        pipe.run()
-        results = self._calc_error_val(results_file_name)
-        self.assertEqual(results.diff_rows, 0)
-
-
-if __name__ == '__main__':
-    unittest.main()
+    pipe.run()
+    results = calc_error_val(results_file_name)
+    assert results.diff_rows == 0

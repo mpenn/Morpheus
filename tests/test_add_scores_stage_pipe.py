@@ -15,121 +15,45 @@
 # limitations under the License.
 
 import os
-import unittest
 
-import cupy as cp
 import numpy as np
 import pandas as pd
-import pytest
 
-from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.pipeline.general_stages import AddScoresStage
 from morpheus.pipeline.input.from_file import FileSourceStage
-from morpheus.pipeline.messages import MultiMessage
-from morpheus.pipeline.messages import MultiResponseProbsMessage
-from morpheus.pipeline.messages import ResponseMemoryProbs
-from morpheus.pipeline.pipeline import SinglePortStage
+from morpheus.pipeline.output.serialize import SerializeStage
+from morpheus.pipeline.output.to_file import WriteToFileStage
 from morpheus.pipeline.preprocessing import DeserializeStage
 from tests import TEST_DIRS
-from tests import BaseMorpheusTest
+from tests import ConvMsg
 
 
-class ConvMsg(SinglePortStage):
-    def __init__(self, c: Config):
-        super().__init__(c)
+def test_add_scores_stage_pipe(config, tmp_path):
+    config.class_labels = ['frogs', 'lizards', 'toads', 'turtles']
 
-    @property
-    def name(self):
-        return "test"
+    input_file = os.path.join(TEST_DIRS.expeced_data_dir, "filter_probs.csv")
+    out_file = os.path.join(tmp_path, 'results.csv')
 
-    def accepted_types(self):
-        return (MultiMessage, )
+    pipe = LinearPipeline(config)
+    pipe.set_source(FileSourceStage(config, filename=input_file, iterative=False))
+    pipe.add_stage(DeserializeStage(config))
+    pipe.add_stage(ConvMsg(config))
+    pipe.add_stage(AddScoresStage(config))
+    pipe.add_stage(SerializeStage(config, include=["^{}$".format(c) for c in config.class_labels]))
+    pipe.add_stage(WriteToFileStage(config, filename=out_file, overwrite=False))
+    pipe.run()
 
-    def _conv_message(self, m):
-        df = m.meta.df
-        probs = df.values
-        memory = ResponseMemoryProbs(count=len(probs), probs=probs)
-        return MultiResponseProbsMessage(m.meta, 0, len(probs), memory, 0, len(probs))
+    assert os.path.exists(out_file)
 
-    def _build_single(self, seg, input_stream):
-        stream = seg.make_node(self.unique_name, self._conv_message)
-        seg.make_edge(input_stream[0], stream)
+    expected = np.loadtxt(input_file, delimiter=",", skiprows=1)
 
-        return stream, MultiResponseProbsMessage
+    # The output data will contain an additional id column that we will need to slice off
+    # also somehow 0.7 ends up being 0.7000000000000001
+    output_data = pd.read_csv(out_file)
+    idx = output_data.columns.intersection(config.class_labels)
+    assert idx.to_list() == config.class_labels
 
+    output_np = np.around(output_data[idx].to_numpy(), 2)
 
-class WriteMetaToFileStage(SinglePortStage):
-    def __init__(self, c, filename):
-        super().__init__(c)
-
-        self._output_file = filename
-        self._columns = c.class_labels
-
-    @property
-    def name(self):
-        return "meta-to-file"
-
-    def accepted_types(self):
-        return (MultiMessage, )
-
-    def _write_meta_to_file(self, x):
-        df = x.get_meta()
-        with open(self._output_file, "a") as f:
-            idx = df.columns.intersection(self._columns)
-            df[idx].to_csv(f)
-
-        return x
-
-    def _build_single(self, seg, input_stream):
-        stream = input_stream[0]
-        to_file = seg.make_node(self.unique_name, self._write_meta_to_file)
-        seg.make_edge(stream, to_file)
-        stream = to_file
-
-        return input_stream
-
-class TestAddScoresStagePipe(BaseMorpheusTest):
-    def _test_pipe(self, use_cpp):
-        config = Config.get()
-        config.class_labels = ['frogs', 'lizards', 'toads', 'turtles']
-        config.use_cpp = use_cpp
-
-        input_file = os.path.join(TEST_DIRS.expeced_data_dir, "filter_probs.csv")
-
-        temp_dir = self._mk_tmp_dir()
-        out_file = os.path.join(temp_dir, 'results.csv')
-
-
-        pipe = LinearPipeline(config)
-        pipe.set_source(FileSourceStage(config, filename=input_file, iterative=False))
-        pipe.add_stage(DeserializeStage(config))
-        pipe.add_stage(ConvMsg(config))
-        pipe.add_stage(AddScoresStage(config))
-        pipe.add_stage(WriteMetaToFileStage(config, filename=out_file))
-        pipe.run()
-
-        self.assertTrue(os.path.exists(out_file))
-
-        expected = np.loadtxt(input_file, delimiter=",", skiprows=1)
-
-        # The output data will contain an additional id column that we will need to slice off
-        # also somehow 0.7 ends up being 0.7000000000000001
-        output_data = pd.read_csv(out_file)
-        idx = output_data.columns.intersection(config.class_labels)
-        self.assertEqual(idx.to_list(), config.class_labels)
-
-        output_np = np.around(output_data[idx].to_numpy(), 2)
-
-        self.assertEqual(output_np.tolist(), expected.tolist())
-
-    @pytest.mark.slow
-    def test_pipe_no_cpp(self):
-        self._test_pipe(False)
-
-    @pytest.mark.slow
-    def test_pipe_cpp(self):
-        self._test_pipe(True)
-
-if __name__ == '__main__':
-    unittest.main()
+    assert output_np.tolist() == expected.tolist()

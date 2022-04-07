@@ -16,139 +16,141 @@
 
 import json
 import os
-import unittest
 from unittest import mock
 
-from morpheus import config
-from tests import BaseMorpheusTest
+import pytest
+
+import morpheus
+
+# Using morpheus.config to distinguish between the config package and the pytest fixture of the same name
 
 
-class TestConfig(BaseMorpheusTest):
-    @mock.patch('docker.from_env')
-    def test_auto_determine_bootstrap(self, mock_docker_from_env):
-        mock_net = mock.MagicMock()
-        mock_net.get.return_value = mock_net
-        mock_net.attrs = {'IPAM': {'Config': [{'Gateway': 'test_bridge_ip'}]}}
+@mock.patch('docker.from_env')
+def test_auto_determine_bootstrap(mock_docker_from_env):
+    mock_net = mock.MagicMock()
+    mock_net.get.return_value = mock_net
+    mock_net.attrs = {'IPAM': {'Config': [{'Gateway': 'test_bridge_ip'}]}}
 
-        # create mock containers
-        mc1 = mock.MagicMock()
-        mc1.ports = {'9092/tcp': [{'HostIp': 'test_host1', 'HostPort': '47'}]}
+    # create mock containers
+    mc1 = mock.MagicMock()
+    mc1.ports = {'9092/tcp': [{'HostIp': 'test_host1', 'HostPort': '47'}]}
 
-        mc2 = mock.MagicMock()
-        mc2.ports = {}
+    mc2 = mock.MagicMock()
+    mc2.ports = {}
 
-        mc3 = mock.MagicMock()
-        mc3.ports = {'9092/tcp': [{'HostIp': 'test_host2', 'HostPort': '42'}]}
+    mc3 = mock.MagicMock()
+    mc3.ports = {'9092/tcp': [{'HostIp': 'test_host2', 'HostPort': '42'}]}
 
-        mock_net.containers = [mc1, mc2, mc3]
+    mock_net.containers = [mc1, mc2, mc3]
 
-        mock_docker_client = mock.MagicMock()
-        mock_docker_client.networks = mock_net
-        mock_docker_from_env.return_value = mock_docker_client
+    mock_docker_client = mock.MagicMock()
+    mock_docker_client.networks = mock_net
+    mock_docker_from_env.return_value = mock_docker_client
 
-        bootstrap_servers = config.auto_determine_bootstrap()
-        self.assertEqual(bootstrap_servers, "test_bridge_ip:47,test_bridge_ip:42")
-
-    def test_config_base(self):
-        c = config.ConfigBase()
-
-        # Really just test to make sure we are still here
-        self.assertIsInstance(c, config.ConfigBase)
-
-    def test_config_onnx_to_trt(self):
-        c = config.ConfigOnnxToTRT(input_model='frogs',
-                                   output_model='toads',
-                                   batches=[(1, 2), (3, 4)],
-                                   seq_length=100,
-                                   max_workspace_size=512)
-
-        self.assertIsInstance(c, config.ConfigBase)
-        self.assertIsInstance(c, config.ConfigOnnxToTRT)
-        self.assertEqual(c.input_model, 'frogs')
-        self.assertEqual(c.output_model, 'toads')
-        self.assertEqual(c.batches, [(1, 2), (3, 4)])
-        self.assertEqual(c.seq_length, 100)
-        self.assertEqual(c.max_workspace_size, 512)
-
-    def test_auto_encoder(self):
-        c = config.ConfigAutoEncoder(feature_columns=['a', 'b', 'c', 'def'],
-                                     userid_column_name='def',
-                                     userid_filter='testuser')
-
-        self.assertIsInstance(c, config.ConfigBase)
-        self.assertIsInstance(c, config.ConfigAutoEncoder)
-        self.assertEqual(c.feature_columns, ['a', 'b', 'c', 'def'])
-        self.assertEqual(c.userid_column_name, 'def')
-        self.assertEqual(c.userid_filter, 'testuser')
-
-    def test_pipeline_modes(self):
-        expected = {"OTHER", "NLP", "FIL", "AE"}
-        entries = set(pm.name for pm in config.PipelineModes)
-        self.assertTrue(entries.issuperset(expected))
-
-    def test_config(self):
-        self.assertRaises(Exception, config.Config)
-
-        c = config.Config.default()
-        self.assertIsInstance(c, config.ConfigBase)
-        self.assertIsInstance(c, config.Config)
-
-        self.assertTrue(hasattr(c, 'debug'))
-        self.assertTrue(hasattr(c, 'log_level'))
-        self.assertTrue(hasattr(c, 'log_config_file'))
-        self.assertTrue(hasattr(c, 'mode'))
-        self.assertTrue(hasattr(c, 'feature_length'))
-        self.assertTrue(hasattr(c, 'pipeline_batch_size'))
-        self.assertTrue(hasattr(c, 'num_threads'))
-        self.assertTrue(hasattr(c, 'model_max_batch_size'))
-        self.assertTrue(hasattr(c, 'edge_buffer_size'))
-        self.assertTrue(hasattr(c, 'class_labels'))
-        self.assertTrue(hasattr(c, 'use_cpp'))
-        self.assertTrue(hasattr(c, 'ae'))
-
-    def test_config_default(self):
-        c1 = config.Config.default()
-        c2 = config.Config.default()
-
-        self.assertIsInstance(c1, config.ConfigBase)
-        self.assertIsInstance(c1, config.Config)
-
-        self.assertIs(c1, c2)
-        self.assertIs(c1, config.Config.default())
-        self.assertIsNot(c1, config.Config.get())
-
-    def test_config_get(self):
-        c1 = config.Config.get()
-        c2 = config.Config.get()
-
-        self.assertIsInstance(c1, config.ConfigBase)
-        self.assertIsInstance(c1, config.Config)
-
-        self.assertIs(c1, c2)
-        self.assertIs(c1, config.Config.get())
-        self.assertIsNot(c1, config.Config.default())
-
-    def test_config_load(self):
-        c = config.Config.get()
-        self.assertRaises(NotImplementedError, c.load, 'ignored')
-
-    def test_config_save(self):
-        temp_dir = self._mk_tmp_dir()
-        filename = os.path.join(temp_dir, 'config.json')
-
-        c = config.Config.get()
-        c.save(filename)
-
-        self.assertTrue(os.path.exists(filename))
-        with open(filename) as fh:
-            self.assertIsInstance(json.load(fh), dict)
-
-    def test_to_string(self):
-        c = config.Config.get()
-        s = c.to_string()
-        self.assertIsInstance(s, str)
-        self.assertIsInstance(json.loads(s), dict)
+    bootstrap_servers = morpheus.config.auto_determine_bootstrap()
+    assert bootstrap_servers == "test_bridge_ip:47,test_bridge_ip:42"
 
 
-if __name__ == '__main__':
-    unittest.main()
+def test_config_base(config):
+    assert isinstance(config, morpheus.config.ConfigBase)
+
+
+def test_config_onnx_to_trt():
+    c = morpheus.config.ConfigOnnxToTRT(input_model='frogs',
+                                        output_model='toads',
+                                        batches=[(1, 2), (3, 4)],
+                                        seq_length=100,
+                                        max_workspace_size=512)
+
+    assert isinstance(c, morpheus.config.ConfigBase)
+    assert isinstance(c, morpheus.config.ConfigOnnxToTRT)
+    assert c.input_model == 'frogs'
+    assert c.output_model == 'toads'
+    assert c.batches == [(1, 2), (3, 4)]
+    assert c.seq_length == 100
+    assert c.max_workspace_size == 512
+
+
+def test_auto_encoder():
+    c = morpheus.config.ConfigAutoEncoder(feature_columns=['a', 'b', 'c', 'def'],
+                                          userid_column_name='def',
+                                          userid_filter='testuser')
+
+    assert isinstance(c, morpheus.config.ConfigBase)
+    assert isinstance(c, morpheus.config.ConfigAutoEncoder)
+    assert c.feature_columns == ['a', 'b', 'c', 'def']
+    assert c.userid_column_name == 'def'
+    assert c.userid_filter == 'testuser'
+
+
+def test_pipeline_modes():
+    expected = {"OTHER", "NLP", "FIL", "AE"}
+    entries = set(pm.name for pm in morpheus.config.PipelineModes)
+    assert entries.issuperset(expected)
+
+
+def test_config():
+    pytest.raises(Exception, morpheus.config.Config)
+
+    c = morpheus.config.Config.default()
+    assert isinstance(c, morpheus.config.ConfigBase)
+    assert isinstance(c, morpheus.config.Config)
+
+    assert hasattr(c, 'debug')
+    assert hasattr(c, 'log_level')
+    assert hasattr(c, 'log_config_file')
+    assert hasattr(c, 'mode')
+    assert hasattr(c, 'feature_length')
+    assert hasattr(c, 'pipeline_batch_size')
+    assert hasattr(c, 'num_threads')
+    assert hasattr(c, 'model_max_batch_size')
+    assert hasattr(c, 'edge_buffer_size')
+    assert hasattr(c, 'class_labels')
+    assert hasattr(c, 'use_cpp')
+    assert hasattr(c, 'ae')
+
+
+def test_config_default():
+    c1 = morpheus.config.Config.default()
+    c2 = morpheus.config.Config.default()
+
+    assert isinstance(c1, morpheus.config.ConfigBase)
+    assert isinstance(c1, morpheus.config.Config)
+
+    assert c1 is c2
+    assert c1 is morpheus.config.Config.default()
+    assert c1 is not morpheus.config.Config.get()
+
+
+def test_config_get():
+    c1 = morpheus.config.Config.get()
+    c2 = morpheus.config.Config.get()
+
+    assert isinstance(c1, morpheus.config.ConfigBase)
+    assert isinstance(c1, morpheus.config.Config)
+
+    assert c1 is c2
+    assert c1 is morpheus.config.Config.get()
+    assert c1 is not morpheus.config.Config.default()
+
+
+def test_config_load():
+    c = morpheus.config.Config.get()
+    pytest.raises(NotImplementedError, c.load, 'ignored')
+
+
+def test_config_save(tmp_path):
+    filename = os.path.join(tmp_path, 'config.json')
+
+    c = morpheus.config.Config.get()
+    c.save(filename)
+
+    assert os.path.exists(filename)
+    with open(filename) as fh:
+        assert isinstance(json.load(fh), dict)
+
+
+def test_to_string(config):
+    s = config.to_string()
+    assert isinstance(s, str)
+    assert isinstance(json.loads(s), dict)

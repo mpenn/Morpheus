@@ -49,7 +49,7 @@ def test_serialize_pipe(tmp_path, config, output_type):
         # The output data will contain an additional id column that we will need to slice off
         output_data = np.loadtxt(out_file, delimiter=",", skiprows=1)
         output_data = output_data[:, 1:]
-    else: # assume json
+    else:  # assume json
         df = read_file_to_df(out_file, file_type=FileTypes.Auto)
         output_data = df.values
 

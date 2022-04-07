@@ -14,106 +14,95 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
 from unittest import mock
 
 import cupy as cp
 import pytest
 
-from morpheus.config import Config
 from morpheus.pipeline.general_stages import FilterDetectionsStage
-from tests import BaseMorpheusTest
 
 
-@pytest.mark.usefixtures("config_no_cpp")
-class TestFilterDetectionsStage(BaseMorpheusTest):
-    def test_constructor(self):
-        config = Config.get()
+def test_constructor(config):
+    fds = FilterDetectionsStage(config)
+    assert fds.name == "filter"
 
-        fds = FilterDetectionsStage(config)
-        self.assertEqual(fds.name, "filter")
+    # Just ensure that we get a valid non-empty tuple
+    accepted_types = fds.accepted_types()
+    assert isinstance(accepted_types, tuple)
+    assert len(accepted_types) > 0
 
-        # Just ensure that we get a valid non-empty tuple
-        accepted_types = fds.accepted_types()
-        self.assertIsInstance(accepted_types, tuple)
-        self.assertGreater(len(accepted_types), 0)
-
-        fds = FilterDetectionsStage(config, threshold=0.2)
-        self.assertEqual(fds._threshold, 0.2)
-
-    def test_filter(self):
-        config = Config.get()
-        config.use_cpp = False # C++ doesn't like our mocked messages
-        fds = FilterDetectionsStage(config, threshold=0.5)
-
-        mock_message = mock.MagicMock()
-        mock_message.mess_offset = 8
-        mock_message.probs = cp.array([[0.1, 0.5, 0.3], [0.2, 0.3, 0.4]])
-
-        # All values are below the threshold
-        self.assertEqual(fds.filter(mock_message), [])
-
-        # Only one row has a value above the threshold
-        mock_message.probs = cp.array([
-            [0.2, 0.4, 0.3],
-            [0.1, 0.5, 0.8],
-            [0.2, 0.4, 0.3],
-        ])
-
-        output_list = fds.filter(mock_message)
-        self.assertEqual(len(output_list), 1)
-        self.assertEqual(output_list[0].offset, 1)
-        self.assertEqual(output_list[0].mess_offset, 9)
-        self.assertEqual(output_list[0].mess_count, 1)
-
-        # Two adjacent rows have a value above the threashold
-        mock_message.probs = cp.array([
-            [0.2, 0.4, 0.3],
-            [0.1, 0.2, 0.3],
-            [0.1, 0.5, 0.8],
-            [0.1, 0.9, 0.2],
-            [0.2, 0.4, 0.3],
-        ])
-
-        output_list = fds.filter(mock_message)
-        self.assertEqual(len(output_list), 1)
-        self.assertEqual(output_list[0].offset, 2)
-        self.assertEqual(output_list[0].mess_offset, 10)
-        self.assertEqual(output_list[0].mess_count, 2)
-
-        # Two non-adjacent rows have a value above the threashold
-        mock_message.probs = cp.array([
-            [0.2, 0.4, 0.3],
-            [0.1, 0.2, 0.3],
-            [0.1, 0.5, 0.8],
-            [0.4, 0.3, 0.2],
-            [0.1, 0.9, 0.2],
-            [0.2, 0.4, 0.3],
-        ])
-        output_list = fds.filter(mock_message)
-        self.assertEqual(len(output_list), 2)
-        self.assertEqual(output_list[0].offset, 2)
-        self.assertEqual(output_list[0].mess_offset, 10)
-        self.assertEqual(output_list[0].mess_count, 1)
-
-        self.assertEqual(output_list[1].offset, 4)
-        self.assertEqual(output_list[1].mess_offset, 12)
-        self.assertEqual(output_list[1].mess_count, 1)
-
-    def test_build_single(self):
-        mock_stream = mock.MagicMock()
-        mock_segment = mock.MagicMock()
-        mock_segment.make_node.return_value = mock_stream
-        mock_input = mock.MagicMock()
-
-        config = Config.get()
-        config.use_cpp = False # C++ doesn't like our mocked messages
-        fds = FilterDetectionsStage(config)
-        fds._build_single(mock_segment, mock_input)
-
-        mock_segment.make_node_full.assert_called_once()
-        mock_segment.make_edge.assert_called_once()
+    fds = FilterDetectionsStage(config, threshold=0.2)
+    assert fds._threshold == 0.2
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.use_python
+def test_filter(config):
+    fds = FilterDetectionsStage(config, threshold=0.5)
+
+    mock_message = mock.MagicMock()
+    mock_message.mess_offset = 8
+    mock_message.probs = cp.array([[0.1, 0.5, 0.3], [0.2, 0.3, 0.4]])
+
+    # All values are below the threshold
+    assert fds.filter(mock_message) == []
+
+    # Only one row has a value above the threshold
+    mock_message.probs = cp.array([
+        [0.2, 0.4, 0.3],
+        [0.1, 0.5, 0.8],
+        [0.2, 0.4, 0.3],
+    ])
+
+    output_list = fds.filter(mock_message)
+    assert len(output_list) == 1
+    assert output_list[0].offset == 1
+    assert output_list[0].mess_offset == 9
+    assert output_list[0].mess_count == 1
+
+    # Two adjacent rows have a value above the threashold
+    mock_message.probs = cp.array([
+        [0.2, 0.4, 0.3],
+        [0.1, 0.2, 0.3],
+        [0.1, 0.5, 0.8],
+        [0.1, 0.9, 0.2],
+        [0.2, 0.4, 0.3],
+    ])
+
+    output_list = fds.filter(mock_message)
+    assert len(output_list) == 1
+    assert output_list[0].offset == 2
+    assert output_list[0].mess_offset == 10
+    assert output_list[0].mess_count == 2
+
+    # Two non-adjacent rows have a value above the threashold
+    mock_message.probs = cp.array([
+        [0.2, 0.4, 0.3],
+        [0.1, 0.2, 0.3],
+        [0.1, 0.5, 0.8],
+        [0.4, 0.3, 0.2],
+        [0.1, 0.9, 0.2],
+        [0.2, 0.4, 0.3],
+    ])
+    output_list = fds.filter(mock_message)
+    assert len(output_list) == 2
+    assert output_list[0].offset == 2
+    assert output_list[0].mess_offset == 10
+    assert output_list[0].mess_count == 1
+
+    assert output_list[1].offset == 4
+    assert output_list[1].mess_offset == 12
+    assert output_list[1].mess_count == 1
+
+
+@pytest.mark.use_python
+def test_build_single(config):
+    mock_stream = mock.MagicMock()
+    mock_segment = mock.MagicMock()
+    mock_segment.make_node.return_value = mock_stream
+    mock_input = mock.MagicMock()
+
+    fds = FilterDetectionsStage(config)
+    fds._build_single(mock_segment, mock_input)
+
+    mock_segment.make_node_full.assert_called_once()
+    mock_segment.make_edge.assert_called_once()
