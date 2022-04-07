@@ -19,6 +19,9 @@
 
 #include <cudf/io/csv.hpp>
 #include <cudf/io/data_sink.hpp>
+
+#include <rmm/mr/device/per_device_resource.hpp>
+
 #include <ostream>
 #include <sstream>
 
@@ -102,7 +105,7 @@ namespace morpheus {
             options_builder       = options_builder.metadata(&metadata);
         }
 
-        cudf::io::write_csv(options_builder.build());
+        cudf::io::write_csv(options_builder.build(), rmm::mr::get_current_device_resource());
     }
 
     std::string df_to_json(const TableInfo& tbl)

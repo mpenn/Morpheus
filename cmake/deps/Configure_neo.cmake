@@ -39,6 +39,7 @@ function(find_and_configure_neo version branch)
                       "NEO_USE_CCACHE ${MORPHEUS_USE_CCACHE}"
                       "NEO_USE_CLANG_TIDY ${MORPHEUS_USE_CLANG_TIDY}"
                       "NEO_PYTHON_INPLACE_BUILD ${MORPHEUS_PYTHON_INPLACE_BUILD}"
+                      "RMM_VERSION=21.10"
   )
 
   # Now ensure its installed
