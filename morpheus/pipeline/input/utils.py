@@ -84,11 +84,9 @@ def read_file_to_df(file_name: str,
         mode = determine_file_type(file_name)
 
     # Special args for JSON
+    kwargs = {}
     if (mode == FileTypes.JSON):
-        kwargs = {"lines": True}
-
-    elif (mode == FileTypes.CSV):
-        kwargs = {}
+        kwargs["lines"] = True
 
     # Update with any args set by the user. User values overwrite defaults
     kwargs.update(parser_kwargs)

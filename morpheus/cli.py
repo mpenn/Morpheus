@@ -21,6 +21,7 @@ import click
 import click_completion
 from click.globals import get_current_context
 
+from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
 from morpheus.config import ConfigAutoEncoder
 from morpheus.config import ConfigBase
@@ -39,6 +40,9 @@ click_completion.init()
 # for each function
 
 DEFAULT_CONFIG = Config.default()
+
+FILE_TYPE_MEMBERS = {name.lower(): t for (name, t) in FileTypes.__members__.items()}
+FILE_TYPE_NAMES = sorted(FILE_TYPE_MEMBERS.keys())
 
 command_kwargs = {
     "context_settings": dict(show_default=True, ),
@@ -508,7 +512,7 @@ def post_pipeline(ctx: click.Context, *args, **kwargs):
                     "Iterative mode is good for interleaving source stages. Non-iterative is better for dask "
                     "(uploads entire dataset in one call)"))
 @click.option('--file-type',
-              type=click.Choice(['auto', 'json', 'csv'], case_sensitive=False),
+              type=click.Choice(FILE_TYPE_NAMES, case_sensitive=False),
               default="auto",
               help=("Indicates what type of file to read. "
                     "Specifying 'auto' will determine the file type from the extension."))
@@ -529,12 +533,10 @@ def from_file(ctx: click.Context, **kwargs):
     p: LinearPipeline = ctx.ensure_object(LinearPipeline)
 
     from morpheus.pipeline.input.from_file import FileSourceStage
-    from morpheus.pipeline.input.from_file import FileTypes
 
-    if ("file_type" in kwargs):
-        kwargs["file_type"] = getattr(FileTypes, kwargs["file_type"].title())
+    file_type = FILE_TYPE_MEMBERS[kwargs.pop("file_type").lower()]
 
-    stage = FileSourceStage(Config.get(), **kwargs)
+    stage = FileSourceStage(Config.get(), file_type=file_type, **kwargs)
 
     p.set_source(stage)
 
@@ -597,7 +599,7 @@ def from_kafka(ctx: click.Context, **kwargs):
               help=("Max number of files to read. Useful for debugging to limit startup time. "
                     "Default value of -1 is unlimited."))
 @click.option('--file-type',
-              type=click.Choice(['auto', 'json', 'csv'], case_sensitive=False),
+              type=click.Choice(FILE_TYPE_NAMES, case_sensitive=False),
               default="auto",
               help=("Indicates what type of file to read. "
                     "Specifying 'auto' will determine the file type from the extension."))
@@ -614,7 +616,9 @@ def from_cloudtrail(ctx: click.Context, **kwargs):
 
     from morpheus.pipeline.input.from_cloudtrail import CloudTrailSourceStage
 
-    stage = CloudTrailSourceStage(Config.get(), **kwargs)
+    file_type = FILE_TYPE_MEMBERS[kwargs.pop("file_type").lower()]
+
+    stage = CloudTrailSourceStage(Config.get(), file_type=file_type, **kwargs)
 
     p.set_source(stage)
 
