@@ -37,7 +37,7 @@ from github_link import make_linkcode_resolve  # noqa
 # -- Project information -----------------------------------------------------
 
 project = 'morpheus'
-copyright = '2021, NVIDIA'
+copyright = '2022, NVIDIA'
 author = 'NVIDIA'
 
 # The short X.Y version
@@ -86,8 +86,8 @@ autodoc_typehints = "description"  # Sphinx-native method. Not as good as sphinx
 autodoc_typehints_description_target = "documented"  # Dont double up on type hints
 add_module_names = False  # Remove namespaces from class/method signatures
 autodoc_mock_imports = [
-    "streamz",
     "morpheus.cli",  # Dont document the CLI in Sphinx
+    "tqdm",
 ]
 
 # Config numpydoc
