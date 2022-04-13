@@ -26,6 +26,7 @@ from morpheus.config import Config
 from morpheus.config import ConfigAutoEncoder
 from morpheus.config import ConfigBase
 from morpheus.config import ConfigOnnxToTRT
+from morpheus.config import CppConfig
 from morpheus.config import PipelineModes
 from morpheus.config import auto_determine_bootstrap
 from morpheus.utils.logging import configure_logging
@@ -39,7 +40,7 @@ click_completion.init()
 # should be locally imported. For example, `morpheus.Pipeline` takes a long time to import and must be locally imported
 # for each function
 
-DEFAULT_CONFIG = Config.default()
+DEFAULT_CONFIG = Config()
 
 FILE_TYPE_MEMBERS = {name.lower(): t for (name, t) in FileTypes.__members__.items()}
 FILE_TYPE_NAMES = sorted(FILE_TYPE_MEMBERS.keys())
@@ -58,6 +59,7 @@ logger = logging.getLogger("morpheus.cli")
 
 
 class AliasedGroup(click.Group):
+
     def get_command(self, ctx, cmd_name):
         try:
             cmd_name = ALIASES[cmd_name]
@@ -74,6 +76,7 @@ def without_empty_args(f):
     """
     Removes keyword arguments that have a None value
     """
+
     def new_func(*args, **kwargs):
         kwargs = _without_empty_args(kwargs)
         return f(get_current_context(), *args, **kwargs)
@@ -85,6 +88,7 @@ def show_defaults(f):
     """
     Ensures the click.Context has `show_defaults` set to True. (Seems like a bug currently)
     """
+
     def new_func(*args, **kwargs):
         ctx: click.Context = get_current_context()
         ctx.show_default = True
@@ -93,9 +97,7 @@ def show_defaults(f):
     return update_wrapper(new_func, f)
 
 
-def _apply_to_config(config: ConfigBase = None, **kwargs):
-    config = Config.get() if config is None else config
-
+def _apply_to_config(config: ConfigBase, **kwargs):
     for param in kwargs:
         if hasattr(config, param):
             setattr(config, param, kwargs[param])
@@ -105,13 +107,15 @@ def _apply_to_config(config: ConfigBase = None, **kwargs):
     return config
 
 
-def prepare_command(config: ConfigBase = None):
+def prepare_command(parse_config: bool = False):
+
     def inner_prepare_command(f):
         """Preparse command for use. Combines @without_empty_args, @show_defaults and @click.pass_context
 
         Args:
             f ([type]): [description]
         """
+
         def new_func(*args, **kwargs):
             ctx: click.Context = get_current_context()
             ctx.show_default = True
@@ -119,7 +123,9 @@ def prepare_command(config: ConfigBase = None):
             kwargs = _without_empty_args(kwargs)
 
             # Apply the config if desired
-            if (config):
+            if parse_config:
+                config = get_config_from_ctx(ctx)
+
                 _apply_to_config(config, **kwargs)
 
             return f(ctx, *args, **kwargs)
@@ -127,6 +133,23 @@ def prepare_command(config: ConfigBase = None):
         return update_wrapper(new_func, f)
 
     return inner_prepare_command
+
+
+def get_config_from_ctx(ctx) -> Config:
+    ctx_dict = ctx.ensure_object(dict)
+
+    if "config" not in ctx_dict:
+        ctx_dict["config"] = Config()
+
+    return ctx_dict["config"]
+
+
+def get_pipeline_from_ctx(ctx):
+    ctx_dict = ctx.ensure_object(dict)
+
+    assert "pipeline" in ctx_dict, "Inconsistent configuration. Pipeline accessed before created"
+
+    return ctx_dict["pipeline"]
 
 
 log_levels = list(logging._nameToLevel.keys())
@@ -155,7 +178,7 @@ def _parse_log_level(ctx, param, value):
               help=("Config file to use to configure logging. Use only for advanced situations. "
                     "Can accept both JSON and ini style configurations"))
 @click.version_option()
-@prepare_command(Config.get())
+@prepare_command(parse_config=True)
 def cli(ctx: click.Context,
         log_level: int = DEFAULT_CONFIG.log_level,
         log_config_file: str = DEFAULT_CONFIG.log_config_file,
@@ -169,7 +192,7 @@ def cli(ctx: click.Context,
     configure_logging(log_level=log_level, log_config_file=log_config_file)
 
     # Re-get the logger class
-    global logger
+    global logger  # pylint: disable=global-statement
     logger = logging.getLogger("morpheus.cli")
 
 
@@ -186,7 +209,7 @@ def tools(ctx: click.Context, **kwargs):
 @click.option('--batches', type=(int, int), required=True, multiple=True)
 @click.option('--seq_length', type=int, required=True)
 @click.option('--max_workspace_size', type=int, default=16000)
-@prepare_command(False)
+@prepare_command()
 def onnx_to_trt(ctx: click.Context, **kwargs):
 
     logger.info("Generating onnx file")
@@ -252,11 +275,11 @@ def install(append, case_insensitive, shell, path):
                     "backpressure at the cost of memory. Smaller values will push messages through the "
                     "pipeline quicker. Must be greater than 1 and a power of 2 (i.e. 2, 4, 8, 16, etc.)"))
 @click.option('--use_cpp',
-              default=DEFAULT_CONFIG.use_cpp,
+              default=True,
               type=bool,
               help=("Whether or not to use C++ node and message types or to prefer python. "
                     "Only use as a last resort if bugs are encountered"))
-@prepare_command(Config.get())
+@prepare_command(parse_config=True)
 def run(ctx: click.Context, **kwargs):
 
     pass
@@ -313,10 +336,8 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     click.secho("Configuring Pipeline via CLI", fg="green")
 
-    config = Config.get()
-
+    config = get_config_from_ctx(ctx)
     config.mode = PipelineModes.NLP
-
     config.feature_length = kwargs["model_seq_length"]
 
     if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
@@ -326,9 +347,9 @@ def pipeline_nlp(ctx: click.Context, **kwargs):
 
     from morpheus.pipeline import LinearPipeline
 
-    ctx.obj = LinearPipeline(config)
+    p = ctx.obj["pipeline"] = LinearPipeline(config)
 
-    return ctx.obj
+    return p
 
 
 @click.group(chain=True, short_help="Run the inference pipeline with a FIL model", cls=AliasedGroup, **command_kwargs)
@@ -368,10 +389,8 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     click.secho("Configuring Pipeline via CLI", fg="green")
 
-    config = Config.get()
-
+    config = get_config_from_ctx(ctx)
     config.mode = PipelineModes.FIL
-
     config.feature_length = kwargs["model_fea_length"]
 
     if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
@@ -384,9 +403,9 @@ def pipeline_fil(ctx: click.Context, **kwargs):
 
     from morpheus.pipeline import LinearPipeline
 
-    ctx.obj = LinearPipeline(config)
+    p = ctx.obj["pipeline"] = LinearPipeline(config)
 
-    return ctx.obj
+    return p
 
 
 @click.group(chain=True,
@@ -439,16 +458,14 @@ def pipeline_ae(ctx: click.Context, **kwargs):
 
     click.secho("Configuring Pipeline via CLI", fg="green")
 
-    config = Config.get()
-
+    config = get_config_from_ctx(ctx)
     config.mode = PipelineModes.AE
 
-    if (config.use_cpp):
+    if CppConfig.should_use_cpp:
         logger.warning("C++ is disabled for AutoEncoder pipelines at this time.")
-        config.use_cpp = False
+        CppConfig.should_use_cpp = False
 
     config.ae = ConfigAutoEncoder()
-
     config.ae.userid_column_name = kwargs["userid_column_name"]
 
     if ("columns_file" in kwargs and kwargs["columns_file"] is not None):
@@ -474,9 +491,9 @@ def pipeline_ae(ctx: click.Context, **kwargs):
 
     from morpheus.pipeline import LinearPipeline
 
-    ctx.obj = LinearPipeline(config)
+    p = ctx.obj["pipeline"] = LinearPipeline(config)
 
-    return ctx.obj
+    return p
 
 
 @pipeline_nlp.result_callback()
@@ -485,13 +502,13 @@ def pipeline_ae(ctx: click.Context, **kwargs):
 @click.pass_context
 def post_pipeline(ctx: click.Context, *args, **kwargs):
 
-    logger.info("Config: \n{}".format(Config.get().to_string()))
+    config = get_config_from_ctx(ctx)
+
+    logger.info("Config: \n%s", config.to_string())
 
     click.secho("Starting pipeline via CLI... Ctrl+C to Quit", fg="red")
 
-    from morpheus.pipeline import LinearPipeline
-
-    pipeline: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    pipeline = get_pipeline_from_ctx(ctx)
 
     if ("viz_file" in kwargs and kwargs["viz_file"] is not None):
         pipeline.build()
@@ -525,18 +542,17 @@ def post_pipeline(ctx: click.Context, *args, **kwargs):
               type=bool,
               help=("Whether or not to filter rows with null 'data' column. Null values in the 'data' column can "
                     "cause issues down the line with processing. Setting this to True is recommended."))
-@prepare_command(False)
+@prepare_command()
 def from_file(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.input.from_file import FileSourceStage
 
     file_type = FILE_TYPE_MEMBERS[kwargs.pop("file_type").lower()]
 
-    stage = FileSourceStage(Config.get(), file_type=file_type, **kwargs)
+    stage = FileSourceStage(config, file_type=file_type, **kwargs)
 
     p.set_source(stage)
 
@@ -562,19 +578,18 @@ def from_file(ctx: click.Context, **kwargs):
               is_flag=True,
               help=("Enabling this option will skip committing messages as they are pulled off the server. "
                     "This is only useful for debugging, allowing the user to process the same messages multiple times"))
-@prepare_command(False)
+@prepare_command()
 def from_kafka(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"] == "auto"):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
 
     from morpheus.pipeline.input.from_kafka import KafkaSourceStage
 
-    stage = KafkaSourceStage(Config.get(), **kwargs)
+    stage = KafkaSourceStage(config, **kwargs)
 
     p.set_source(stage)
 
@@ -607,18 +622,17 @@ def from_kafka(ctx: click.Context, **kwargs):
               default=1,
               type=click.IntRange(min=1),
               help=("Repeats the input dataset multiple times. Useful to extend small datasets for debugging."))
-@prepare_command(False)
+@prepare_command()
 def from_cloudtrail(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.input.from_cloudtrail import CloudTrailSourceStage
 
     file_type = FILE_TYPE_MEMBERS[kwargs.pop("file_type").lower()]
 
-    stage = CloudTrailSourceStage(Config.get(), file_type=file_type, **kwargs)
+    stage = CloudTrailSourceStage(config, file_type=file_type, **kwargs)
 
     p.set_source(stage)
 
@@ -638,16 +652,15 @@ def from_cloudtrail(ctx: click.Context, **kwargs):
                     "message is received. Otherwise, the progress bar is shown on pipeline startup and "
                     "will begin timing immediately. In large pipelines, this option may be desired to "
                     "give a more accurate timing."))
-@prepare_command(False)
+@prepare_command()
 def monitor(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.general_stages import MonitorStage
 
-    stage = MonitorStage(Config.get(), **kwargs)
+    stage = MonitorStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -656,16 +669,15 @@ def monitor(ctx: click.Context, **kwargs):
 
 @click.command(short_help="Buffer results", deprecated=True, **command_kwargs)
 @click.option('--count', type=int, default=1000, help="")
-@prepare_command(False)
+@prepare_command()
 def buffer(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.general_stages import BufferStage
 
-    stage = BufferStage(Config.get(), **kwargs)
+    stage = BufferStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -674,16 +686,15 @@ def buffer(ctx: click.Context, **kwargs):
 
 @click.command(short_help="Drop null data entries from a DataFrame", **command_kwargs)
 @click.option('--column', type=str, default="data", help="Which column to use when searching for null values.")
-@prepare_command(False)
+@prepare_command()
 def dropna(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.preprocessing import DropNullStage
 
-    stage = DropNullStage(Config.get(), **kwargs)
+    stage = DropNullStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -694,16 +705,15 @@ def dropna(ctx: click.Context, **kwargs):
                help=("This stage will buffer all inputs until the source stage is complete. At that point all messages "
                      "will be dumped into downstream stages. Useful for testing performance of one stage at a time."),
                **command_kwargs)
-@prepare_command(False)
+@prepare_command()
 def trigger(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.general_stages import TriggerStage
 
-    stage = TriggerStage(Config.get(), **kwargs)
+    stage = TriggerStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -712,16 +722,15 @@ def trigger(ctx: click.Context, **kwargs):
 
 @click.command(short_help="Delay results for a certain duration", deprecated=True, **command_kwargs)
 @click.option('--duration', type=str, help="Time to delay messages in the pipeline. Follows the pandas interval format")
-@prepare_command(False)
+@prepare_command()
 def delay(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.general_stages import DelayStage
 
-    stage = DelayStage(Config.get(), **kwargs)
+    stage = DelayStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -729,16 +738,15 @@ def delay(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Deserialize source data from JSON.", **command_kwargs)
-@prepare_command(False)
+@prepare_command()
 def deserialize(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.preprocessing import DeserializeStage
 
-    stage = DeserializeStage(Config.get(), **kwargs)
+    stage = DeserializeStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -763,16 +771,15 @@ def deserialize(ctx: click.Context, **kwargs):
               help=("Maximum amount of rows that will be retained in history. As new data arrives, models will be "
                     "retrained with a maximum number of rows specified by this value."))
 @click.option('--seed', type=int, default=None, help="Seed to use when training. Helps ensure consistent results.")
-@prepare_command(False)
+@prepare_command()
 def train_ae(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.preprocess.autoencoder import TrainAEStage
 
-    stage = TrainAEStage(Config.get(), **kwargs)
+    stage = TrainAEStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -803,16 +810,15 @@ def train_ae(ctx: click.Context, **kwargs):
                     "multiple segments. Lower numbers will reult in more overlap. Setting this to -1 will auto "
                     "calculate the stride to be 75% of the max sequence length. If truncation=True, "
                     "this option has no effect."))
-@prepare_command(False)
+@prepare_command()
 def preprocess_nlp(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.preprocessing import PreprocessNLPStage
 
-    stage = PreprocessNLPStage(Config.get(), **kwargs)
+    stage = PreprocessNLPStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -820,16 +826,15 @@ def preprocess_nlp(ctx: click.Context, **kwargs):
 
 
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
-@prepare_command(False)
+@prepare_command()
 def preprocess_fil(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.preprocessing import PreprocessFILStage
 
-    stage = PreprocessFILStage(Config.get(), **kwargs)
+    stage = PreprocessFILStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -837,16 +842,15 @@ def preprocess_fil(ctx: click.Context, **kwargs):
 
 
 @click.command(name="preprocess", short_help="Convert messages to tokens", **command_kwargs)
-@prepare_command(False)
+@prepare_command()
 def preprocess_ae(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.preprocess.autoencoder import PreprocessAEStage
 
-    stage = PreprocessAEStage(Config.get(), **kwargs)
+    stage = PreprocessAEStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -865,20 +869,19 @@ def preprocess_ae(ctx: click.Context, **kwargs):
 @click.option(
     "--use_shared_memory",
     type=bool,
-    default=False,  # TODO: For EA, Shared memory is giving issues. Default to False for now
+    default=False,
     help=("Whether or not to use CUDA Shared IPC Memory for transferring data to Triton. "
           "Using CUDA IPC reduces network transfer time but requires that Morpheus and Triton are "
           "located on the same machine"))
-@prepare_command(False)
+@prepare_command()
 def inf_triton(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.inference.inference_triton import TritonInferenceStage
 
-    stage = TritonInferenceStage(Config.get(), **kwargs)
+    stage = TritonInferenceStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -886,16 +889,15 @@ def inf_triton(ctx: click.Context, **kwargs):
 
 
 @click.command(short_help="Perform a no-op inference for testing", **command_kwargs)
-@prepare_command(False)
+@prepare_command()
 def inf_identity(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.inference.inference_identity import IdentityInferenceStage
 
-    stage = IdentityInferenceStage(Config.get(), **kwargs)
+    stage = IdentityInferenceStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -907,16 +909,15 @@ def inf_identity(ctx: click.Context, **kwargs):
               type=click.Path(exists=True, dir_okay=False),
               required=True,
               help="PyTorch model filename to load")
-@prepare_command(False)
+@prepare_command()
 def inf_pytorch(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.inference.inference_pytorch import PyTorchInferenceStage
 
-    stage = PyTorchInferenceStage(Config.get(), **kwargs)
+    stage = PyTorchInferenceStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -924,16 +925,15 @@ def inf_pytorch(ctx: click.Context, **kwargs):
 
 
 @click.command(name="inf-pytorch", short_help="Perform inference with PyTorch", **command_kwargs)
-@prepare_command(False)
+@prepare_command()
 def inf_pytorch_ae(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.inference.inference_ae import AutoEncoderInferenceStage
 
-    stage = AutoEncoderInferenceStage(Config.get(), **kwargs)
+    stage = AutoEncoderInferenceStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -954,12 +954,11 @@ def inf_pytorch_ae(ctx: click.Context, **kwargs):
               default="",
               help=("Prefix to add to each label. Allows adding labels different from the "
                     "Config.class_labels property"))
-@prepare_command(False)
+@prepare_command()
 def add_class(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     if ("label" in kwargs):
         if (kwargs["label"] is not None):
@@ -970,7 +969,7 @@ def add_class(ctx: click.Context, **kwargs):
 
     from morpheus.pipeline.general_stages import AddClassificationsStage
 
-    stage = AddClassificationsStage(Config.get(), **kwargs)
+    stage = AddClassificationsStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -990,12 +989,11 @@ def add_class(ctx: click.Context, **kwargs):
               default="",
               help=("Prefix to add to each label. Allows adding labels different from the "
                     "Config.class_labels property"))
-@prepare_command(False)
+@prepare_command()
 def add_scores(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     if ("label" in kwargs):
         if (kwargs["label"] is not None):
@@ -1006,29 +1004,28 @@ def add_scores(ctx: click.Context, **kwargs):
 
     from morpheus.pipeline.general_stages import AddScoresStage
 
-    stage = AddScoresStage(Config.get(), **kwargs)
+    stage = AddScoresStage(config, **kwargs)
 
     p.add_stage(stage)
 
     return stage
 
 
-@click.command(short_help="Filter message by a classification threshold", **command_kwargs)
+@click.command(name="filter", short_help="Filter message by a classification threshold", **command_kwargs)
 @click.option('--threshold',
               type=float,
               default=0.5,
               required=True,
               help=("All messages without a probability above this threshold will be filtered away"))
-@prepare_command(False)
-def filter(ctx: click.Context, **kwargs):
+@prepare_command()
+def filter_command(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.general_stages import FilterDetectionsStage
 
-    stage = FilterDetectionsStage(Config.get(), **kwargs)
+    stage = FilterDetectionsStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1050,19 +1047,18 @@ def filter(ctx: click.Context, **kwargs):
               required=True,
               help=("Which columns to exclude from MultiMessage into JSON. Can be specified multiple times. "
                     "Resulting ignored columns is the intersection of all regex. Include applied before exclude"))
-@prepare_command(False)
+@prepare_command()
 def serialize(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     kwargs["include"] = list(kwargs["include"])
     kwargs["exclude"] = list(kwargs["exclude"])
 
     from morpheus.pipeline.output.serialize import SerializeStage
 
-    stage = SerializeStage(Config.get(), **kwargs)
+    stage = SerializeStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1098,19 +1094,18 @@ def serialize(ctx: click.Context, **kwargs):
               is_flag=True,
               help=("Whether or not to reuse the most recent run ID in ML Flow or create a new one each time the "
                     "pipeline is run"))
-@prepare_command(False)
+@prepare_command()
 def mlflow_drift(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     # Ensure labels is not a tuple
     kwargs["labels"] = list(kwargs["labels"])
 
     from morpheus.pipeline.postprocess.mlflow_drift import MLFlowDriftStage
 
-    stage = MLFlowDriftStage(Config.get(), **kwargs)
+    stage = MLFlowDriftStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1157,16 +1152,15 @@ def mlflow_drift(ctx: click.Context, **kwargs):
               help=("The z-score threshold required to flag datapoints. The value indicates the number of standard "
                     "deviations from the mean that is required to be flagged. Increasing this value will decrease "
                     "the number of detections."))
-@prepare_command(False)
+@prepare_command()
 def timeseries(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.postprocess.timeseries import TimeSeriesStage
 
-    stage = TimeSeriesStage(Config.get(), **kwargs)
+    stage = TimeSeriesStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1210,16 +1204,15 @@ def timeseries(ctx: click.Context, **kwargs):
               default=0.05,
               required=True,
               help="Relative tolerance to use when comparing float columns.")
-@prepare_command(False)
+@prepare_command()
 def validate(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.output.validation import ValidationStage
 
-    stage = ValidationStage(Config.get(), **kwargs)
+    stage = ValidationStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1229,16 +1222,15 @@ def validate(ctx: click.Context, **kwargs):
 @click.command(short_help="Write all messages to a file", **command_kwargs)
 @click.option('--filename', type=click.Path(writable=True), required=True, help="The file to write to")
 @click.option('--overwrite', is_flag=True, help="Whether or not to overwrite the target file")
-@prepare_command(False)
+@prepare_command()
 def to_file(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.output.to_file import WriteToFileStage
 
-    stage = WriteToFileStage(Config.get(), **kwargs)
+    stage = WriteToFileStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1253,19 +1245,18 @@ def to_file(ctx: click.Context, **kwargs):
               help=("Comma-separated list of bootstrap servers. If using Kafka created via `docker-compose`, "
                     "this can be set to 'auto' to automatically determine the cluster IPs and ports"))
 @click.option('--output_topic', type=str, required=True, help="Output Kafka topic to publish to")
-@prepare_command(False)
+@prepare_command()
 def to_kafka(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     if ("bootstrap_servers" in kwargs and kwargs["bootstrap_servers"] == "auto"):
         kwargs["bootstrap_servers"] = auto_determine_bootstrap()
 
     from morpheus.pipeline.output.to_kafka import WriteToKafkaStage
 
-    stage = WriteToKafkaStage(Config.get(), **kwargs)
+    stage = WriteToKafkaStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1279,16 +1270,15 @@ def to_kafka(ctx: click.Context, **kwargs):
               required=True,
               help="")
 @click.option('--overwrite', is_flag=True, help="")
-@prepare_command(False)
+@prepare_command()
 def gen_viz(ctx: click.Context, **kwargs):
 
-    from morpheus.pipeline import LinearPipeline
-
-    p: LinearPipeline = ctx.ensure_object(LinearPipeline)
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
 
     from morpheus.pipeline.output.gen_viz_frames import GenerateVizFramesStage
 
-    stage = GenerateVizFramesStage(Config.get(), **kwargs)
+    stage = GenerateVizFramesStage(config, **kwargs)
 
     p.add_stage(stage)
 
@@ -1313,7 +1303,7 @@ pipeline_nlp.add_command(buffer)
 pipeline_nlp.add_command(delay)
 pipeline_nlp.add_command(deserialize)
 pipeline_nlp.add_command(dropna)
-pipeline_nlp.add_command(filter)
+pipeline_nlp.add_command(filter_command)
 pipeline_nlp.add_command(from_file)
 pipeline_nlp.add_command(from_kafka)
 pipeline_nlp.add_command(gen_viz)
@@ -1335,7 +1325,7 @@ pipeline_fil.add_command(buffer)
 pipeline_fil.add_command(delay)
 pipeline_fil.add_command(deserialize)
 pipeline_fil.add_command(dropna)
-pipeline_fil.add_command(filter)
+pipeline_fil.add_command(filter_command)
 pipeline_fil.add_command(from_file)
 pipeline_fil.add_command(from_kafka)
 pipeline_fil.add_command(inf_identity)
@@ -1354,7 +1344,7 @@ pipeline_ae.add_command(add_class)
 pipeline_ae.add_command(add_scores)
 pipeline_ae.add_command(buffer)
 pipeline_ae.add_command(delay)
-pipeline_ae.add_command(filter)
+pipeline_ae.add_command(filter_command)
 pipeline_ae.add_command(from_cloudtrail)
 pipeline_ae.add_command(gen_viz)
 pipeline_ae.add_command(inf_pytorch_ae)

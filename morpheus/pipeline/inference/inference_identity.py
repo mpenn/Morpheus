@@ -51,5 +51,7 @@ class IdentityInferenceStage(InferenceStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
+        self._config = c
+
     def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
-        return IdentityInferenceWorker(inf_queue=inf_queue, c=Config.get())
+        return IdentityInferenceWorker(inf_queue=inf_queue, c=self._config)

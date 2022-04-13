@@ -96,8 +96,9 @@ class PyTorchInferenceStage(InferenceStage):
     def __init__(self, c: Config, model_filename: str):
         super().__init__(c)
 
+        self._config = c
         self._model_filename = model_filename
 
     def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
 
-        return PyTorchInference(inf_queue, Config.get(), model_filename=self._model_filename)
+        return PyTorchInference(inf_queue, self._config, model_filename=self._model_filename)

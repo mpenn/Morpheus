@@ -827,6 +827,8 @@ class TritonInferenceStage(InferenceStage):
                  use_shared_memory: bool = False):
         super().__init__(c)
 
+        self._config = c
+
         self._kwargs = {
             "model_name": model_name,
             "server_url": server_url,
@@ -841,11 +843,11 @@ class TritonInferenceStage(InferenceStage):
         return self._get_worker_class().supports_cpp_node()
 
     def _get_worker_class(self):
-        if (Config.get().mode == PipelineModes.NLP):
+        if (self._config.mode == PipelineModes.NLP):
             return TritonInferenceNLP
-        elif (Config.get().mode == PipelineModes.FIL):
+        elif (self._config.mode == PipelineModes.FIL):
             return TritonInferenceFIL
-        elif (Config.get().mode == PipelineModes.AE):
+        elif (self._config.mode == PipelineModes.AE):
             return TritonInferenceAE
         else:
             raise NotImplementedError("Unknown config mode")
@@ -854,7 +856,7 @@ class TritonInferenceStage(InferenceStage):
 
         worker_cls = self._get_worker_class()
 
-        return worker_cls(inf_queue=inf_queue, c=Config.get(), **self._kwargs)
+        return worker_cls(inf_queue=inf_queue, c=self._config, **self._kwargs)
 
     def _get_cpp_inference_node(self, seg: neo.Segment):
 

@@ -21,6 +21,7 @@ from neo.core import operators as ops
 
 import morpheus._lib.stages as neos
 from morpheus.config import Config
+from morpheus.config import CppConfig
 from morpheus.pipeline.file_types import FileTypes
 from morpheus.pipeline.input.utils import read_file_to_df
 from morpheus.pipeline.messages import MessageMeta
@@ -94,7 +95,7 @@ class FileSourceStage(SingleOutputSource):
 
     def _build_source(self, seg: neo.Segment) -> StreamPair:
 
-        if (Config.get().use_cpp):
+        if CppConfig.should_use_cpp:
             out_stream = neos.FileSourceStage(seg, self.unique_name, self._filename, self._repeat_count)
         else:
             out_stream = seg.make_source(self.unique_name, self._generate_frames())

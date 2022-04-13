@@ -172,6 +172,7 @@ class TrainAEStage(MultiMessageStage):
                  sort_glob: bool = False):
         super().__init__(c)
 
+        self._config = c
         self._feature_columns = c.ae.feature_columns
         self._batch_size = c.pipeline_batch_size
         self._pretrained_filename = pretrained_filename
@@ -215,7 +216,7 @@ class TrainAEStage(MultiMessageStage):
     def _train_model(self, x: UserMessageMeta) -> typing.List[MultiAEMessage]:
 
         if (x.user_id not in self._user_models):
-            self._user_models[x.user_id] = UserModelManager(Config.get(),
+            self._user_models[x.user_id] = UserModelManager(self._config,
                                                             x.user_id,
                                                             False,
                                                             self._train_epochs,
@@ -250,12 +251,12 @@ class TrainAEStage(MultiMessageStage):
 
             user_to_df = CloudTrailSourceStage.files_to_dfs_per_user(file_list,
                                                                      FileTypes.Auto,
-                                                                     Config.get().ae.userid_column_name,
+                                                                     self._config.ae.userid_column_name,
                                                                      self._feature_columns,
-                                                                     Config.get().ae.userid_filter)
+                                                                     self._config.ae.userid_filter)
 
             for user_id, df in user_to_df.items():
-                self._user_models[user_id] = UserModelManager(Config.get(),
+                self._user_models[user_id] = UserModelManager(self._config,
                                                               user_id,
                                                               True,
                                                               self._train_epochs,

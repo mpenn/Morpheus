@@ -23,6 +23,7 @@ from stages.graph_sage_stage import GraphSAGEStage
 import cudf
 
 from morpheus.config import Config
+from morpheus.config import CppConfig
 from morpheus.config import PipelineModes
 from morpheus.pipeline.general_stages import MonitorStage
 from morpheus.pipeline.input.from_file import FileSourceStage
@@ -115,9 +116,10 @@ def run_pipeline(
     # Enable the default logger
     configure_logging(log_level=logging.INFO)
 
+    CppConfig.should_use_cpp = False
+
     # Its necessary to get the global config object and configure it for FIL mode
-    config = Config.get()
-    config.use_cpp = False
+    config = Config()
     config.mode = PipelineModes.OTHER
     config.use_dask = False
 

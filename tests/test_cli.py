@@ -24,6 +24,7 @@ from mlflow.tracking import fluent
 
 from morpheus import cli
 from morpheus.config import ConfigAutoEncoder
+from morpheus.config import CppConfig
 from morpheus.config import PipelineModes
 from morpheus.pipeline import LinearPipeline
 from morpheus.pipeline.general_stages import AddClassificationsStage
@@ -92,7 +93,7 @@ def callback_values(request: pytest.FixtureRequest):
     @group.result_callback(replace=True)
     @click.pass_context
     def mock_post_callback(ctx, stages, *a, **k):
-        cv.update({'ctx': ctx, 'stages': stages, 'pipe': ctx.find_object(LinearPipeline)})
+        cv.update({'ctx': ctx, 'stages': stages, 'pipe': ctx.obj["pipeline"]})
         ctx.exit(47)
 
     return cv
@@ -158,14 +159,16 @@ class TestCLI:
                 'timeseries', '--resolution=1m', '--zscore_threshold=8.0', '--hot_start'] + \
                MONITOR_ARGS + VALIDATE_ARGS + ['serialize'] + TO_FILE_ARGS
 
+        obj = {}
         runner = CliRunner()
-        result = runner.invoke(cli.cli, args)
+        result = runner.invoke(cli.cli, args, obj=obj)
         assert result.exit_code == 47, result.output
 
         # Ensure our config is populated correctly
 
+        config = obj["config"]
         assert config.mode == PipelineModes.AE
-        assert not config.use_cpp
+        assert not CppConfig.should_use_cpp
         assert config.class_labels == ["ae_anomaly_score"]
         assert config.model_max_batch_size == 1024
         assert config.pipeline_batch_size == 1024
@@ -315,11 +318,13 @@ class TestCLI:
         args = GENERAL_ARGS + ['pipeline-fil'] + FILE_SRC_ARGS + ['deserialize', 'preprocess'] + INF_TRITON_ARGS + \
                MONITOR_ARGS + ['add-class'] + VALIDATE_ARGS + ['serialize'] + TO_FILE_ARGS
 
+        obj = {}
         runner = CliRunner()
-        result = runner.invoke(cli.cli, args)
+        result = runner.invoke(cli.cli, args, obj=obj)
         assert result.exit_code == 47, result.output
 
         # Ensure our config is populated correctly
+        config = obj["config"]
         assert config.mode == PipelineModes.FIL
         assert config.class_labels == ["mining"]
 
@@ -389,12 +394,14 @@ class TestCLI:
                 'mlflow-drift', '--tracking_uri', mlflow_uri] + \
                INF_TRITON_ARGS + MONITOR_ARGS + ['add-class'] + VALIDATE_ARGS + ['serialize'] + TO_FILE_ARGS + TO_KAFKA_ARGS
 
+        obj = {}
         runner = CliRunner()
-        result = runner.invoke(cli.cli, args)
+        result = runner.invoke(cli.cli, args, obj=obj)
         assert result.exit_code == 47, result.output
 
         # Ensure our config is populated correctly
 
+        config = obj["config"]
         assert config.mode == PipelineModes.FIL
         assert config.class_labels == ['frogs', 'lizards', 'toads']
 
@@ -498,11 +505,13 @@ class TestCLI:
                ['add-class', '--label=pred', '--threshold=0.7'] + \
                VALIDATE_ARGS + ['serialize'] + TO_FILE_ARGS
 
+        obj = {}
         runner = CliRunner()
-        result = runner.invoke(cli.cli, args)
+        result = runner.invoke(cli.cli, args, obj=obj)
         assert result.exit_code == 47, result.output
 
         # Ensure our config is populated correctly
+        config = obj["config"]
         assert config.mode == PipelineModes.NLP
         assert config.class_labels == ["score", "pred"]
         assert config.feature_length == 128
@@ -583,11 +592,13 @@ class TestCLI:
                ['add-class', '--label=pred', '--threshold=0.7'] + \
                VALIDATE_ARGS + ['serialize'] + TO_FILE_ARGS + TO_KAFKA_ARGS
 
+        obj = {}
         runner = CliRunner()
-        result = runner.invoke(cli.cli, args)
+        result = runner.invoke(cli.cli, args, obj=obj)
         assert result.exit_code == 47, result.output
 
         # Ensure our config is populated correctly
+        config = obj["config"]
         assert config.mode == PipelineModes.NLP
         assert config.class_labels == ["score", "pred"]
         assert config.feature_length == 128
@@ -687,9 +698,11 @@ class TestCLI:
         """
         args = GENERAL_ARGS + ['pipeline'] + FILE_SRC_ARGS + TO_FILE_ARGS
 
+        obj = {}
         runner = CliRunner()
-        result = runner.invoke(cli.cli, args)
+        result = runner.invoke(cli.cli, args, obj=obj)
         assert result.exit_code == 47, result.output
 
+        config = obj["config"]
         # Ensure our config is populated correctly
         assert config.mode == PipelineModes.NLP

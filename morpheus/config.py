@@ -106,6 +106,37 @@ class PipelineModes(str, Enum):
     AE = "AE"
 
 
+class CppConfig:
+    """
+    Allows setting whether CPP implementations should be used for Morpheus classes.
+
+    Parameters
+    ----------
+    use_cpp : bool, default = True
+        Whether or not to use C++ node and message types or to prefer python. Only use as a last resort if bugs are
+        encountered
+    """
+    __use_cpp: bool = True
+
+    @property
+    @staticmethod
+    def should_use_cpp() -> bool:
+        """
+        Gets the current global option for whether or not to use C++ node and message types or to prefer python.
+        """
+        return CppConfig.__use_cpp
+
+    @staticmethod
+    @should_use_cpp.setter
+    def should_use_cpp(value: bool):
+        """
+        Sets the global option for whether or not to use C++ node and message types or to prefer python. Only use as a
+        last resort if bugs are encountered
+        """
+        CppConfig.__use_cpp = value
+
+
+
 @dataclasses.dataclass
 class Config(ConfigBase):
     """
@@ -138,14 +169,6 @@ class Config(ConfigBase):
         encountered
 
     """
-    # Flag to indicate we are creating a static instance. Prevents raising an error on creation
-    __is_creating: typing.ClassVar[bool] = False
-
-    # Default should never be changed and is used to initialize the CLI
-    __default: typing.ClassVar["Config"] = None
-    # Singleton instance of the Config
-    __instance: typing.ClassVar["Config"] = None
-
     # Whether in Debug mode.
     debug: bool = False
     log_level: int = logging.WARN
@@ -162,41 +185,7 @@ class Config(ConfigBase):
     # Class labels to convert class index to label.
     class_labels: typing.List[str] = dataclasses.field(default_factory=list)
 
-    # Whether or not to use C++ node and message types or to prefer python
-    use_cpp: bool = True
-
     ae: ConfigAutoEncoder = dataclasses.field(default=None)
-
-    @staticmethod
-    def default() -> "Config":
-        if Config.__default is None:
-            try:
-                Config.__is_creating = True
-                Config.__default = Config()
-            finally:
-                Config.__is_creating = False
-
-        return Config.__default
-
-    @classmethod
-    def get(cls) -> "Config":
-        if cls.__instance is None:
-            try:
-                cls.__is_creating = True
-                cls.__instance = Config()
-            finally:
-                cls.__is_creating = False
-
-        return cls.__instance
-
-    def __post_init__(self):
-        # Double check that this class is not being created outside of .get()
-        if not Config.__is_creating:
-            raise Exception("This class is a singleton! Use Config.default() or Config.get() for instances")
-
-    def load(self, filename: str):
-        # Read the json file and store as
-        raise NotImplementedError("load() has not been implemented yet.")
 
     def save(self, filename: str):
         # Read the json file and store as
@@ -210,9 +199,3 @@ class Config(ConfigBase):
 
         # Using JSON serializer for now since its easier to read. pprint is more compact
         return json.dumps(dataclasses.asdict(self), indent=2, sort_keys=True)
-
-    @classmethod
-    def reset(cls):
-        cls.__default = None
-        cls.__instance = None
-        cls.__is_creating = False

@@ -34,13 +34,14 @@ import distributed
 import cudf
 
 from morpheus.config import Config
+from morpheus.config import CppConfig
 from morpheus.pipeline.messages import MultiMessage
 from morpheus.utils.atomic_integer import AtomicInteger
 from morpheus.utils.type_utils import _DecoratorType
 from morpheus.utils.type_utils import greatest_ancestor
 from morpheus.utils.type_utils import pretty_print_type_name
 
-config = Config.get()
+config = Config()
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +346,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
 
     def get_all_output_stages(self) -> typing.List["StreamWrapper"]:
         return [x.parent for x in self.get_all_outputs()]
+        
 
     def supports_cpp_node(self):
         """
@@ -359,7 +361,7 @@ class StreamWrapper(ABC, collections.abc.Hashable):
         """
         Specifies whether or not to build a C++ node. Only should be called during the build phase
         """
-        return Config.get().use_cpp and self.supports_cpp_node()
+        return CppConfig.should_use_cpp and self.supports_cpp_node()
 
     def can_build(self, check_ports=False) -> bool:
         """
@@ -684,7 +686,7 @@ class MultiMessageStage(SinglePortStage):
     def _post_build_single(self, seg: neo.Segment, out_pair: StreamPair) -> StreamPair:
 
         # Check if we are debug and should log timestamps
-        if (Config.get().debug and self._should_log_timestamps):
+        if (config.debug and self._should_log_timestamps):
             # Cache the name property. Removes dependency on self in callback
             cached_name = self.name
 
