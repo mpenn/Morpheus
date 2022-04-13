@@ -54,6 +54,7 @@ class KafkaSourceStage(SingleOutputSource):
         Enabling this option will skip committing messages as they are pulled off the server. This is only useful for
         debugging, allowing the user to process the same messages multiple times
     """
+
     def __init__(self,
                  c: Config,
                  bootstrap_servers: str,
@@ -86,7 +87,7 @@ class KafkaSourceStage(SingleOutputSource):
         dask = True
         max_batch_size = self._max_batch_size
         keys = False
-        engine = "cudf"
+        engine = None
 
         self._consumer_params = consumer_params
         # Override the auto-commit config to enforce custom streamz checkpointing
@@ -107,6 +108,9 @@ class KafkaSourceStage(SingleOutputSource):
     @property
     def name(self) -> str:
         return "from-kafka"
+
+    def supports_cpp_node(self):
+        return True
 
     def _source_generator(self, s: neo.Subscriber):
         # Each invocation of this function makes a new thread so recreate the producers
@@ -262,7 +266,8 @@ class KafkaSourceStage(SingleOutputSource):
 
         finally:
             # Close the consumer and call on_completed
-            consumer.close()
+            if (consumer):
+                consumer.close()
             s.on_completed()
 
     def _kafka_params_to_messagemeta(self, x: tuple):
@@ -289,7 +294,8 @@ class KafkaSourceStage(SingleOutputSource):
         """
 
         if topic is None:
-            raise ValueError("ERROR: You must specifiy the topic " "that you want to consume from")
+            raise ValueError("ERROR: You must specifiy the topic "
+                             "that you want to consume from")
 
         kafka_confs = {str.encode(key): str.encode(value) for key, value in kafka_configs.items()}
 
@@ -329,7 +335,7 @@ class KafkaSourceStage(SingleOutputSource):
 
     def _build_source(self, seg: neo.Segment) -> StreamPair:
 
-        if (Config.get().use_cpp or True):
+        if (self._build_cpp_node()):
             source = neos.KafkaSourceStage(seg,
                                            self.unique_name,
                                            self._max_batch_size,

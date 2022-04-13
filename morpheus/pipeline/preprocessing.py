@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import dataclasses
 import inspect
-import json
-import time
+import logging
 import typing
 from abc import abstractmethod
 from functools import partial
@@ -45,6 +43,8 @@ from morpheus.pipeline.pipeline import StreamPair
 from morpheus.pipeline.pipeline import get_time_ms
 from morpheus.utils.cudf_subword_helper import tokenize_text_series
 
+logger = logging.getLogger(__name__)
+
 
 class DeserializeStage(MultiMessageStage):
     """
@@ -57,6 +57,7 @@ class DeserializeStage(MultiMessageStage):
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -132,6 +133,7 @@ class DropNullStage(SinglePortStage):
         Column name to perform null check.
 
     """
+
     def __init__(self, c: Config, column: str):
         super().__init__(c)
 
@@ -161,6 +163,7 @@ class DropNullStage(SinglePortStage):
 
         # Finally, flatten to a single stream
         def node_fn(input: neo.Observable, output: neo.Subscriber):
+
             def on_next(x: MessageMeta):
 
                 y = MessageMeta(x.df[~x.df[self._column].isna()])
@@ -186,6 +189,7 @@ class PreprocessBaseStage(MultiMessageStage):
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -253,6 +257,7 @@ class PreprocessNLPStage(PreprocessBaseStage):
         the second sequence and so on until the entire sentence is encoded.
 
     """
+
     def __init__(self,
                  c: Config,
                  vocab_hash_file: str,
@@ -380,6 +385,7 @@ class PreprocessFILStage(PreprocessBaseStage):
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -445,7 +451,11 @@ class PreprocessFILStage(PreprocessBaseStage):
 
         """
 
-        df = x.get_meta(fea_cols)
+        try:
+            df = x.get_meta(fea_cols)
+        except KeyError:
+            logger.exception("Cound not get metadat for columns.")
+            return None
 
         # Extract just the numbers from each feature col. Not great to operate on x.meta.df here but the operations will
         # only happen once.

@@ -20,8 +20,8 @@ message(STATUS "Configuring CUDA Architecture")
 # Default to using "" for CUDA_ARCHITECTURES to build based on GPU in system
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES "")
-  message(STATUS "CMAKE_CUDA_ARCHITECTURES was not defined. Defaulting to '' to build only for local architecture.
-    Specify -DCMAKE_CUDA_ARCHITECTURES='ALL' to build for all archs.")
+  message(STATUS "CMAKE_CUDA_ARCHITECTURES was not defined. Defaulting to '' to build only for local architecture. "
+                 "Specify -DCMAKE_CUDA_ARCHITECTURES='ALL' to build for all archs.")
 endif()
 
 # Initialize CUDA architectures
