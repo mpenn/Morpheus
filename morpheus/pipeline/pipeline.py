@@ -60,6 +60,7 @@ class Sender():
     """
     The `Sender` object reprents a port on a `StreamWrapper` object that sends messages to a `Receiver`
     """
+
     def __init__(self, parent: "StreamWrapper", port_number: int):
 
         self._parent = parent
@@ -95,6 +96,7 @@ class Receiver():
     """
     The `Receiver` object reprents a downstream port on a `StreamWrapper` object that gets messages from a `Sender`
     """
+
     def __init__(self, parent: "StreamWrapper", port_number: int):
 
         self._parent = parent
@@ -344,6 +346,21 @@ class StreamWrapper(ABC, collections.abc.Hashable):
     def get_all_output_stages(self) -> typing.List["StreamWrapper"]:
         return [x.parent for x in self.get_all_outputs()]
 
+    def supports_cpp_node(self):
+        """
+        Specifies whether this Stage is even capable of creating C++ nodes. During the build phase, this value will be
+        combined with Config.get().use_cpp to determine whether or not a C++ node is created. This is an instance method
+        to allow runtime decisions and derived classes to override base implementations
+        """
+        # By default, return False unless otherwise specified
+        return False
+
+    def _build_cpp_node(self):
+        """
+        Specifies whether or not to build a C++ node. Only should be called during the build phase
+        """
+        return Config.get().use_cpp and self.supports_cpp_node()
+
     def can_build(self, check_ports=False) -> bool:
         """
         Determines if all inputs have been built allowing this node to be built
@@ -469,6 +486,7 @@ class SourceStage(StreamWrapper):
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -539,6 +557,7 @@ class SourceStage(StreamWrapper):
 
 
 class SingleOutputSource(SourceStage):
+
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -567,23 +586,9 @@ class Stage(StreamWrapper):
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         super().__init__(c)
-
-    def supports_cpp_node(self):
-        """
-        Specifies whether this Stage is even capable of creating C++ nodes. During the build phase, this value will be
-        combined with Config.get().use_cpp to determine whether or not a C++ node is created. This is an instance method
-        to allow runtime decisions and derived classes to override base implementations
-        """
-        # By default, return False unless otherwise specified
-        return False
-
-    def _build_cpp_node(self):
-        """
-        Specifies whether or not to build a C++ node. Only should be called during the build phase
-        """
-        return Config.get().use_cpp and self.supports_cpp_node()
 
     def _post_build(self, seg: neo.Segment, out_ports_pair: typing.List[StreamPair]) -> typing.List[StreamPair]:
 
@@ -605,6 +610,7 @@ class Stage(StreamWrapper):
 
 
 class SinglePortStage(Stage):
+
     def __init__(self, c: Config):
         super().__init__(c)
 
@@ -667,6 +673,7 @@ class SinglePortStage(Stage):
 
 
 class MultiMessageStage(SinglePortStage):
+
     def __init__(self, c: Config):
 
         # Derived classes should set this to true to log timestamps in debug builds
@@ -712,6 +719,7 @@ class Pipeline():
         Pipeline configuration instance
 
     """
+
     def __init__(self, c: Config):
         self._source_count: int = None  # Maximum number of iterations for progress reporting. None = Unknown/Unlimited
 
@@ -1113,6 +1121,7 @@ class Pipeline():
 
 
 class LinearPipeline(Pipeline):
+
     def __init__(self, c: Config):
         super().__init__(c)
 

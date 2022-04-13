@@ -32,6 +32,7 @@ from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
 
 
 class InferenceWorker:
+
     def __init__(self, inf_queue: ProducerConsumerQueue) -> None:
         self._inf_queue = inf_queue
 
@@ -212,9 +213,9 @@ class InferenceStage(MultiMessageStage):
                         nonlocal outstanding_requests
                         m = self._convert_one_response(memory, b, resp)
 
-                        f.set_result(m)
-
                         outstanding_requests -= 1
+
+                        f.set_result(m)
 
                     fut_list.append(fut)
 

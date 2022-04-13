@@ -63,12 +63,9 @@ include(setup_cache)
 # Configure all dependencies
 include(cmake/dependencies.cmake)
 
-# After dependencies have been created, set the clang-tidy option only on our code
-if(MORPHEUS_USE_CLANG_TIDY)
-  # Disabled global clang-tidy for now. Once trtlab has been moved to neo, can be re-enabled
-  # set(CMAKE_CXX_CLANG_TIDY "clang-tidy")
-  message(STATUS "Enabling clang-tidy for targets that opt-in")
-endif()
+####################################
+# - Post dependencies setup --------
+include(cmake/setup_compiler.cmake)
 
 # Include the main trtlab code
 add_subdirectory(morpheus)
