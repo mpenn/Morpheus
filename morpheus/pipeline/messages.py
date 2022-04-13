@@ -23,7 +23,7 @@ import pandas as pd
 import cudf
 
 import morpheus._lib.messages as neom
-from morpheus.config import Config
+from morpheus.config import CppConfig
 
 # If set, this disables all CPP class creation
 NO_CPP = os.getenv("MORPHEUS_NO_CPP", 'False').lower() in ('true', '1', 't')
@@ -55,7 +55,7 @@ class MessageBase(metaclass=MessageImpl):
     def __new__(cls, *args, **kwargs):
 
         # If _cpp_class is set, and use_cpp is enabled, create the C++ instance
-        if (getattr(cls, "_cpp_class", None) is not None and Config.get().use_cpp):
+        if (getattr(cls, "_cpp_class", None) is not None and CppConfig.should_use_cpp):
             return cls._cpp_class(*args, **kwargs)
 
         # Otherwise, do the default init

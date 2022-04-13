@@ -89,14 +89,11 @@ def config_only_cpp():
     """
 
     from morpheus.config import Config
+    from morpheus.config import CppConfig
 
-    config = Config.get()
+    CppConfig.should_use_cpp = True
 
-    config.use_cpp = True
-
-    yield config
-
-    Config.reset()
+    yield Config()
 
 
 @pytest.fixture(scope="function")
@@ -107,14 +104,11 @@ def config_no_cpp():
     """
 
     from morpheus.config import Config
+    from morpheus.config import CppConfig
 
-    config = Config.get()
+    CppConfig.should_use_cpp = False
 
-    config.use_cpp = False
-
-    yield config
-
-    Config.reset()
+    yield Config()
 
 
 @pytest.fixture(scope="function")
@@ -131,8 +125,7 @@ def config(request: pytest.FixtureRequest):
     """
 
     from morpheus.config import Config
-
-    config = Config.get()
+    from morpheus.config import CppConfig
 
     if (not hasattr(request, "param")):
         use_cpp = request.node.get_closest_marker("use_cpp") is not None
@@ -140,20 +133,12 @@ def config(request: pytest.FixtureRequest):
 
         assert use_cpp != use_python, "Invalid config"
 
-        if (use_cpp):
-            config.use_cpp = True
-        else:
-            config.use_cpp = False
+        CppConfig.should_use_cpp = (True if use_cpp else False)
 
     else:
-        if (request.param):
-            config.use_cpp = True
-        else:
-            config.use_cpp = False
+        CppConfig.should_use_cpp = (True if request.param else False)
 
-    yield config
-
-    Config.reset()
+    yield Config()
 
 
 @pytest.fixture(scope="function")

@@ -93,7 +93,8 @@ def check_all_messages(should_be_cpp: bool, no_cpp_class: bool):
 
 
 def test_constructor_cpp(config):
-    check_all_messages(config.use_cpp, False)
+    from morpheus.config import CppConfig
+    check_all_messages(CppConfig.should_use_cpp, False)
 
 
 @pytest.mark.reload_modules(messages)

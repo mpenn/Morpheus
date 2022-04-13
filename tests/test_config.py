@@ -89,60 +89,10 @@ def test_pipeline_modes():
     assert entries.issuperset(expected)
 
 
-def test_config():
-    pytest.raises(Exception, morpheus.config.Config)
-
-    c = morpheus.config.Config.default()
-    assert isinstance(c, morpheus.config.ConfigBase)
-    assert isinstance(c, morpheus.config.Config)
-
-    assert hasattr(c, 'debug')
-    assert hasattr(c, 'log_level')
-    assert hasattr(c, 'log_config_file')
-    assert hasattr(c, 'mode')
-    assert hasattr(c, 'feature_length')
-    assert hasattr(c, 'pipeline_batch_size')
-    assert hasattr(c, 'num_threads')
-    assert hasattr(c, 'model_max_batch_size')
-    assert hasattr(c, 'edge_buffer_size')
-    assert hasattr(c, 'class_labels')
-    assert hasattr(c, 'use_cpp')
-    assert hasattr(c, 'ae')
-
-
-def test_config_default():
-    c1 = morpheus.config.Config.default()
-    c2 = morpheus.config.Config.default()
-
-    assert isinstance(c1, morpheus.config.ConfigBase)
-    assert isinstance(c1, morpheus.config.Config)
-
-    assert c1 is c2
-    assert c1 is morpheus.config.Config.default()
-    assert c1 is not morpheus.config.Config.get()
-
-
-def test_config_get():
-    c1 = morpheus.config.Config.get()
-    c2 = morpheus.config.Config.get()
-
-    assert isinstance(c1, morpheus.config.ConfigBase)
-    assert isinstance(c1, morpheus.config.Config)
-
-    assert c1 is c2
-    assert c1 is morpheus.config.Config.get()
-    assert c1 is not morpheus.config.Config.default()
-
-
-def test_config_load():
-    c = morpheus.config.Config.get()
-    pytest.raises(NotImplementedError, c.load, 'ignored')
-
-
 def test_config_save(tmp_path):
     filename = os.path.join(tmp_path, 'config.json')
 
-    c = morpheus.config.Config.get()
+    c = morpheus.config.Config()
     c.save(filename)
 
     assert os.path.exists(filename)

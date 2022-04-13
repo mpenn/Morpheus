@@ -30,6 +30,7 @@ from cudf.core.subword_tokenizer import SubwordTokenizer
 
 import morpheus._lib.stages as neos
 from morpheus.config import Config
+from morpheus.config import CppConfig
 from morpheus.pipeline.messages import InferenceMemoryFIL
 from morpheus.pipeline.messages import InferenceMemoryNLP
 from morpheus.pipeline.messages import MessageMeta
@@ -111,7 +112,7 @@ class DeserializeStage(MultiMessageStage):
             input.pipe(ops.map(partial(DeserializeStage.process_dataframe, batch_size=self._batch_size)),
                        ops.flatten()).subscribe(output)
 
-        if (Config.get().use_cpp):
+        if (CppConfig.should_use_cpp):
             stream = neos.DeserializeStage(seg, self.unique_name, self._batch_size)
         else:
             stream = seg.make_node_full(self.unique_name, node_fn)
@@ -223,7 +224,7 @@ class PreprocessBaseStage(MultiMessageStage):
         if (preproc_sig.return_annotation and typing_utils.issubtype(preproc_sig.return_annotation, out_type)):
             out_type = preproc_sig.return_annotation
 
-        if (Config.get().use_cpp):
+        if (CppConfig.should_use_cpp):
             stream = self._get_preprocess_node(seg)
         else:
             stream = seg.make_node(self.unique_name, preprocess_fn)

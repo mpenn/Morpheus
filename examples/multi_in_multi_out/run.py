@@ -70,7 +70,7 @@ def run():
     this_ex_dir = os.path.dirname(__file__)
     ex_root_dir = os.path.dirname(this_ex_dir)
 
-    c = Config.get()
+    c = Config()
 
     c.log_level = logging.DEBUG
     c.debug = True  # Allows timestamps to be added for certain stages

@@ -172,6 +172,8 @@ class AutoEncoderInferenceStage(InferenceStage):
     def __init__(self, c: Config):
         super().__init__(c)
 
+        self._config = c
+
     def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
 
-        return AutoEncoderInference(inf_queue, Config.get())
+        return AutoEncoderInference(inf_queue, self._config)

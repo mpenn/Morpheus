@@ -28,6 +28,7 @@ import cudf
 
 import morpheus._lib.stages as neos
 from morpheus.config import Config
+from morpheus.config import CppConfig
 from morpheus.pipeline import Stage
 from morpheus.pipeline.messages import MessageMeta
 from morpheus.pipeline.messages import MultiMessage
@@ -483,7 +484,7 @@ class AddClassificationsStage(SinglePortStage):
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
-        if Config.get().use_cpp:
+        if CppConfig.should_use_cpp:
             stream = neos.AddClassificationsStage(seg,
                                                   self.unique_name,
                                                   self._threshold,
@@ -589,7 +590,7 @@ class FilterDetectionsStage(SinglePortStage):
 
             input.pipe(ops.map(self.filter), ops.flatten()).subscribe(output)
 
-        if Config.get().use_cpp:
+        if CppConfig.should_use_cpp:
             stream = neos.FilterDetectionsStage(seg, self.unique_name, self._threshold)
         else:
             stream = seg.make_node_full(self.unique_name, flatten_fn)
@@ -731,7 +732,7 @@ class AddScoresStage(SinglePortStage):
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
 
         # Convert the messages to rows of strings
-        if Config.get().use_cpp:
+        if CppConfig.should_use_cpp:
             stream = neos.AddScoresStage(seg, self.unique_name, len(self._class_labels), self._idx2label)
         else:
             stream = seg.make_node(self.unique_name, self._add_labels)
