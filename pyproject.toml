@@ -13,7 +13,9 @@ build-backend = "setuptools.build_meta"
 markers = [
    "slow: Slow tests, the tests covered by this also need to be run in their own processes until #71 is resolved",
    "use_cpp: Test support C++ nodes and objects",
-   "use_python: Test only supports Python nodes and objects"
+   "use_python: Test only supports Python nodes and objects",
+   "replace_callback: Replaces the results_callback in cli",
+   "reload_modules: Reloads a set of python modules after running the current test"
 ]
 
 filterwarnings = [
