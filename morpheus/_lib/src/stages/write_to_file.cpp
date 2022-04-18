@@ -41,7 +41,6 @@ WriteToFileStage::WriteToFileStage(const neo::Segment &parent,
         file_type = determine_file_type(filename);
     }
 
-    using std::placeholders::_1;
     if (file_type == FileTypes::CSV)
     {
         m_write_func = [this](auto &&PH1) { write_csv(std::forward<decltype(PH1)>(PH1)); };
@@ -55,6 +54,9 @@ WriteToFileStage::WriteToFileStage(const neo::Segment &parent,
         LOG(FATAL) << "Unknown extension for file: " << filename;
         throw std::runtime_error("Unknown extension");
     }
+
+    // Enable throwing exceptions in case something fails.
+    m_fstream.exceptions(std::fstream::failbit | std::fstream::badbit);
 
     m_fstream.open(filename, mode);
 }
@@ -94,7 +96,7 @@ std::shared_ptr<WriteToFileStage> WriteToFileStageInterfaceProxy::init(neo::Segm
                                                                        const std::string &mode,
                                                                        FileTypes file_type)
 {
-    std::ios::openmode fsmode;
+    std::ios::openmode fsmode = std::ios::out;
 
     if (StringUtil::str_contains(mode, "r"))
     {
@@ -106,29 +108,26 @@ std::shared_ptr<WriteToFileStage> WriteToFileStageInterfaceProxy::init(neo::Segm
         // Dont support binary
         throw std::invalid_argument("Binary mode ('b') is not supported by WriteToFileStage. Mode: " + mode);
     }
-
-    // Default is write
-    if (mode.empty() || StringUtil::str_contains(mode, "w"))
-    {
-        fsmode |= std::ios::out;
-    }
-
-    // Check for appending
-    if (StringUtil::str_contains(mode, "a"))
-    {
-        fsmode |= (std::ios::app | std::ios::out);
-    }
-
-    // Check for truncation
     if (StringUtil::str_contains(mode, "+"))
     {
-        fsmode |= (std::ios::trunc | std::ios::out);
+        // Dont support binary
+        throw std::invalid_argument("Read/Write mode ('+') is not supported by WriteToFileStage. Mode: " + mode);
     }
 
-    // Ensure something was set
-    if (fsmode == std::ios::openmode())
+    // Default is write
+    if (StringUtil::str_contains(mode, "w"))
     {
-        throw std::runtime_error(std::string("Unsupported file mode: ") + mode);
+        fsmode |= std::ios::trunc;
+    }
+    else if (StringUtil::str_contains(mode, "a"))
+    {
+        // Check for appending
+        fsmode |= std::ios::app;
+    }
+    else
+    {
+        // Ensure something was set
+        throw std::runtime_error(std::string("Unsupported file mode. Must choose either 'w' or 'a'. Mode: ") + mode);
     }
 
     auto stage = std::make_shared<WriteToFileStage>(parent, name, filename, fsmode, file_type);
