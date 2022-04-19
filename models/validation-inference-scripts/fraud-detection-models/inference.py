@@ -1,7 +1,8 @@
 """
 Example Usage:
-python inference.py --graph-data train_data.csv --validation-data val_data.csv --model-xgb model/xgb-model.pt --model-hinsage model/hinsage-model.pt --output out.txt
-
+python inference.py --graph-data ../../datasets/training-data/fraud-detection-training-data.csv \
+     --validation-data ../../datasets/validation-data/fraud-detection-validation-data.csv \
+     --model-xgb model/xgb-model.pt --model-hinsage model/hinsage-model.pt --output out.txt
 """
 
 import argparse
@@ -13,10 +14,8 @@ import tensorflow as tf
 import xgboost as xgb
 from sklearn.metrics import f1_score
 from stellargraph import StellarGraph
-#from components.GraphConstruction import GraphConstruction
 from stellargraph.layer import HinSAGE
 from stellargraph.mapper import HinSAGENodeGenerator
-
 import cudf
 from cuml import ForestInference
 
@@ -88,7 +87,6 @@ def main():
     graph_data = pd.concat([graph_data, val_data])
     graph_data = graph_data.set_index(graph_data['index'])
 
-    # import IPython;IPython.embed();exit(1)
     infer(args.model_xgb, args.model_hinsage, graph_data=graph_data, node_identifier=list(val_data['index']), output=args.output)
 
 
