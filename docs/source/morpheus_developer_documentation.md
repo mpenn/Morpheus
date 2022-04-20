@@ -1012,7 +1012,7 @@ PassThruStage::PassThruStage(const neo::Segment& seg, const std::string& name) :
 {}
 ```
 
-The build_operator method defines an observer which is subscribed to our input observable. The observer consists of three functions, typically lambdas, an `on_next`, `on_error` and `on_completed`. Typically these three functions call the associated methods on the output subscriber.
+The `build_operator` method defines an observer which is subscribed to our input observable. The observer consists of three functions, typically lambdas, an `on_next`, `on_error` and `on_completed`. Typically these three functions call the associated methods on the output subscriber.
 ```cpp
 PassThruStage::operator_fn_t PassThruStage::build_operator()
 {
@@ -1202,7 +1202,7 @@ void close();
 
 The `build_observable` method is responsible for constructing a Neo `Observable` for our source type, the result of which will be passed in to our base's constructor. A Neo `Observable` is constructed by passing it a reference to a function (typically a lambda) which receives a reference to a Neo `Subscriber`, typically this function is the center of a source stage making calls to the `Subscriber`'s `on_next`, `on_error` and `on_completed` methods. For this example the RabbitMQ specific logic was broken out into the `source_generator` method, which should be analogous to the `source_generator` method from the Python class, and will emit new messages into the pipeline by calling `subscriber.on_next(message)`.
 
-The `from_json` method parses a JSON string to a cuDF [table_with_metadata](https://docs.rapids.ai/api/libcudf/stable/structcudf_1_1io_1_1table__with__metadata.html). Lastly, the close method disconnects from the RabbitMQ exchange.
+The `from_json` method parses a JSON string to a cuDF [table_with_metadata](https://docs.rapids.ai/api/libcudf/stable/structcudf_1_1io_1_1table__with__metadata.html). Lastly, the `close` method disconnects from the RabbitMQ exchange.
 
 We will also need three private attributes specific to our interactions with RabbitMQ, our polling interval, the name of the queue we are listening to and a pointer to our channel object.
 ```cpp
@@ -1339,7 +1339,7 @@ The key thing to note is the third argument in the invocation of our base's cons
 base_t(segment, name, build_observable())
 ```
 
-The observable argument to the constructor contains an empty default value, allowing stage authors to later define the observable by calling the set_source_observable method, the constructor could instead be written as:
+The observable argument to the constructor contains an empty default value, allowing stage authors to later define the observable by calling the `set_source_observable` method, the constructor could instead be written as:
 ```cpp
 base_t(segment, name)
 {
@@ -1351,6 +1351,7 @@ Our `build_observable` method returns an observable, which needs to do three thi
 1. Emit data into the pipeline by calling `Subscriber`'s `on_next` method. In our example this occurs in the `source_generator` method.
 1. When an error occurs, call the `Subscriber`'s `on_error` method.
 1. When we are done, call the `Subscriber`'s `on_complete` method.
+
 Note: Some source stages such as ones that read input data from a file there is a clear point where the stage is complete. Others such as this one are intended to continue running until it is shut-down, for these situations the stage can poll the `Subscriber`'s `is_subscribed` method which will return a value of `false` on shut-down.
 ```cpp
 neo::Observable<RabbitMQSourceStage::source_type_t> RabbitMQSourceStage::build_observable()
@@ -1404,7 +1405,7 @@ void RabbitMQSourceStage::source_generator(neo::Subscriber<RabbitMQSourceStage::
 ```
 
 ###### A note on performance:
-We don't yet know how large the messages we are going to be receiving from RabbitMQ, but we should assume that they may be quite large. As such we try to limit the number of copies of this data, preferring to instead pass by reference or move data. The `SimpleAmqpClient`'s `Body()` method returns a const reference to the payload which we also pass by reference into the `from_json` method. Since our stage has no need for the data itself after it's emitted into the pipeline we move our cuDF data table when we construct our MessageMeta instance and again we then move the message into the subscriber's `on_next` method.
+We don't yet know how large the messages we are going to be receiving from RabbitMQ, but we should assume that they may be quite large. As such we try to limit the number of copies of this data, preferring to instead pass by reference or move data. The `SimpleAmqpClient`'s `Body()` method returns a const reference to the payload which we also pass by reference into the `from_json` method. Since our stage has no need for the data itself after it's emitted into the pipeline we move our cuDF data table when we construct our `MessageMeta` instance and again we then move the message into the subscriber's `on_next` method.
 
 Our `from_json` and `close` methods are rather straight forward:
 ```cpp
@@ -1598,7 +1599,7 @@ PYBIND11_MODULE(morpheus_rabbit, m)
 ```
 
 ##### Python Changes
-Previously our stage connected to RabbitMQ server in the constructor, this is no longer advantageous to us when C++ execution is enabled, instead we will record our constructor arguments and move the connection code to a new `connect` method. Our new constructor and connect methods are updated to:
+Previously our stage connected to RabbitMQ server in the constructor, this is no longer advantageous to us when C++ execution is enabled, instead we will record our constructor arguments and move the connection code to a new `connect` method. Our new constructor and `connect` methods are updated to:
 ```python
 def __init__(self,
              config: Config,
