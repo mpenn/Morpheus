@@ -45,6 +45,7 @@ dependencies:
     - gtest=1.10
     - gxx_linux-64=9.4
     - mlflow>=1.23
+    - myst-parser==0.17.2
     - ninja=1.10.2
     - pandas=1.3.5
     - pip

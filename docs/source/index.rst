@@ -196,6 +196,7 @@ See :doc:`basic_usage` for more information on using the CLI and :doc:`advanced_
 
    basic_usage
    advanced_usage
+   morpheus_developer_documentation
    api
 
 
