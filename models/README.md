@@ -39,10 +39,13 @@ In the root directory, the file `model-information.csv` contains the following i
 Sensitive information detection is used to identify pieces of sensitive data (e.g., AWS credentials, GitHub credentials, passwords) in unencrypted data. The model for this use case is an NLP model, specifically a transformer-based model with attention (e.g., mini-BERT).
 
 ### Anomalous Behavior Profiling
-This use case is currently implemeted to differentiate between crypto mining / GPU malware and other GPU-based workflows (e.g., ML/DL training). The model is a XGBoost model.
+This use case is currently implemented to differentiate between crypto mining / GPU malware and other GPU-based workflows (e.g., ML/DL training). The model is a XGBoost model.
 
 ### Phishing Email Detection
-This use case is currently implemeted to differentiate between phishing and non-phishing emails. The models for this use case are NLP models, specifically transformer-based models with attention (e.g., BERT).
+This use case is currently implemented to differentiate between phishing and non-phishing emails. The models for this use case are NLP models, specifically transformer-based models with attention (e.g., BERT).
 
 ### Humans-As-Machines-Machines-As-Humans Detection
-This use case is currently implemeted to detect changes in users' behavior that incate a change from a human to a machines or a machine to a human. The model is an ensemble of an autoencoder and fast fourier transform reconstruction.
+This use case is currently implemented to detect changes in users' behavior that indicate a change from a human to a machines or a machine to a human. The model is an ensemble of an autoencoder and fast fourier transform reconstruction.
+
+### Fraud detection system Detection
+This use case implemented to identify fraudulent transactions from legal transaction in credit card transaction network. The model is based on a combination of graph neural network and gradient boosting tree. It uses a bipartite heterogenous graph representation as input for GraphSAGE for feature learning and XGBoost as a classifier.

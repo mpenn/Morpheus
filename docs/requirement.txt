@@ -13,8 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ipython
+myst-parser==0.17.2
+nbsphinx
+numpydoc
 sphinx
 sphinx_rtd_theme
-numpydoc
-ipython
-nbsphinx

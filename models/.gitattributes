@@ -3,3 +3,4 @@ phishing-models/* filter=lfs diff=lfs merge=lfs -text
 hammah-models/* filter=lfs diff=lfs merge=lfs -text
 abp-models/* filter=lfs diff=lfs merge=lfs -text
 datasets/** filter=lfs diff=lfs merge=lfs -text
+log-parsing-models/* filter=lfs diff=lfs merge=lfs -text
