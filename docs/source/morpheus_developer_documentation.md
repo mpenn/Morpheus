@@ -65,6 +65,11 @@ The most important piece of a stage is node creation. The node creation function
 
 The difference between stages and nodes is that stages guarantee that the same machine will run all nodes in the same process space. This allows nodes to optimize the information they pass between themselves to ensure maximum performance. For example, two nodes could pass a raw GPU device pointer between them, allowing maximum performance with minimum overhead. Without this guarantee that both nodes are running in the same process space, passing such a low-level piece of information would be unsafe.
 
+## Creating a New Morpheus Pipeline
+In general, pipelines in Morpheus can be constructed via the `morpheus` command line tool or with a Python script and the choice is left up to the preference of the author of the pipeline. There are a few situations that nescesitate choosing Python over the command line tool, they are:
+* Use of a custom Morpheus stage
+* The need to
+
 ## Creating a New Morpheus Stage
 ### Python Stage
 Morpheus includes several stages to choose from when building a custom pipeline, which can be included and configured to suit your needs. However, there are likely going to be situations that require writing a custom stage. Morpheus stages are written in Python and optionally may include a C++ implementation.
