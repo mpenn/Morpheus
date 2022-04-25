@@ -66,9 +66,31 @@ The most important piece of a stage is node creation. The node creation function
 The difference between stages and nodes is that stages guarantee that the same machine will run all nodes in the same process space. This allows nodes to optimize the information they pass between themselves to ensure maximum performance. For example, two nodes could pass a raw GPU device pointer between them, allowing maximum performance with minimum overhead. Without this guarantee that both nodes are running in the same process space, passing such a low-level piece of information would be unsafe.
 
 ## Creating a New Morpheus Pipeline
+### Overview
 In general, pipelines in Morpheus can be constructed via the `morpheus` command line tool or with a Python script and the choice is left up to the preference of the author of the pipeline. There are a few situations that nescesitate choosing Python over the command line tool, they are:
 * Use of a custom Morpheus stage
-* The need to
+* The need to use a value which either cannot or not easily be expressed on the command line.
+* The need to set a configuration variable not currently exposed as a command line flag.
+
+### Building a Phishing Detection Pipeline
+For this example we will be using a pipeline which can be executed from both Python and on the command line.
+Consider the following pipeline:
+```shell
+morpheus --log_level=DEBUG run --pipeline_batch_size=1024 --model_max_batch_size=32  \
+   pipeline-nlp --model_seq_length=128 --labels_file=./data/labels_phishing.txt \
+   from-file --filename=./models/datasets/validation-data/phishing-email-validation-data.jsonlines \
+   deserialize \
+   preprocess --vocab_hash_file=./data/bert-base-uncased-hash.txt --truncation=True --do_lower_case=True --add_special_tokens=False \
+   inf-triton --model_name=phishing-bert-onnx --server_url=localhost:8001 --force_convert_inputs=True \
+   monitor --description "Inference Rate" --smoothing=0.001 --unit inf \
+   add-class --label=pred --threshold=0.7 \
+   validate --val_file_name=./models/datasets/validation-data/phishing-email-validation-data.jsonlines --results_file_name=/tmp/val_phishing-bert-20211006-triton-onnx-results.json --overwrite \
+   serialize \
+   to-file --filename=/tmp/val_phishing-bert-20211006-triton-onnx.csv --overwrite
+```
+
+In the above example the first line sets some global parameters. Each additional line adds a stage to the pipeline in the order given. Each stage exposes it's own unique parameters as command line flags.
+
 
 ## Creating a New Morpheus Stage
 ### Python Stage
