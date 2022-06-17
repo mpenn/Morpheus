@@ -15,6 +15,7 @@
 import dataclasses
 import typing
 
+import cupy as cp
 from dfencoder.autoencoder import AutoEncoder
 
 from morpheus.messages.message_meta import UserMessageMeta
@@ -29,6 +30,7 @@ class MultiInferenceAEMessage(MultiInferenceMessage):
     """
 
     model: AutoEncoder
+    train_loss_scores: cp.ndarray
 
     @property
     def user_id(self):
@@ -93,4 +95,5 @@ class MultiInferenceAEMessage(MultiInferenceMessage):
                                        memory=self.memory,
                                        offset=start,
                                        count=stop - start,
-                                       model=self.model)
+                                       model=self.model,
+                                       train_loss_scores=self.train_loss_scores)

@@ -115,6 +115,8 @@ class ConfigAutoEncoder(ConfigBase):
     feature_columns: typing.List[str] = None
     userid_column_name: str = "userIdentityaccountId"
     userid_filter: str = None
+    feature_scaler: str = "standard"
+    min_train_features: int = 1
 
 
 @dataclasses.dataclass

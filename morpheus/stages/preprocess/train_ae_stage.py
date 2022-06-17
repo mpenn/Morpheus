@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import glob
+import importlib
 import logging
 import typing
 
@@ -30,7 +31,6 @@ from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.multi_message_stage import MultiMessageStage
 from morpheus.pipeline.stream_pair import StreamPair
-from morpheus.stages.input.cloud_trail_source_stage import CloudTrailSourceStage
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +51,20 @@ class _UserModelManager(object):
         self._max_history: int = max_history
         self._seed: int = seed
         self._feature_columns = c.ae.feature_columns
+        self._feature_scaler = c.ae.feature_scaler
         self._epochs = epochs
         self._save_model = save_model
 
         self._model: AutoEncoder = None
+        self._train_loss_scores = None
 
     @property
     def model(self):
         return self._model
+
+    @property
+    def train_loss_scores(self):
+        return self._train_loss_scores
 
     def train(self, df: pd.DataFrame) -> AutoEncoder:
 
@@ -68,9 +74,9 @@ class _UserModelManager(object):
 
             history = self._history.iloc[to_drop:, :]
 
-            combined_df = pd.concat([history, df])
+            train_df = pd.concat([history, df])
         else:
-            combined_df = df
+            train_df = df
 
         # If the seed is set, enforce that here
         if (self._seed is not None):
@@ -90,22 +96,26 @@ class _UserModelManager(object):
             # logger='ipynb',
             verbose=False,
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)
-            scaler='gauss_rank',  # feature scaling method
+            scaler=self._feature_scaler,  # feature scaling method
             min_cats=1,  # cut off for minority categories
-            progress_bar=False,
+            progress_bar=False
         )
 
         logger.debug("Training AE model for user: '%s'...", self._user_id)
-        model.fit(combined_df[combined_df.columns.intersection(self._feature_columns)], epochs=self._epochs)
+        # train_df = combined_df[combined_df.columns.intersection(self._feature_columns)]
+        model.fit(train_df, epochs=self._epochs)
+        train_loss_scores = model.get_anomaly_score(train_df)
+
         logger.debug("Training AE model for user: '%s'... Complete.", self._user_id)
 
         if (self._save_model):
             self._model = model
+            self._train_loss_scores = train_loss_scores
 
         # Save the history for next time
-        self._history = combined_df.iloc[max(0, len(combined_df) - self._max_history):, :]
+        self._history = train_df.iloc[max(0, len(train_df) - self._max_history):, :]
 
-        return model
+        return model, train_loss_scores
 
 
 class TrainAEStage(MultiMessageStage):
@@ -135,10 +145,12 @@ class TrainAEStage(MultiMessageStage):
                  c: Config,
                  pretrained_filename: str = None,
                  train_data_glob: str = None,
+                 source_stage_class: str = None,
                  train_epochs: int = 25,
                  train_max_history: int = 1000,
                  seed: int = None,
-                 sort_glob: bool = False):
+                 sort_glob: bool = False,
+                 models_output_filename: str = None):
         super().__init__(c)
 
         self._config = c
@@ -150,6 +162,15 @@ class TrainAEStage(MultiMessageStage):
         self._train_max_history = train_max_history
         self._seed = seed
         self._sort_glob = sort_glob
+        self._models_output_filename = models_output_filename
+
+        self._source_stage_class = source_stage_class
+        if self._source_stage_class is not None:
+            source_stage_module, source_stage_classname = self._source_stage_class.rsplit('.', 1)
+            # load the source stage module, will raise ImportError if module cannot be loaded
+            source_stage_module = importlib.import_module(source_stage_module)
+            # get the source stage class, will raise AttributeError if class cannot be found
+            self._source_stage_class = getattr(source_stage_module, source_stage_classname)
 
         # Single model for the entire pipeline
         self._pretrained_model: AutoEncoder = None
@@ -176,11 +197,14 @@ class TrainAEStage(MultiMessageStage):
 
     def _get_per_user_model(self, x: UserMessageMeta):
 
-        if (x.user_id not in self._user_models):
-            raise RuntimeError("User ID ({}) was not found in the training dataset and cannot be processed.".format(
-                x.user_id))
+        model = None
+        train_loss_scores = None
 
-        return self._user_models[x.user_id].model
+        if (x.user_id in self._user_models):
+            model = self._user_models[x.user_id].model
+            train_loss_scores = self._user_models[x.user_id].train_loss_scores
+
+        return model, train_loss_scores
 
     def _train_model(self, x: UserMessageMeta) -> typing.List[MultiAEMessage]:
 
@@ -192,9 +216,9 @@ class TrainAEStage(MultiMessageStage):
                                                              self._train_max_history,
                                                              self._seed)
 
-        model = self._user_models[x.user_id].train(x.df)
+        model, train_loss_scores = self._user_models[x.user_id].train(x.df)
 
-        return model
+        return model, train_loss_scores
 
     def _build_single(self, seg: neo.Segment, input_stream: StreamPair) -> StreamPair:
         stream = input_stream[0]
@@ -208,17 +232,20 @@ class TrainAEStage(MultiMessageStage):
                                "The 'train_data_glob' will be ignored")
 
             with open(self._pretrained_filename, 'rb') as in_strm:
-                self._pretrained_model = dill.load(in_strm)
+                # self._pretrained_model = dill.load(in_strm)
+                self._user_models = dill.load(in_strm)
 
-            get_model_fn = self._get_pretrained_model
+            # get_model_fn = self._get_pretrained_model
+            get_model_fn = self._get_per_user_model
 
         elif (self._train_data_glob is not None):
+            if (self._source_stage_class is None):
+                raise RuntimeError("source_stage_class must be provided with train_data_glob")
             file_list = glob.glob(self._train_data_glob)
             if self._sort_glob:
                 file_list = sorted(file_list)
 
-            user_to_df = CloudTrailSourceStage.files_to_dfs_per_user(file_list,
-                                                                     FileTypes.Auto,
+            user_to_df = self._source_stage_class.files_to_dfs_per_user(file_list,
                                                                      self._config.ae.userid_column_name,
                                                                      self._feature_columns,
                                                                      self._config.ae.userid_filter)
@@ -231,7 +258,17 @@ class TrainAEStage(MultiMessageStage):
                                                                self._train_max_history,
                                                                self._seed)
 
-                self._user_models[user_id].train(df)
+                # Derive features here
+                df = self._source_stage_class.derive_features(df, self._feature_columns)
+                df = df.dropna(thresh=20, axis=1, how='all')
+
+                if len(df.columns) >= self._config.ae.min_train_features:
+                    self._user_models[user_id].train(df)
+
+            # Save trained user models
+            if self._models_output_filename is not None:
+                with open(self._models_output_filename, 'wb') as out_strm:
+                    dill.dump(self._user_models, out_strm)
 
             get_model_fn = self._get_per_user_model
 
@@ -242,9 +279,9 @@ class TrainAEStage(MultiMessageStage):
 
             def on_next(x: UserMessageMeta):
 
-                model = get_model_fn(x)
+                model, train_loss_scores = get_model_fn(x)
 
-                full_message = MultiAEMessage(meta=x, mess_offset=0, mess_count=x.count, model=model)
+                full_message = MultiAEMessage(meta=x, mess_offset=0, mess_count=x.count, model=model, train_loss_scores=train_loss_scores)
 
                 to_send = []
 

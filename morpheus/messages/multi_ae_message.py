@@ -15,6 +15,7 @@
 import dataclasses
 import logging
 
+import cupy as cp
 from dfencoder import AutoEncoder
 
 from morpheus.messages.multi_message import MultiMessage
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 class MultiAEMessage(MultiMessage):
 
     model: AutoEncoder
+    train_loss_scores: cp.ndarray
 
     def get_slice(self, start, stop):
         """
@@ -45,4 +47,4 @@ class MultiAEMessage(MultiMessage):
             A new `MultiAEMessage` with sliced offset and count.
 
         """
-        return MultiAEMessage(meta=self.meta, mess_offset=start, mess_count=stop - start, model=self.model)
+        return MultiAEMessage(meta=self.meta, mess_offset=start, mess_count=stop - start, model=self.model, train_loss_scores=self.train_loss_scores)

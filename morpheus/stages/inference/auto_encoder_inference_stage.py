@@ -15,6 +15,7 @@
 import typing
 
 import cupy as cp
+import numpy as np
 
 from morpheus.config import Config
 from morpheus.messages import MultiResponseAEMessage
@@ -72,8 +73,8 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
     def calc_output_dims(self, x: MultiInferenceAEMessage) -> typing.Tuple:
 
-        # We only want one score
-        return (x.count, 1)
+        # recontruction loss and zscore
+        return (x.count, 2)
 
     def process(self, batch: MultiInferenceAEMessage, cb: typing.Callable[[ResponseMemory], None]):
         """
@@ -82,7 +83,7 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
         Parameters
         ----------
-        batch : `morpheus.pipeline.messagesMultiInferenceMessage`
+        batch : `morpheus.pipeline.messages.MultiInferenceMessage`
             Batch of inference messages.
         cb : typing.Callable[[`morpheus.pipeline.messages.ResponseMemory`], None]
             Inference callback.
@@ -90,9 +91,22 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
         """
         data = batch.get_meta(batch.meta.df.columns.intersection(self._feature_columns))
 
-        net_loss = batch.model.get_anomaly_score(data)
-        ae_scores = cp.asarray(net_loss)
-        ae_scores = ae_scores.reshape((batch.count, 1))
+        if batch.model is not None:
+            rloss_scores = batch.model.get_anomaly_score(data)
+            zscores = (rloss_scores - batch.train_loss_scores.mean())/batch.train_loss_scores.std()
+            rloss_scores = rloss_scores.reshape((batch.count, 1))
+            zscores = np.absolute(zscores)
+            zscores = zscores.reshape((batch.count, 1))
+
+        else:
+            rloss_scores = np.empty((batch.count, 1))
+            rloss_scores[:] = np.NaN
+            zscores = np.empty((batch.count, 1))
+            zscores[:] = np.NaN
+        
+        ae_scores = np.concatenate((rloss_scores, zscores), axis=1)
+
+        ae_scores = cp.asarray(ae_scores)
 
         mem = ResponseMemoryProbs(
             count=batch.count,

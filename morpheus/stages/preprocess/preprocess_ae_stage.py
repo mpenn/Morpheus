@@ -46,6 +46,7 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         self._fea_length = c.feature_length
         self._feature_columns = c.ae.feature_columns
+        self._min_features = c.ae.min_train_features
 
     @property
     def name(self) -> str:
@@ -62,7 +63,7 @@ class PreprocessAEStage(PreprocessBaseStage):
 
     @staticmethod
     def pre_process_batch(x: MultiAEMessage, fea_len: int,
-                          feature_columns: typing.List[str]) -> MultiInferenceAEMessage:
+                          feature_columns: typing.List[str], min_features: int) -> MultiInferenceAEMessage:
         """
         This function performs pre-processing for autoencoder.
 
@@ -80,12 +81,19 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         meta_df = x.get_meta(x.meta.df.columns.intersection(feature_columns))
         autoencoder = x.model
+        train_loss_scores = x.train_loss_scores
+        count = len(meta_df.index)
+        mess_count = count
+        input = cp.zeros(meta_df.shape, dtype=cp.float32)
 
-        data = autoencoder.prepare_df(meta_df)
-        input = autoencoder.build_input_tensor(data)
-        input = cp.asarray(input.detach())
+        memory = None
 
-        count = input.shape[0]
+        if autoencoder is not None and len(meta_df.columns) >= min_features:
+            data = autoencoder.prepare_df(meta_df)
+            input = autoencoder.build_input_tensor(data)
+            input = cp.asarray(input.detach())
+            count = input.shape[0]
+            mess_count = x.mess_count
 
         seg_ids = cp.zeros((count, 3), dtype=cp.uint32)
         seg_ids[:, 0] = cp.arange(0, count, dtype=cp.uint32)
@@ -95,18 +103,20 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         infer_message = MultiInferenceAEMessage(meta=x.meta,
                                                 mess_offset=x.mess_offset,
-                                                mess_count=x.mess_count,
+                                                mess_count=mess_count,
                                                 memory=memory,
                                                 offset=0,
-                                                count=memory.count,
-                                                model=autoencoder)
+                                                count=count,
+                                                model=autoencoder,
+                                                train_loss_scores = train_loss_scores)
 
         return infer_message
 
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         return partial(PreprocessAEStage.pre_process_batch,
                        fea_len=self._fea_length,
-                       feature_columns=self._feature_columns)
+                       feature_columns=self._feature_columns,
+                       min_features = self._min_features)
 
     def _get_preprocess_node(self, seg: neo.Segment):
         raise NotImplementedError("No C++ node for AE")

@@ -21,6 +21,7 @@ import click
 from click.globals import get_current_context
 
 import morpheus
+from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
 from morpheus.config import ConfigAutoEncoder
 from morpheus.config import ConfigBase
@@ -450,7 +451,7 @@ def pipeline_fil(ctx: click.Context, **kwargs):
              cls=AliasedGroup,
              **command_kwargs)
 @click.option('--columns_file',
-              default=os.path.join(morpheus.DATA_DIR, "columns_ae.txt"),
+              default=os.path.join(morpheus.DATA_DIR, "columns_ae_cloudtrail.txt"),
               type=click.Path(dir_okay=False, exists=True, file_okay=True),
               help=(""))
 @click.option('--labels_file',
@@ -469,6 +470,14 @@ def pipeline_fil(ctx: click.Context, **kwargs):
               default=None,
               help=("Specifying this value will filter all incoming data to only use rows with matching User IDs. "
                     "Which column is used for the User ID is specified by `userid_column_name`"))
+@click.option('--feature_scaler',
+              type=str,
+              default="standard",
+              help=("Autoencoder feature scaler"))
+@click.option('--min_train_features',
+              default=1,
+              type=click.IntRange(min=1),
+              help="Number of features trained in the model")
 @click.option('--viz_file',
               default=None,
               type=click.Path(dir_okay=False, writable=True),
@@ -504,6 +513,8 @@ def pipeline_ae(ctx: click.Context, **kwargs):
 
     config.ae = ConfigAutoEncoder()
     config.ae.userid_column_name = kwargs["userid_column_name"]
+    config.ae.feature_scaler = kwargs["feature_scaler"]
+    config.ae.min_train_features = kwargs["min_train_features"]
 
     if ("columns_file" in kwargs and kwargs["columns_file"] is not None):
         with open(kwargs["columns_file"], "r") as lf:
@@ -511,7 +522,7 @@ def pipeline_ae(ctx: click.Context, **kwargs):
             logger.debug("Loaded columns. Current columns: [%s]", str(config.ae.feature_columns))
     else:
         # Use a default single label
-        config.class_labels = ["ae_anomaly_score"]
+        config.class_labels = ["reconstruct_loss", "zscore"]
 
     if ("labels_file" in kwargs and kwargs["labels_file"] is not None):
         with open(kwargs["labels_file"], "r") as lf:
@@ -519,7 +530,7 @@ def pipeline_ae(ctx: click.Context, **kwargs):
             logger.debug("Loaded labels file. Current labels: [%s]", str(config.class_labels))
     else:
         # Use a default single label
-        config.class_labels = ["ae_anomaly_score"]
+        config.class_labels = ["reconstruct_loss", "zscore"]
 
     if ("userid_filter" in kwargs):
         config.ae.userid_filter = kwargs["userid_filter"]
@@ -691,6 +702,102 @@ def from_cloudtrail(ctx: click.Context, **kwargs):
 
     return stage
 
+@click.command(short_help="Load messages from a Duo directory", **command_kwargs)
+@click.option('--input_glob',
+              type=str,
+              required=True,
+              help=("Input glob pattern to match files to read. For example, './input_dir/*.json' would read all "
+                    "files with the 'json' extension in the directory 'input_dir'."))
+@click.option('--watch_directory',
+              type=bool,
+              default=False,
+              help=("The watch directory option instructs this stage to not close down once all files have been read. "
+                    "Instead it will read all files that match the 'input_glob' pattern, and then continue to watch "
+                    "the directory for additional files. Any new files that are added that match the glob will then "
+                    "be processed."))
+@click.option('--max_files',
+              type=click.IntRange(min=1),
+              help=("Max number of files to read. Useful for debugging to limit startup time. "
+                    "Default value of -1 is unlimited."))
+@click.option('--repeat',
+              default=1,
+              type=click.IntRange(min=1),
+              help=("Repeats the input dataset multiple times. Useful to extend small datasets for debugging."))
+@click.option('--sort_glob',
+              type=bool,
+              default=False,
+              help=("If true the list of files matching `input_glob` will be processed in sorted order."))
+@click.option('--recursive',
+              type=bool,
+              default=True,
+              help=("If true, events will be emitted for the files in subdirectories matching `input_glob`."))
+@click.option('--queue_max_size',
+              type=int,
+              default=128,
+              help=("Maximum queue size to hold the file paths to be processed that match `input_glob`."))
+@click.option('--batch_timeout', type=float, default=5.0, help=("Timeout to retrieve batch messages from the queue."))
+@prepare_command()
+def from_duo(ctx: click.Context, **kwargs):
+
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
+
+    from morpheus.stages.input.duo_source_stage import DuoSourceStage
+
+    stage = DuoSourceStage(config, file_type=FileTypes.CSV, **kwargs)
+
+    p.set_source(stage)
+
+    return stage
+
+@click.command(short_help="Load messages from a Duo directory", **command_kwargs)
+@click.option('--input_glob',
+              type=str,
+              required=True,
+              help=("Input glob pattern to match files to read. For example, './input_dir/*.json' would read all "
+                    "files with the 'json' extension in the directory 'input_dir'."))
+@click.option('--watch_directory',
+              type=bool,
+              default=False,
+              help=("The watch directory option instructs this stage to not close down once all files have been read. "
+                    "Instead it will read all files that match the 'input_glob' pattern, and then continue to watch "
+                    "the directory for additional files. Any new files that are added that match the glob will then "
+                    "be processed."))
+@click.option('--max_files',
+              type=click.IntRange(min=1),
+              help=("Max number of files to read. Useful for debugging to limit startup time. "
+                    "Default value of -1 is unlimited."))
+@click.option('--repeat',
+              default=1,
+              type=click.IntRange(min=1),
+              help=("Repeats the input dataset multiple times. Useful to extend small datasets for debugging."))
+@click.option('--sort_glob',
+              type=bool,
+              default=False,
+              help=("If true the list of files matching `input_glob` will be processed in sorted order."))
+@click.option('--recursive',
+              type=bool,
+              default=True,
+              help=("If true, events will be emitted for the files in subdirectories matching `input_glob`."))
+@click.option('--queue_max_size',
+              type=int,
+              default=128,
+              help=("Maximum queue size to hold the file paths to be processed that match `input_glob`."))
+@click.option('--batch_timeout', type=float, default=5.0, help=("Timeout to retrieve batch messages from the queue."))
+@prepare_command()
+def from_azure(ctx: click.Context, **kwargs):
+
+    config = get_config_from_ctx(ctx)
+    p = get_pipeline_from_ctx(ctx)
+
+    from morpheus.stages.input.azure_source_stage import AzureSourceStage
+
+    stage = AzureSourceStage(config, file_type=FileTypes.JSON, **kwargs)
+
+    p.set_source(stage)
+
+    return stage
+
 
 @click.command(short_help="Display throughput numbers at a specific point in the pipeline", **command_kwargs)
 @click.option('--description', type=str, required=True, help="Header message to use for this monitor")
@@ -814,6 +921,9 @@ def deserialize(ctx: click.Context, **kwargs):
               type=str,
               help=("On startup, all files matching this glob pattern will be loaded and used "
                     "to train a model for each unique user ID."))
+@click.option('--source_stage_class',
+              type=str,
+              help=("If train_data_glob provided, use source stage to batch training data per user."))
 @click.option('--train_epochs',
               type=click.IntRange(min=1),
               default=25,
@@ -824,6 +934,7 @@ def deserialize(ctx: click.Context, **kwargs):
               help=("Maximum amount of rows that will be retained in history. As new data arrives, models will be "
                     "retrained with a maximum number of rows specified by this value."))
 @click.option('--seed', type=int, default=None, help="Seed to use when training. Helps ensure consistent results.")
+@click.option('--models_output_filename', type=click.Path(writable=True), help="The file to write user models to")
 @prepare_command()
 def train_ae(ctx: click.Context, **kwargs):
 
@@ -1391,7 +1502,9 @@ pipeline_ae.add_command(add_scores)
 pipeline_ae.add_command(buffer)
 pipeline_ae.add_command(delay)
 pipeline_ae.add_command(filter_command)
+pipeline_ae.add_command(from_azure)
 pipeline_ae.add_command(from_cloudtrail)
+pipeline_ae.add_command(from_duo)
 pipeline_ae.add_command(gen_viz)
 pipeline_ae.add_command(inf_pytorch_ae)
 pipeline_ae.add_command(inf_triton)
