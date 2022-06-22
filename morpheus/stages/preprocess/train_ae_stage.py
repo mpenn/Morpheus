@@ -260,7 +260,7 @@ class TrainAEStage(MultiMessageStage):
 
                 # Derive features here
                 df = self._source_stage_class.derive_features(df, self._feature_columns)
-                df = df.dropna(thresh=20, axis=1, how='all')
+                df = df.dropna(thresh=2, axis=1, how='all')
 
                 if len(df.columns) >= self._config.ae.min_train_features:
                     self._user_models[user_id].train(df)

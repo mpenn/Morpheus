@@ -744,7 +744,7 @@ def from_duo(ctx: click.Context, **kwargs):
 
     from morpheus.stages.input.duo_source_stage import DuoSourceStage
 
-    stage = DuoSourceStage(config, file_type=FileTypes.CSV, **kwargs)
+    stage = DuoSourceStage(config, **kwargs)
 
     p.set_source(stage)
 

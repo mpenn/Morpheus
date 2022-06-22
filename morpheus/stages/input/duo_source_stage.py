@@ -44,27 +44,71 @@ class DuoSourceStage(AutoencoderSourceStage):
     def name(self) -> str:
         return "from-duo"
 
+    def supports_cpp_node(self):
+        return False
+
+    @staticmethod
+    def create_features(df):
+        access_device = pd.json_normalize(df['access_device'])
+        auth_device = pd.json_normalize(df['auth_device'])
+        auth_device = auth_device[['name']]
+        auth_device.rename(columns={'name': 'device'}, inplace=True)
+        user_val = pd.json_normalize(df['user'])
+        user_val = user_val[['name']]
+        df = df.reset_index(drop=True)
+        access_device = access_device.reset_index(drop=True)
+        auth_device = auth_device.reset_index(drop=True)
+        user_val = user_val.reset_index(drop=True)
+        df = pd.concat([df, access_device, auth_device, user_val], axis=1)
+        return df
+
+    @staticmethod
+    def rename_columns(df):
+        df.rename(columns={'browser': 'accessdevicebrowser', 'os': 'accessdeviceos', 'name': 'username'}, inplace=True)
+        # df = df[
+        #     ['accessdevicebrowser', 'accessdeviceos', 'timestamp', 'result', 'reason', 'device', 'location.city',
+        #     'username']]
+        return df
+
+    @staticmethod
+    def change_columns(df):
+        df.columns = df.columns.str.replace('[_,.,{,},:]', '')
+        df.columns = df.columns.str.strip()
+        return df
+
+    @staticmethod
+    def change_timestamp(df):
+        df['time'] = pd.to_datetime(df['timestamp'])
+        df['time'] = df['time'].astype(str)
+        df['time'] = df['time'].str.split(' ').str[0]
+        df.reset_index(drop=True, inplace=True)
+        return df
+
+    @staticmethod
+    def create_locicrement(df):
+        # result = df
+        slot_list = []
+        timeslots = df['time'].unique()
+        for slot in timeslots:
+            new_df = df[(df['time'] == slot)]
+            new_df["locincrement"] = ((new_df['locationcity'].factorize()[0] + 1))
+            slot_list.append(new_df)
+        slot_df = pd.concat(slot_list)
+        if len(slot_df["locincrement"].unique()) == 1:
+            slot_df["locincrement"] = np.NaN
+            # result = slot_df
+        return slot_df
+
+    @staticmethod
+    def create_logcount(df):
+        df["logcount"] = df.groupby('time').cumcount()
+        return df
+
     @staticmethod
     def derive_features(df: pd.DataFrame, feature_columns: typing.List[str]):
 
-        df.columns=df.columns.str.replace('[_,.,{,},:]','')
-        df["event_dt"] = pd.to_datetime(df['timestamp'],unit='s')
-        df['event_ymd'] = df['event_dt'].astype(str).str.split(' ').str[0]
-
-        datelist=list(set(list(df["event_ymd"])))
-        datelist.sort()
-        newloclist=[]
-        for dt in (datelist):
-            d=(df.index[df['event_ymd'] == dt].tolist())
-            df2=df.loc[d]
-            df2=df2.fillna("nan")
-            df2["locincrement"]=((df2['locationcity'].factorize()[0] + 1))
-            newloclist.append(df2["locincrement"])
-        if len(newloclist)!=0:
-            df3 = pd.concat(newloclist)
-            df=pd.concat([df,df3],axis=1)
-
-        df["logcount"]=df.groupby('event_ymd').cumcount()
+        df = DuoSourceStage.create_locicrement(df)
+        df = DuoSourceStage.create_logcount(df)
 
         if (feature_columns is not None):
             df.drop(columns=df.columns.difference(feature_columns), inplace=True)
@@ -80,7 +124,11 @@ class DuoSourceStage(AutoencoderSourceStage):
 
         dfs = []
         for file in x:
-            df = read_file_to_df(file, FileTypes.CSV, df_type="pandas")
+            df = pd.read_json(file, orient="records")
+            df = DuoSourceStage.create_features(df)
+            df = DuoSourceStage.rename_columns(df)
+            df = DuoSourceStage.change_columns(df)
+            df = DuoSourceStage.change_timestamp(df)
             dfs = dfs + AutoencoderSourceStage.repeat_df(df, repeat_count)
 
         df_per_user = AutoencoderSourceStage.batch_user_split(dfs, userid_column_name, userid_filter)

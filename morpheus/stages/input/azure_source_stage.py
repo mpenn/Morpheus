@@ -45,6 +45,9 @@ class AzureSourceStage(AutoencoderSourceStage):
     def name(self) -> str:
         return "from-azure"
 
+    def supports_cpp_node(self):
+        return False
+
     @staticmethod
     def read_file(filename: str, file_type: FileTypes) -> pd.DataFrame:
         """
