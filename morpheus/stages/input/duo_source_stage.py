@@ -96,7 +96,6 @@ class DuoSourceStage(AutoencoderSourceStage):
         slot_df = pd.concat(slot_list)
         if len(slot_df["locincrement"].unique()) == 1:
             slot_df["locincrement"] = np.NaN
-            # result = slot_df
         return slot_df
 
     @staticmethod
