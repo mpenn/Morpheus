@@ -17,10 +17,10 @@ import os
 import typing
 from functools import partial
 
-import neo
 import numpy as np
 import pandas as pd
-from neo.core import operators as ops
+import srf
+from srf.core import operators as ops
 
 from morpheus._lib.file_types import FileTypes
 from morpheus._lib.file_types import determine_file_type

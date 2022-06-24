@@ -24,6 +24,7 @@ option(BUILD_SHARED_LIBS "Default value for whether or not to build shared or st
 option(MORPHEUS_BUILD_BENCHMARKS "Whether or not to build benchmarks" OFF)
 option(MORPHEUS_BUILD_EXAMPLES "Whether or not to build examples" OFF)
 option(MORPHEUS_BUILD_TESTS "Whether or not to build tests" OFF)
+option(MORPHEUS_BUILD_PYTHON_STUBS "Whether or not to generated .pyi stub files for C++ Python modules. Disable to avoid requiring loading the NVIDIA GPU Driver during build" ON)
 option(MORPHEUS_USE_CCACHE "Enable caching compilation results with ccache" OFF)
 option(MORPHEUS_USE_CLANG_TIDY "Enable running clang-tidy as part of the build process" OFF)
 option(MORPHEUS_USE_CONDA "Enables finding dependencies via conda instead of vcpkg.
@@ -61,7 +62,21 @@ rapids_cmake_build_type(Release)
 include(cmake/configure_toolchain.cmake)
 
 # Project definition
-project(morpheus LANGUAGES C CXX CUDA)
+project(morpheus LANGUAGES C CXX)
+
+# Delay enabling CUDA until after we have determined our CXX compiler
+if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+  message(STATUS "Setting CUDA host compiler to match CXX compiler: ${CMAKE_CXX_COMPILER}")
+
+  # Only set the host compiler if we arent using clang. Using clang > 8ish is
+  # incompatible with CUDA 11.4/11.5/11.6. See Issue #102
+  if(NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
+  endif()
+endif()
+
+# Now enable CUDA
+enable_language(CUDA)
 
 # Ccache configuration
 include(setup_cache)

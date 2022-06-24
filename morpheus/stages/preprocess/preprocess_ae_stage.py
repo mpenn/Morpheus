@@ -17,7 +17,7 @@ import typing
 from functools import partial
 
 import cupy as cp
-import neo
+import srf
 
 from morpheus.config import Config
 from morpheus.messages import InferenceMemoryAE
@@ -118,5 +118,5 @@ class PreprocessAEStage(PreprocessBaseStage):
                        feature_columns=self._feature_columns,
                        min_features = self._min_features)
 
-    def _get_preprocess_node(self, seg: neo.Segment):
+    def _get_preprocess_node(self, builder: srf.Builder):
         raise NotImplementedError("No C++ node for AE")

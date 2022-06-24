@@ -29,7 +29,7 @@ FROM ${FROM_IMAGE}:${CUDA_VER}-devel-${LINUX_DISTRO}${LINUX_VER} AS base
 # Required arguments
 ARG IMAGE_TYPE=base
 ARG RAPIDS_CHANNEL=rapidsai-nightly
-ARG RAPIDS_VER=22.04
+ARG RAPIDS_VER=22.06
 ARG PYTHON_VER=3.8
 ARG CONDA_CHANNEL=rapidsai
 
@@ -47,7 +47,7 @@ RUN apt-get update &&\
     apt-get upgrade -y &&\
     curl -sL https://deb.nodesource.com/setup_12.x | bash - &&\
     apt-get install --no-install-recommends -y \
-        build-essential pkg-config curl unzip tar zip openssh-client bc jq nodejs \
+        build-essential pkg-config curl unzip tar zip openssh-client bc jq nodejs git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
 # Enables "source activate conda"
@@ -121,7 +121,7 @@ RUN --mount=type=cache,id=workspace_cache,target=/workspace/.cache,sharing=locke
     --mount=type=cache,id=conda_pkgs,target=/opt/conda/pkgs,sharing=locked \
     source activate base &&\
     # Temp add CONDA_CHANNEL_ALIAS to get around conda-build 404 errors
-    MORPHEUS_ROOT=/workspace CONDA_BLD_PATH=/opt/conda/conda-bld CONDA_ARGS="--no-test" ./ci/conda/recipes/run_conda_build.sh morpheus
+    MORPHEUS_ROOT=/workspace MORPHEUS_BUILD_PYTHON_STUBS=OFF CONDA_BLD_PATH=/opt/conda/conda-bld CONDA_ARGS="--no-test" ./ci/conda/recipes/run_conda_build.sh morpheus
 
 # ============ Stage: runtime ============
 # Setup container for runtime environment
