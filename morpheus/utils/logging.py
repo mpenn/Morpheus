@@ -26,7 +26,7 @@ from srf.core import logging as srf_logging
 from tqdm import tqdm
 
 
-class TqdmLoggingHandler(logging.Handler):
+class TqdmLoggingHandler(srf_log_handler.SrfHandler):
 
     def __init__(self, level=logging.NOTSET):
         super().__init__(level)
@@ -46,8 +46,14 @@ class TqdmLoggingHandler(logging.Handler):
 
             with tqdm.external_write_mode(file=file, nolock=False):
                 # Write the message
-                click.echo(click.style(msg, **color_kwargs), file=file, err=is_error)
-                self.flush()
+                try:
+                    # click.echo(click.style(msg, **color_kwargs), file=file, err=is_error)
+                    srf_logging.log(click.style(msg, **color_kwargs), record.levelno, record.filename, record.lineno)
+                    self.flush()
+                except RecursionError:  # See issue 36272 https://bugs.python.org/issue36272
+                    raise
+                except Exception:
+                    self.handleError(record)
 
         except (KeyboardInterrupt, SystemExit):
             raise
@@ -129,8 +135,8 @@ def _configure_from_log_level(log_level: int):
         logging.Formatter('%(asctime)s - [%(levelname)s]: %(message)s {%(name)s, %(threadName)s}'))
 
     # Tqdm stream handler (avoids messing with progress bars)
-    # console_handler = TqdmLoggingHandler()
-    console_handler = srf_log_handler.SrfHandler()
+    console_handler = TqdmLoggingHandler()
+    # console_handler = srf_log_handler.SrfHandler()
 
     # Build and run the queue listener to actually process queued messages
     queue_listener = logging.handlers.QueueListener(morpheus_logging_queue,
