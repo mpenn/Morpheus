@@ -85,6 +85,8 @@ def _configure_from_log_file(log_config_file: str):
         # Must be another ini type file
         logging.config.fileConfig(log_config_file)
 
+    srf_logging.init_logging("morpheus", logging.getLogger("morpheus").getEffectiveLevel())
+
 
 def _configure_from_log_level(log_level: int):
     """
@@ -127,7 +129,7 @@ def _configure_from_log_level(log_level: int):
         logging.Formatter('%(asctime)s - [%(levelname)s]: %(message)s {%(name)s, %(threadName)s}'))
 
     # Tqdm stream handler (avoids messing with progress bars)
-    #console_handler = TqdmLoggingHandler()
+    # console_handler = TqdmLoggingHandler()
     console_handler = srf_log_handler.SrfHandler()
 
     # Build and run the queue listener to actually process queued messages
