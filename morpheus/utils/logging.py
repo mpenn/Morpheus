@@ -21,6 +21,8 @@ import os
 
 import appdirs
 import click
+from srf.core import log_handler as srf_log_handler
+from srf.core import logging as srf_logging
 from tqdm import tqdm
 
 
@@ -98,6 +100,7 @@ def _configure_from_log_level(log_level: int):
     logging.captureWarnings(True)
 
     # Get the root Morpheus logger
+    srf_logging.init_logging("morpheus", log_level)
     morpheus_logger = logging.getLogger("morpheus")
     morpheus_logger.setLevel(log_level)
 
@@ -124,7 +127,8 @@ def _configure_from_log_level(log_level: int):
         logging.Formatter('%(asctime)s - [%(levelname)s]: %(message)s {%(name)s, %(threadName)s}'))
 
     # Tqdm stream handler (avoids messing with progress bars)
-    console_handler = TqdmLoggingHandler()
+    #console_handler = TqdmLoggingHandler()
+    console_handler = srf_log_handler.SrfHandler()
 
     # Build and run the queue listener to actually process queued messages
     queue_listener = logging.handlers.QueueListener(morpheus_logging_queue,
