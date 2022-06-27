@@ -19,10 +19,10 @@ import queue
 import typing
 from functools import partial
 
-import neo
+import srf
 import numpy as np
 import pandas as pd
-from neo.core import operators as ops
+from srf.core import operators as ops
 
 from morpheus._lib.common import FiberQueue
 from morpheus._lib.file_types import FileTypes
