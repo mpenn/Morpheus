@@ -106,8 +106,8 @@ From the Morpheus repo root directory run:
 export MORPHEUS_ROOT=$(pwd)
 # Launch Morpheus printing debug messages
 morpheus --log_level=DEBUG \
-   `# Run a pipeline with 8 threads and a model batch size of 32 (Must match Triton config)` \
-   run --num_threads=8 --pipeline_batch_size=1024 --model_max_batch_size=32 \
+   `# Run a pipeline with 12 threads and a model batch size of 32 (Must match Triton config)` \
+   run --num_threads=12 --pipeline_batch_size=1024 --model_max_batch_size=32 \
    `# Specify a NLP pipeline with 256 sequence length (Must match Triton config)` \
    pipeline-nlp --model_seq_length=256 \
    `# 1st Stage: Read from file` \
@@ -122,9 +122,11 @@ morpheus --log_level=DEBUG \
    monitor --description "Inference Rate" --smoothing=0.001 --unit inf \
    `# 6th Stage: Add results from inference to the messages` \
    add-class \
-   `# 7th Stage: Convert from objects back into strings` \
+   `# 7th Stage: Filtering removes any messages that did not detect SI` \
+   filter \
+   `# 8th Stage: Convert from objects back into strings` \
    serialize --exclude '^_ts_' \
-   `# 8th Stage: Write out the JSON lines to the detections.jsonlines file` \
+   `# 9th Stage: Write out the JSON lines to the detections.jsonlines file` \
    to-file --filename=detections.jsonlines --overwrite
 ```
 
