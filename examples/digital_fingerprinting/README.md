@@ -189,8 +189,7 @@ serialize \
 to-file --filename=./duo-detections.csv --overwrite
 ```
 
-Load pre-trained user models from file, `models/hammah-models/duo_ae_user_models.pkl`. Pipeline then uses these models to run inference
-on validation data in `models/datasets/validation-data/duo`. Inference results are written to `duo-detections.csv`.
+The following example shows how we can load pre-trained user models from the file (`models/hammah-models/duo_ae_user_models.pkl`) we created in the previous example. Pipeline then uses these models to run inference on validation data in `models/datasets/validation-data/duo`. Inference results are written to `duo-detections.csv`.
 ```
 morpheus --log_level=DEBUG \
 run --num_threads=1 --pipeline_batch_size=1024 --model_max_batch_size=1024 --use_cpp=False \
@@ -239,8 +238,7 @@ serialize \
 to-file --filename=./azure-detections.csv --overwrite
 ```
 
-Load pre-trained user models from file, `models/hammah-models/azure_ae_user_models.pkl`. Pipeline then uses these models to run inference
-on validation data in `models/datasets/validation-data/azure`. Inference results are written to `azure-detections.csv`.
+The following example shows how we can load pre-trained user models from the file (`models/hammah-models/azure_ae_user_models.pkl`) we created in the previous example. Pipeline then uses these models to run inference on validation data in `models/datasets/validation-data/azure`. Inference results are written to `azure-detections.csv`.
 ```
 morpheus --log_level=DEBUG \
 run --num_threads=1 --pipeline_batch_size=1024 --model_max_batch_size=1024 --use_cpp=False \
