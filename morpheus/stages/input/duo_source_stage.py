@@ -85,7 +85,7 @@ class DuoSourceStage(AutoencoderSourceStage):
         return df
 
     @staticmethod
-    def create_locicrement(df):
+    def create_locincrement(df):
         # result = df
         slot_list = []
         timeslots = df['time'].unique()
@@ -94,19 +94,19 @@ class DuoSourceStage(AutoencoderSourceStage):
             new_df["locincrement"] = ((new_df['locationcity'].factorize()[0] + 1))
             slot_list.append(new_df)
         slot_df = pd.concat(slot_list)
-        if len(slot_df["locincrement"].unique()) == 1:
-            slot_df["locincrement"] = np.NaN
+        slot_df["locincrement"] = slot_df["locincrement"].astype("int32")
         return slot_df
 
     @staticmethod
     def create_logcount(df):
         df["logcount"] = df.groupby('time').cumcount()
+        df["logcount"] = df["logcount"].astype("int32")
         return df
 
     @staticmethod
     def derive_features(df: pd.DataFrame, feature_columns: typing.List[str]):
 
-        df = DuoSourceStage.create_locicrement(df)
+        df = DuoSourceStage.create_locincrement(df)
         df = DuoSourceStage.create_logcount(df)
 
         if (feature_columns is not None):
