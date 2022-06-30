@@ -16,10 +16,12 @@
  */
 
 #include <morpheus/objects/table_info.hpp>
-
+#include <morpheus/utilities/cudf_util.hpp>
 #include <morpheus/utilities/type_util_detail.hpp>
 
+#include <cudf/column/column.hpp>
 #include <cudf/copying.hpp>
+#include <cudf/table/table.hpp>
 #include <cudf/table/table_view.hpp>
 #include <cudf/types.hpp>
 
@@ -103,7 +105,6 @@ void TableInfo::insert_columns(const std::vector<std::string> &column_names, con
 
     // TODO figure out how to do this without the gil
     {
-        namespace py = pybind11;
         pybind11::gil_scoped_acquire gil;
         pybind11::object cupy_zeros = pybind11::module_::import("cupy").attr("zeros");
 
@@ -184,5 +185,48 @@ TableInfo TableInfo::get_slice(cudf::size_type start, cudf::size_type stop, std:
     auto slice_cols = slice_rows.select(col_indices);
 
     return TableInfo(m_parent, slice_cols, m_index_names, new_column_names);
+}
+
+cudf::io::table_with_metadata TableInfo::apply_mask(std::shared_ptr<rmm::device_buffer> mask,
+                                                    std::vector<std::string> column_names) const
+{
+    std::vector<cudf::size_type> col_indices;
+
+    std::vector<std::string> new_column_names;
+
+    // Append the indices column idx by default
+    for (cudf::size_type i = 0; i < this->m_index_names.size(); ++i)
+    {
+        col_indices.push_back(i);
+    }
+
+    std::transform(column_names.begin(),
+                   column_names.end(),
+                   std::back_inserter(col_indices),
+                   [this, &new_column_names](const std::string &c) {
+                       auto found_col = std::find(this->m_column_names.begin(), this->m_column_names.end(), c);
+
+                       if (found_col == this->m_column_names.end())
+                       {
+                           throw std::runtime_error("Unknown column: " + c);
+                       }
+
+                       // Add the found column to the metadata
+                       new_column_names.push_back(c);
+
+                       return (found_col - this->m_column_names.begin() + this->num_indices());
+                   });
+
+    std::vector<std::unique_ptr<cudf::column>> new_cols;
+    for (const auto idx : col_indices)
+    {
+        auto cv      = m_table_view.column(idx);
+        auto new_col = std::make_unique<cudf::column>(cv);
+        new_col->set_null_mask(*mask);
+        new_cols.emplace_back(std::move(new_col));
+    }
+
+    auto tbl = std::make_unique<cudf::table>(std::move(new_cols));
+    return cudf::io::table_with_metadata{std::move(tbl), {new_column_names}};
 }
 }  // namespace morpheus

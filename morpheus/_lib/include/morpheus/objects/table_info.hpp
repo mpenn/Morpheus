@@ -20,6 +20,7 @@
 #include <morpheus/objects/data_table.hpp>
 #include <morpheus/utilities/type_util_detail.hpp>
 
+#include <cudf/io/types.hpp>
 #include <cudf/table/table_view.hpp>
 
 #include <memory>
@@ -97,6 +98,8 @@ struct TableInfo
      * TODO(Documentation)
      */
     TableInfo get_slice(cudf::size_type start, cudf::size_type stop, std::vector<std::string> column_names = {}) const;
+
+    cudf::io::table_with_metadata apply_mask(std::shared_ptr<rmm::device_buffer> mask, std::vector<std::string> column_names = {}) const;
 
   private:
     std::shared_ptr<const IDataTable> m_parent;
