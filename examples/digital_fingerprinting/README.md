@@ -275,7 +275,7 @@ python ./examples/digital_fingerprinting/run.py \
     --output_file ./cloudtrail-dfp-results.csv
 ```
 
-Here we load pre-trained user models from the file (`models/hammah-models/cloudtrail_ae_user_models.pkl`) we created in the previous example. Pipeline then uses these models to run inference on validation data in `models/datasets/validation-data/hammah-*.csv`. Inference results are written to `azure-detections.csv`.
+Here we load pre-trained user models from the file (`models/hammah-models/cloudtrail_ae_user_models.pkl`) we created in the previous example. Pipeline then uses these models to run inference on validation data in `models/datasets/validation-data/hammah-*.csv`. Inference results are written to `cloudtrail-dfp-results.csv`.
 ```
 python ./examples/digital_fingerprinting/run.py \
     --columns_file=morpheus/data/columns_ae_cloudtrail.txt \
