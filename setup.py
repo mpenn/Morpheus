@@ -43,7 +43,7 @@ setup(
         "click>=8",
         "datacompy",
         "docker",
-        "dfencoder @ git+https://github.com/efajardo-nv/dfencoder.git@nv-updates#egg=dfencoder",
+        "dfencoder @ git+https://github.com/efajardo-nv/dfencoder.git@morpheus-22.08#egg=dfencoder",
         "grpcio-channelz",
         "networkx",
         "torch==1.10.2+cu113",

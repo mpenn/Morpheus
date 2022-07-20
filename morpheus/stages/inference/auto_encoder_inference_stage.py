@@ -92,7 +92,7 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
         data = batch.get_meta(batch.meta.df.columns.intersection(self._feature_columns))
 
         if batch.model is not None:
-            rloss_scores = batch.model.get_anomaly_score(data)
+            rloss_scores = batch.model.get_anomaly_score(data)[3]
             zscores = (rloss_scores - batch.train_loss_scores.mean())/batch.train_loss_scores.std()
             rloss_scores = rloss_scores.reshape((batch.count, 1))
             zscores = np.absolute(zscores)

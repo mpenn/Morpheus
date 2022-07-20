@@ -104,7 +104,7 @@ class _UserModelManager(object):
         logger.debug("Training AE model for user: '%s'...", self._user_id)
         # train_df = combined_df[combined_df.columns.intersection(self._feature_columns)]
         model.fit(train_df, epochs=self._epochs)
-        train_loss_scores = model.get_anomaly_score(train_df)
+        train_loss_scores = model.get_anomaly_score(train_df)[3]
 
         logger.debug("Training AE model for user: '%s'... Complete.", self._user_id)
 
