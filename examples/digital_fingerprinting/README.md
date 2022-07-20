@@ -136,7 +136,7 @@ run --num_threads=1 --pipeline_batch_size=1024 --model_max_batch_size=1024 --use
 pipeline-ae \
 --columns_file=morpheus/data/columns_ae_cloudtrail.txt \
 --userid_filter=Account-123456789 \
---feature_scaler=gauss_rank \
+--feature_scaler=standard \
 from-cloudtrail \
 --input_glob=models/datasets/validation-data/hammah-*.csv \
 --max_files=200 \
@@ -257,4 +257,29 @@ monitor --description='Inference rate' --unit inf \
 add-scores \
 serialize \
 to-file --filename=./azure-detections.csv --overwrite
+```
+
+
+## Using Morpheus Python API
+
+The DFP pipelines can also be constructed and run via the Morpheus Python API. An [example](./run_cloudtrail_dfp.py) is included for the Cloudtrail DFP pipeline. The following are some commands to
+run the example.
+
+Train user models from files in `models/datasets/training-data/hammah-*.csv` and saves user models to file. Pipeline then uses these models to run inference on Cloudtrail validation data in `models/datasets/validation-data/hammah-*.csv`. Inference results are written to `cloudtrail-dfp-results.csv`.
+```
+python ./examples/digital_fingerprinting/run.py \
+    --columns_file=morpheus/data/columns_ae_cloudtrail.txt \
+    --input_glob=models/datasets/validation-data/hammah-*.csv \
+    --train_data_glob=models/datasets/training-data/hammah-*.csv \
+    --models_output_filename=models/hammah-models/cloudtrail_ae_user_models.pkl \
+    --output_file ./cloudtrail-dfp-results.csv
+```
+
+Here we load pre-trained user models from the file (`models/hammah-models/cloudtrail_ae_user_models.pkl`) we created in the previous example. Pipeline then uses these models to run inference on validation data in `models/datasets/validation-data/hammah-*.csv`. Inference results are written to `azure-detections.csv`.
+```
+python ./examples/digital_fingerprinting/run.py \
+    --columns_file=morpheus/data/columns_ae_cloudtrail.txt \
+    --input_glob=models/datasets/validation-data/hammah-*.csv \
+    --pretrained_filename=./test_ct_model.pkl \
+    --output_file=./cloudtrail-dfp-results.csv
 ```
