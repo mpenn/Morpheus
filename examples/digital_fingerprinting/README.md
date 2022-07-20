@@ -280,6 +280,6 @@ Here we load pre-trained user models from the file (`models/hammah-models/cloudt
 python ./examples/digital_fingerprinting/run.py \
     --columns_file=morpheus/data/columns_ae_cloudtrail.txt \
     --input_glob=models/datasets/validation-data/hammah-*.csv \
-    --pretrained_filename=./test_ct_model.pkl \
+    --pretrained_filename=models/hammah-models/cloudtrail_ae_user_models.pkl \
     --output_file=./cloudtrail-dfp-results.csv
 ```
