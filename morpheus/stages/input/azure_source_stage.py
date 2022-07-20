@@ -72,7 +72,6 @@ class AzureSourceStage(AutoencoderSourceStage):
             slot_list.append(new_df)
         if slot_list:
             slot_df = pd.concat(slot_list)
-            slot_df["locincrement"] = slot_df["locincrement"].astype("int32")
             return slot_df
         df['locincrement'] = np.NaN
         return df
@@ -87,7 +86,6 @@ class AzureSourceStage(AutoencoderSourceStage):
             slot_list.append(new_df)
         if slot_list:
             slot_df = pd.concat(slot_list)
-            slot_df["appincrement"] = slot_df["appincrement"].astype("int32")
             return slot_df
         df['locincrement'] = np.NaN
         return df
@@ -95,7 +93,6 @@ class AzureSourceStage(AutoencoderSourceStage):
     @staticmethod
     def create_logcount(df):
         df["logcount"] = df.groupby('time').cumcount()
-        df["logcount"] = df["logcount"].astype("int32")
         return df
 
     @staticmethod

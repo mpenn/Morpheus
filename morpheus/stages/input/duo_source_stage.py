@@ -94,13 +94,11 @@ class DuoSourceStage(AutoencoderSourceStage):
             new_df["locincrement"] = ((new_df['locationcity'].factorize()[0] + 1))
             slot_list.append(new_df)
         slot_df = pd.concat(slot_list)
-        slot_df["locincrement"] = slot_df["locincrement"].astype("int32")
         return slot_df
 
     @staticmethod
     def create_logcount(df):
         df["logcount"] = df.groupby('time').cumcount()
-        df["logcount"] = df["logcount"].astype("int32")
         return df
 
     @staticmethod
