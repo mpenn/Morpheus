@@ -45,7 +45,7 @@ cmake --build build --target style_checks --parallel ${PARALLEL_LEVEL}
 gpuci_logger "sccache usage for source build:"
 sccache --show-stats
 
-gpuci_logger "Runing C++ style checks"
+gpuci_logger "Runing C++ checks"
 SKIP_IWYU=1 ${MORPHEUS_ROOT}/ci/scripts/cpp_checks.sh
 
 gpuci_logger "Checking copyright headers"
