@@ -17,6 +17,7 @@ import dataclasses
 import typing
 
 import cupy as cp
+import pandas as pd
 
 import morpheus._lib.messages as _messages
 from morpheus.messages.data_class_prop import DataClassProp
@@ -98,8 +99,13 @@ class ResponseMemoryProbs(ResponseMemory, cpp_class=_messages.ResponseMemoryProb
 
 
 @dataclasses.dataclass
-class ResponseMemoryAE(ResponseMemoryProbs, cpp_class=None):
-    user_id: str = ""
+class ResponseMemoryAE(ResponseMemory, cpp_class=None):
+    probs: dataclasses.InitVar[cp.ndarray] = DataClassProp(get_output, set_output)
+    user_id = ""
+    explain_df = None
+
+    def __post_init__(self, probs):
+        self.probs = probs
 
 
 @dataclasses.dataclass
@@ -213,10 +219,23 @@ class MultiResponseProbsMessage(MultiResponseMessage, cpp_class=_messages.MultiR
 
 
 @dataclasses.dataclass
-class MultiResponseAEMessage(MultiResponseProbsMessage, cpp_class=None):
+class MultiResponseAEMessage(MultiResponseMessage, cpp_class=None):
     """
     A stronger typed version of `MultiResponseProbsMessage` that is used for inference workloads that return a
     probability array. Helps ensure the proper outputs are set and eases debugging.
     """
 
-    user_id: str
+    @property
+    def probs(self):
+        """
+        Probabilities of prediction.
+
+        Returns
+        -------
+        cupy.ndarray
+            probabilities
+
+        """
+
+        return self.get_output("probs")
+

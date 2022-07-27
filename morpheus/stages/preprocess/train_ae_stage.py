@@ -192,9 +192,6 @@ class TrainAEStage(MultiMessageStage):
     def supports_cpp_node(self):
         return False
 
-    def _get_pretrained_model(self, x: UserMessageMeta):
-        return self._pretrained_model
-
     def _get_per_user_model(self, x: UserMessageMeta):
 
         model = None

@@ -16,15 +16,24 @@ import typing
 
 import cupy as cp
 import numpy as np
+import pandas as pd
+from functools import partial
 
 from morpheus.config import Config
 from morpheus.messages import MultiResponseAEMessage
 from morpheus.messages import ResponseMemory
+from morpheus.messages import ResponseMemoryAE
 from morpheus.messages import ResponseMemoryProbs
+from morpheus.pipeline.stream_pair import StreamPair
 from morpheus.messages.multi_inference_ae_message import MultiInferenceAEMessage
 from morpheus.stages.inference.inference_stage import InferenceStage
 from morpheus.stages.inference.inference_stage import InferenceWorker
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
+from morpheus.messages import MultiInferenceMessage
+from morpheus.messages import MultiResponseProbsMessage
+
+import srf
+from srf.core import operators as ops
 
 
 class _AutoEncoderInferenceWorker(InferenceWorker):
@@ -59,7 +68,8 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
         output_dims = self.calc_output_dims(x)
 
-        memory = ResponseMemoryProbs(count=x.count, probs=cp.zeros(output_dims))
+        memory = ResponseMemoryAE(count=x.count, 
+                                  probs=cp.zeros(output_dims))
 
         # Override the default to return the response AE
         output_message = MultiResponseAEMessage(meta=x.meta,
@@ -67,13 +77,12 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
                                                 mess_count=x.mess_count,
                                                 memory=memory,
                                                 offset=x.offset,
-                                                count=x.count,
-                                                user_id=x.user_id)
+                                                count=x.count)
         return output_message
 
     def calc_output_dims(self, x: MultiInferenceAEMessage) -> typing.Tuple:
 
-        # recontruction loss and zscore
+        # reconstruction loss and zscore
         return (x.count, 2)
 
     def process(self, batch: MultiInferenceAEMessage, cb: typing.Callable[[ResponseMemory], None]):
@@ -91,13 +100,20 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
         """
         data = batch.get_meta(batch.meta.df.columns.intersection(self._feature_columns))
 
+        explain_df = pd.DataFrame(np.empty((batch.count,3),dtype=object), columns=["num_col_max_loss", "bin_col_max_loss", "cat_col_max_loss"])
         if batch.model is not None:
             rloss_scores = batch.model.get_anomaly_score(data)[3]
+
+            mse_loss, bce_loss,cce_loss,scores = batch.model.get_anomaly_score(data)
+            num_names, cat_names, bin_names= batch.model.return_feature_names()
+            vi_df= batch.model.get_variable_importance(num_names, cat_names, bin_names, mse_loss, bce_loss, cce_loss, data)
+            for col in vi_df.columns:
+                explain_df[col] = vi_df[col]
+
             zscores = (rloss_scores - batch.train_loss_scores.mean())/batch.train_loss_scores.std()
             rloss_scores = rloss_scores.reshape((batch.count, 1))
             zscores = np.absolute(zscores)
             zscores = zscores.reshape((batch.count, 1))
-
         else:
             rloss_scores = np.empty((batch.count, 1))
             rloss_scores[:] = np.NaN
@@ -108,10 +124,11 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
         ae_scores = cp.asarray(ae_scores)
 
-        mem = ResponseMemoryProbs(
+        mem = ResponseMemoryAE(
             count=batch.count,
-            probs=ae_scores,  # For now, only support one output
-        )
+            probs=ae_scores)
+
+        mem.explain_df = explain_df
 
         cb(mem)
 
@@ -129,3 +146,102 @@ class AutoEncoderInferenceStage(InferenceStage):
     def _get_inference_worker(self, inf_queue: ProducerConsumerQueue) -> InferenceWorker:
 
         return _AutoEncoderInferenceWorker(inf_queue, self._config)
+
+    @staticmethod
+    def _convert_one_response(memory: ResponseMemory, inf: MultiInferenceMessage, res: ResponseMemoryAE):
+        # Make sure we have a continuous list
+        # assert inf.mess_offset == saved_offset + saved_count
+
+        # print(inf.mess_offset)
+        # print(inf.mess_offset+inf.mess_count)
+        res.explain_df.index = range(inf.mess_offset, inf.mess_offset+inf.mess_count)
+        for col in res.explain_df.columns:
+            inf.set_meta(col, res.explain_df[col])
+
+        probs = memory.get_output("probs")
+
+        # Two scenarios:
+        if (inf.mess_count == inf.count):
+            # In message and out message have same count. Just use probs as is
+            probs[inf.offset:inf.count + inf.offset, :] = res.probs
+        else:
+            assert inf.count == res.count
+
+            mess_ids = inf.seq_ids[:, 0].get().tolist()
+
+            # Out message has more reponses, so we have to do key based blending of probs
+            for i, idx in enumerate(mess_ids):
+                probs[idx, :] = cp.maximum(probs[idx, :], res.probs[i, :])
+
+        return MultiResponseAEMessage(meta=inf.meta,
+                                      mess_offset=inf.mess_offset,
+                                      mess_count=inf.mess_count,
+                                      memory=memory,
+                                      offset=inf.offset,
+                                      count=inf.count)
+
+    
+    def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
+
+        print("_build_single")
+
+        stream = input_stream[0]
+        out_type = MultiResponseProbsMessage
+
+        def py_inference_fn(obs: srf.Observable, sub: srf.Subscriber):
+
+            worker = self._get_inference_worker(self._inf_queue)
+
+            worker.init()
+
+            outstanding_requests = 0
+
+            def on_next(x: MultiInferenceMessage):
+                nonlocal outstanding_requests
+
+                batches = self._split_batches(x, self._max_batch_size)
+
+                output_message = worker.build_output_message(x)
+
+                memory = output_message.memory
+
+                fut_list = []
+
+                for batch in batches:
+                    outstanding_requests += 1
+
+                    completion_future = srf.Future()
+
+                    def set_output_fut(resp: ResponseMemoryAE, b, batch_future: srf.Future):
+                        nonlocal outstanding_requests
+                        m = self._convert_one_response(memory, b, resp)
+
+                        outstanding_requests -= 1
+
+                        batch_future.set_result(m)
+
+                    fut_list.append(completion_future)
+
+                    worker.process(batch, partial(set_output_fut, b=batch, batch_future=completion_future))
+
+                for f in fut_list:
+                    f.result()
+
+                return output_message
+
+            obs.pipe(ops.map(on_next)).subscribe(sub)
+
+            assert outstanding_requests == 0, "Not all inference requests were completed"
+
+        if (self._build_cpp_node()):
+            node = self._get_cpp_inference_node(builder)
+        else:
+            node = builder.make_node_full(self.unique_name, py_inference_fn)
+
+        # Set the concurrency level to be up with the thread count
+        node.launch_options.pe_count = self._thread_count
+        builder.make_edge(stream, node)
+
+        stream = node
+
+        return stream, out_type
