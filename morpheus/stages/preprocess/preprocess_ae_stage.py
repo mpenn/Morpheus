@@ -81,7 +81,9 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         meta_df = x.get_meta(x.meta.df.columns.intersection(feature_columns))
         autoencoder = x.model
-        train_loss_scores = x.train_loss_scores
+        # train_loss_scores = x.train_loss_scores
+        scores_mean = x.train_scores_mean
+        scores_std = x.train_scores_std
         count = len(meta_df.index)
         mess_count = count
         input = cp.zeros(meta_df.shape, dtype=cp.float32)
@@ -108,7 +110,8 @@ class PreprocessAEStage(PreprocessBaseStage):
                                                 offset=0,
                                                 count=count,
                                                 model=autoencoder,
-                                                train_loss_scores = train_loss_scores)
+                                                train_scores_mean=scores_mean,
+                                                train_scores_std=scores_std)
 
         return infer_message
 

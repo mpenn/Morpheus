@@ -56,15 +56,25 @@ class _UserModelManager(object):
         self._save_model = save_model
 
         self._model: AutoEncoder = None
-        self._train_loss_scores = None
+        # self._train_loss_scores = None
+        self._train_scores_mean = None
+        self._train_scores_std = None
 
     @property
     def model(self):
         return self._model
 
+    # @property
+    # def train_loss_scores(self):
+    #     return self._train_loss_scores
+
     @property
-    def train_loss_scores(self):
-        return self._train_loss_scores
+    def train_scores_mean(self):
+        return self._train_scores_mean
+
+    @property
+    def train_scores_std(self):
+        return self._train_scores_std
 
     def train(self, df: pd.DataFrame) -> AutoEncoder:
 
@@ -105,17 +115,21 @@ class _UserModelManager(object):
         # train_df = combined_df[combined_df.columns.intersection(self._feature_columns)]
         model.fit(train_df, epochs=self._epochs)
         train_loss_scores = model.get_anomaly_score(train_df)[3]
+        scores_mean = train_loss_scores.mean()
+        scores_std = train_loss_scores.std()
 
         logger.debug("Training AE model for user: '%s'... Complete.", self._user_id)
 
         if (self._save_model):
             self._model = model
-            self._train_loss_scores = train_loss_scores
+            # self._train_loss_scores = train_loss_scores
+            self._train_scores_mean = scores_mean
+            self._train_scores_std = scores_std
 
         # Save the history for next time
         self._history = train_df.iloc[max(0, len(train_df) - self._max_history):, :]
 
-        return model, train_loss_scores
+        return model, scores_mean, scores_std
 
 
 class TrainAEStage(MultiMessageStage):
@@ -195,13 +209,17 @@ class TrainAEStage(MultiMessageStage):
     def _get_per_user_model(self, x: UserMessageMeta):
 
         model = None
-        train_loss_scores = None
+        # train_loss_scores = None
+        train_scores_mean = None
+        train_scores_std = None
 
         if (x.user_id in self._user_models):
             model = self._user_models[x.user_id].model
-            train_loss_scores = self._user_models[x.user_id].train_loss_scores
+            # train_loss_scores = self._user_models[x.user_id].train_loss_scores
+            train_scores_mean = self._user_models[x.user_id].train_scores_mean
+            train_scores_std = self._user_models[x.user_id].train_scores_std
 
-        return model, train_loss_scores
+        return model, train_scores_mean, train_scores_std
 
     def _train_model(self, x: UserMessageMeta) -> typing.List[MultiAEMessage]:
 
@@ -213,9 +231,7 @@ class TrainAEStage(MultiMessageStage):
                                                              self._train_max_history,
                                                              self._seed)
 
-        model, train_loss_scores = self._user_models[x.user_id].train(x.df)
-
-        return model, train_loss_scores
+        return self._user_models[x.user_id].train(x.df)
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
         stream = input_stream[0]
@@ -276,9 +292,9 @@ class TrainAEStage(MultiMessageStage):
 
             def on_next(x: UserMessageMeta):
 
-                model, train_loss_scores = get_model_fn(x)
+                model, scores_mean, scores_std = get_model_fn(x)
 
-                full_message = MultiAEMessage(meta=x, mess_offset=0, mess_count=x.count, model=model, train_loss_scores=train_loss_scores)
+                full_message = MultiAEMessage(meta=x, mess_offset=0, mess_count=x.count, model=model, train_scores_mean=scores_mean, train_scores_std=scores_std)
 
                 to_send = []
 

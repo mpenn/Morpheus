@@ -30,7 +30,9 @@ class MultiInferenceAEMessage(MultiInferenceMessage):
     """
 
     model: AutoEncoder
-    train_loss_scores: cp.ndarray
+    # train_loss_scores: cp.ndarray
+    train_scores_mean: float
+    train_scores_std: float
 
     @property
     def user_id(self):
@@ -96,4 +98,5 @@ class MultiInferenceAEMessage(MultiInferenceMessage):
                                        offset=start,
                                        count=stop - start,
                                        model=self.model,
-                                       train_loss_scores=self.train_loss_scores)
+                                       train_scores_mean=self.train_scores_mean,
+                                       train_scores_std=self.train_scores_std)
