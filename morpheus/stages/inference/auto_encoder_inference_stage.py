@@ -102,9 +102,7 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
         explain_df = pd.DataFrame(np.empty((batch.count,3),dtype=object), columns=["num_col_max_loss", "bin_col_max_loss", "cat_col_max_loss"])
         if batch.model is not None:
-            rloss_scores = batch.model.get_anomaly_score(data)[3]
-
-            mse_loss, bce_loss,cce_loss,scores = batch.model.get_anomaly_score(data)
+            mse_loss, bce_loss,cce_loss, rloss_scores = batch.model.get_anomaly_score(data)
             num_names, cat_names, bin_names= batch.model.return_feature_names()
             vi_df= batch.model.get_variable_importance(num_names, cat_names, bin_names, mse_loss, bce_loss, cce_loss, data)
             for col in vi_df.columns:
