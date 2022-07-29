@@ -147,7 +147,6 @@ train-ae \
 preprocess \
 inf-pytorch \
 add-scores \
-timeseries --resolution=1m --zscore_threshold=8.0 --hot_start \
 monitor --description='Inference rate' --unit inf \
 validate \
 --val_file_name=models/datasets/validation-data/hammah-user123-validation-data.csv \
