@@ -15,7 +15,6 @@
 import dataclasses
 import logging
 
-import cupy as cp
 from dfencoder import AutoEncoder
 
 from morpheus.messages.multi_message import MultiMessage
@@ -49,4 +48,9 @@ class MultiAEMessage(MultiMessage):
             A new `MultiAEMessage` with sliced offset and count.
 
         """
-        return MultiAEMessage(meta=self.meta, mess_offset=start, mess_count=stop - start, model=self.model, train_scores_mean=self.train_scores_mean, train_scores_std=self.train_scores_std)
+        return MultiAEMessage(meta=self.meta,
+                              mess_offset=start,
+                              mess_count=stop - start,
+                              model=self.model,
+                              train_scores_mean=self.train_scores_mean,
+                              train_scores_std=self.train_scores_std)

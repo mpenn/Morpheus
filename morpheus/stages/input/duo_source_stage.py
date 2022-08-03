@@ -12,28 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import glob
 import logging
-import os
-import queue
 import typing
-from functools import partial
 
-import srf
-import numpy as np
 import pandas as pd
-from srf.core import operators as ops
 
-from morpheus._lib.common import FiberQueue
-from morpheus._lib.file_types import FileTypes
-from morpheus._lib.file_types import determine_file_type
-from morpheus.config import Config
-from morpheus.io.deserializers import read_file_to_df
-from morpheus.messages import UserMessageMeta
-from morpheus.pipeline.single_output_source import SingleOutputSource
-from morpheus.pipeline.stream_pair import StreamPair
 from morpheus.stages.input.autoencoder_source_stage import AutoencoderSourceStage
-from morpheus.utils.producer_consumer_queue import Closed
 
 logger = logging.getLogger(__name__)
 

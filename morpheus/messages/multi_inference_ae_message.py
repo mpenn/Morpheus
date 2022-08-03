@@ -15,7 +15,6 @@
 import dataclasses
 import typing
 
-import cupy as cp
 from dfencoder.autoencoder import AutoEncoder
 
 from morpheus.messages.message_meta import UserMessageMeta

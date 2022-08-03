@@ -15,20 +15,13 @@
 import logging
 import os
 import typing
-from functools import partial
 
 import numpy as np
 import pandas as pd
-import srf
-from srf.core import operators as ops
 
 from morpheus._lib.file_types import FileTypes
 from morpheus._lib.file_types import determine_file_type
-from morpheus.config import Config
 from morpheus.io.deserializers import read_file_to_df
-from morpheus.messages import UserMessageMeta
-from morpheus.pipeline.single_output_source import SingleOutputSource
-from morpheus.pipeline.stream_pair import StreamPair
 from morpheus.stages.input.autoencoder_source_stage import AutoencoderSourceStage
 
 logger = logging.getLogger(__name__)

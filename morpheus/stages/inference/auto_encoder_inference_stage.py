@@ -13,27 +13,25 @@
 # limitations under the License.
 
 import typing
+from functools import partial
 
 import cupy as cp
 import numpy as np
 import pandas as pd
-from functools import partial
+import srf
+from srf.core import operators as ops
 
 from morpheus.config import Config
+from morpheus.messages import MultiInferenceMessage
 from morpheus.messages import MultiResponseAEMessage
+from morpheus.messages import MultiResponseProbsMessage
 from morpheus.messages import ResponseMemory
 from morpheus.messages import ResponseMemoryAE
-from morpheus.messages import ResponseMemoryProbs
-from morpheus.pipeline.stream_pair import StreamPair
 from morpheus.messages.multi_inference_ae_message import MultiInferenceAEMessage
+from morpheus.pipeline.stream_pair import StreamPair
 from morpheus.stages.inference.inference_stage import InferenceStage
 from morpheus.stages.inference.inference_stage import InferenceWorker
 from morpheus.utils.producer_consumer_queue import ProducerConsumerQueue
-from morpheus.messages import MultiInferenceMessage
-from morpheus.messages import MultiResponseProbsMessage
-
-import srf
-from srf.core import operators as ops
 
 
 class _AutoEncoderInferenceWorker(InferenceWorker):
@@ -68,8 +66,7 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
         output_dims = self.calc_output_dims(x)
 
-        memory = ResponseMemoryAE(count=x.count, 
-                                  probs=cp.zeros(output_dims))
+        memory = ResponseMemoryAE(count=x.count, probs=cp.zeros(output_dims))
 
         # Override the default to return the response AE
         output_message = MultiResponseAEMessage(meta=x.meta,
@@ -100,15 +97,22 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
         """
         data = batch.get_meta(batch.meta.df.columns.intersection(self._feature_columns))
 
-        explain_df = pd.DataFrame(np.empty((batch.count,3),dtype=object), columns=["num_col_max_loss", "bin_col_max_loss", "cat_col_max_loss"])
+        explain_df = pd.DataFrame(np.empty((batch.count, 3), dtype=object),
+                                  columns=["num_col_max_loss", "bin_col_max_loss", "cat_col_max_loss"])
         if batch.model is not None:
             mse_loss, bce_loss, cce_loss, rloss_scores = batch.model.get_anomaly_score(data)
             num_names, cat_names, bin_names = batch.model.return_feature_names()
-            vi_df= batch.model.get_variable_importance(num_names, cat_names, bin_names, mse_loss, bce_loss, cce_loss, data)
+            vi_df = batch.model.get_variable_importance(num_names,
+                                                        cat_names,
+                                                        bin_names,
+                                                        mse_loss,
+                                                        bce_loss,
+                                                        cce_loss,
+                                                        data)
             for col in vi_df.columns:
                 explain_df[col] = vi_df[col]
 
-            zscores = (rloss_scores - batch.train_scores_mean)/batch.train_scores_std
+            zscores = (rloss_scores - batch.train_scores_mean) / batch.train_scores_std
             rloss_scores = rloss_scores.reshape((batch.count, 1))
             zscores = np.absolute(zscores)
             zscores = zscores.reshape((batch.count, 1))
@@ -117,14 +121,12 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
             rloss_scores[:] = np.NaN
             zscores = np.empty((batch.count, 1))
             zscores[:] = np.NaN
-        
+
         ae_scores = np.concatenate((rloss_scores, zscores), axis=1)
 
         ae_scores = cp.asarray(ae_scores)
 
-        mem = ResponseMemoryAE(
-            count=batch.count,
-            probs=ae_scores)
+        mem = ResponseMemoryAE(count=batch.count, probs=ae_scores)
 
         mem.explain_df = explain_df
 
@@ -150,9 +152,7 @@ class AutoEncoderInferenceStage(InferenceStage):
         # Make sure we have a continuous list
         # assert inf.mess_offset == saved_offset + saved_count
 
-        # print(inf.mess_offset)
-        # print(inf.mess_offset+inf.mess_count)
-        res.explain_df.index = range(inf.mess_offset, inf.mess_offset+inf.mess_count)
+        res.explain_df.index = range(inf.mess_offset, inf.mess_offset + inf.mess_count)
         for col in res.explain_df.columns:
             inf.set_meta(col, res.explain_df[col])
 
@@ -178,10 +178,7 @@ class AutoEncoderInferenceStage(InferenceStage):
                                       offset=inf.offset,
                                       count=inf.count)
 
-    
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
-
-        print("_build_single")
 
         stream = input_stream[0]
         out_type = MultiResponseProbsMessage

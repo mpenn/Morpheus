@@ -513,10 +513,7 @@ def pipeline_fil(ctx: click.Context, **kwargs):
               default=None,
               help=("Specifying this value will filter all incoming data to only use rows with matching User IDs. "
                     "Which column is used for the User ID is specified by `userid_column_name`"))
-@click.option('--feature_scaler',
-              type=str,
-              default="standard",
-              help=("Autoencoder feature scaler"))
+@click.option('--feature_scaler', type=str, default="standard", help=("Autoencoder feature scaler"))
 @click.option('--min_train_features',
               default=1,
               type=click.IntRange(min=1),
@@ -749,6 +746,7 @@ def from_cloudtrail(ctx: click.Context, **kwargs):
 
     return stage
 
+
 @click.command(short_help="Load messages from a Duo directory", **command_kwargs)
 @click.option('--input_glob',
               type=str,
@@ -796,6 +794,7 @@ def from_duo(ctx: click.Context, **kwargs):
     p.set_source(stage)
 
     return stage
+
 
 @click.command(short_help="Load messages from a Duo directory", **command_kwargs)
 @click.option('--input_glob',
@@ -975,6 +974,10 @@ def deserialize(ctx: click.Context, **kwargs):
               type=click.IntRange(min=1),
               default=25,
               help="The number of epochs to train user models for.")
+@click.option('--min_train_rows',
+              type=click.IntRange(min=1),
+              default=300,
+              help="Minimum number of rows to train user model.")
 @click.option('--train_max_history',
               type=click.IntRange(min=1),
               default=1000,

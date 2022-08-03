@@ -62,8 +62,8 @@ class PreprocessAEStage(PreprocessBaseStage):
         return False
 
     @staticmethod
-    def pre_process_batch(x: MultiAEMessage, fea_len: int,
-                          feature_columns: typing.List[str], min_features: int) -> MultiInferenceAEMessage:
+    def pre_process_batch(x: MultiAEMessage, fea_len: int, feature_columns: typing.List[str],
+                          min_features: int) -> MultiInferenceAEMessage:
         """
         This function performs pre-processing for autoencoder.
 
@@ -81,7 +81,6 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         meta_df = x.get_meta(x.meta.df.columns.intersection(feature_columns))
         autoencoder = x.model
-        # train_loss_scores = x.train_loss_scores
         scores_mean = x.train_scores_mean
         scores_std = x.train_scores_std
         count = len(meta_df.index)
@@ -119,7 +118,7 @@ class PreprocessAEStage(PreprocessBaseStage):
         return partial(PreprocessAEStage.pre_process_batch,
                        fea_len=self._fea_length,
                        feature_columns=self._feature_columns,
-                       min_features = self._min_features)
+                       min_features=self._min_features)
 
     def _get_preprocess_node(self, builder: srf.Builder):
         raise NotImplementedError("No C++ node for AE")

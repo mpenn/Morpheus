@@ -22,15 +22,13 @@ from morpheus.config import CppConfig
 from morpheus.config import PipelineModes
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
-from morpheus.stages.input.file_source_stage import FileSourceStage
-from morpheus.stages.output.write_to_file_stage import WriteToFileStage
-from morpheus.stages.preprocess.deserialize_stage import DeserializeStage
-from morpheus.stages.input.cloud_trail_source_stage import CloudTrailSourceStage
-from morpheus.stages.preprocess.train_ae_stage import TrainAEStage
-from morpheus.stages.preprocess.preprocess_ae_stage import PreprocessAEStage
 from morpheus.stages.inference.auto_encoder_inference_stage import AutoEncoderInferenceStage
+from morpheus.stages.input.cloud_trail_source_stage import CloudTrailSourceStage
+from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.stages.postprocess.add_scores_stage import AddScoresStage
 from morpheus.stages.postprocess.serialize_stage import SerializeStage
+from morpheus.stages.preprocess.preprocess_ae_stage import PreprocessAEStage
+from morpheus.stages.preprocess.train_ae_stage import TrainAEStage
 
 
 @click.command()
@@ -86,17 +84,15 @@ from morpheus.stages.postprocess.serialize_stage import SerializeStage
     default="./cloudtrail-detections.csv",
     help="The path to the file where the inference output will be saved.",
 )
-def run_pipeline(
-    num_threads,
-    pipeline_batch_size,
-    model_max_batch_size,
-    columns_file,
-    input_glob,
-    train_data_glob,
-    pretrained_filename,
-    models_output_filename,
-    output_file
-):
+def run_pipeline(num_threads,
+                 pipeline_batch_size,
+                 model_max_batch_size,
+                 columns_file,
+                 input_glob,
+                 train_data_glob,
+                 pretrained_filename,
+                 models_output_filename,
+                 output_file):
     CppConfig.set_should_use_cpp(False)
 
     config = Config()
@@ -106,7 +102,7 @@ def run_pipeline(
     config.ae.feature_scaler = "standard"
 
     with open(columns_file, "r") as lf:
-            config.ae.feature_columns = [x.strip() for x in lf.readlines()]
+        config.ae.feature_columns = [x.strip() for x in lf.readlines()]
 
     config.num_threads = num_threads
     config.pipeline_batch_size = pipeline_batch_size
@@ -120,12 +116,12 @@ def run_pipeline(
     pipeline.set_source(CloudTrailSourceStage(config, input_glob=input_glob))
 
     # Add a training stage
-    pipeline.add_stage(TrainAEStage(config,
-                                    pretrained_filename=pretrained_filename,
-                                    train_data_glob=train_data_glob,
-                                    source_stage_class="morpheus.stages.input.cloud_trail_source_stage.CloudTrailSourceStage",
-                                    models_output_filename=models_output_filename
-                                   ))
+    pipeline.add_stage(
+        TrainAEStage(config,
+                     pretrained_filename=pretrained_filename,
+                     train_data_glob=train_data_glob,
+                     source_stage_class="morpheus.stages.input.cloud_trail_source_stage.CloudTrailSourceStage",
+                     models_output_filename=models_output_filename))
 
     # Add a preprocessing stage
     pipeline.add_stage(PreprocessAEStage(config))

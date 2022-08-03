@@ -17,7 +17,6 @@ import dataclasses
 import typing
 
 import cupy as cp
-import pandas as pd
 
 import morpheus._lib.messages as _messages
 from morpheus.messages.data_class_prop import DataClassProp
@@ -225,4 +224,3 @@ class MultiResponseAEMessage(MultiResponseMessage, cpp_class=None):
         """
 
         return self.get_output("probs")
-

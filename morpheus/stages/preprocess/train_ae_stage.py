@@ -25,7 +25,6 @@ import torch
 from dfencoder import AutoEncoder
 from srf.core import operators as ops
 
-from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
 from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.messages.multi_ae_message import MultiAEMessage
@@ -56,17 +55,12 @@ class _UserModelManager(object):
         self._save_model = save_model
 
         self._model: AutoEncoder = None
-        # self._train_loss_scores = None
         self._train_scores_mean = None
         self._train_scores_std = None
 
     @property
     def model(self):
         return self._model
-
-    # @property
-    # def train_loss_scores(self):
-    #     return self._train_loss_scores
 
     @property
     def train_scores_mean(self):
@@ -108,8 +102,7 @@ class _UserModelManager(object):
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)
             scaler=self._feature_scaler,  # feature scaling method
             min_cats=1,  # cut off for minority categories
-            progress_bar=False
-        )
+            progress_bar=False)
 
         logger.debug("Training AE model for user: '%s'...", self._user_id)
         # train_df = combined_df[combined_df.columns.intersection(self._feature_columns)]
@@ -122,7 +115,6 @@ class _UserModelManager(object):
 
         if (self._save_model):
             self._model = model
-            # self._train_loss_scores = train_loss_scores
             self._train_scores_mean = scores_mean
             self._train_scores_std = scores_std
 
@@ -146,6 +138,7 @@ class TrainAEStage(MultiMessageStage):
         Input glob pattern to match files to read.
     train_epochs : int, default = 25
         Passed in as the `epoch` parameter to `AutoEncoder.fit` causes data to be trained in `train_epochs` batches.
+    min_train_rows : int, default = 300
     train_max_history : int, default = 1000
         Truncate training data to at most `train_max_history` rows.
     seed : int, default = None
@@ -161,6 +154,7 @@ class TrainAEStage(MultiMessageStage):
                  train_data_glob: str = None,
                  source_stage_class: str = None,
                  train_epochs: int = 25,
+                 min_train_rows=300,
                  train_max_history: int = 1000,
                  seed: int = None,
                  sort_glob: bool = False,
@@ -173,6 +167,7 @@ class TrainAEStage(MultiMessageStage):
         self._pretrained_filename = pretrained_filename
         self._train_data_glob: str = train_data_glob
         self._train_epochs = train_epochs
+        self._min_train_rows = min_train_rows
         self._train_max_history = train_max_history
         self._seed = seed
         self._sort_glob = sort_glob
@@ -209,13 +204,11 @@ class TrainAEStage(MultiMessageStage):
     def _get_per_user_model(self, x: UserMessageMeta):
 
         model = None
-        # train_loss_scores = None
         train_scores_mean = None
         train_scores_std = None
 
         if (x.user_id in self._user_models):
             model = self._user_models[x.user_id].model
-            # train_loss_scores = self._user_models[x.user_id].train_loss_scores
             train_scores_mean = self._user_models[x.user_id].train_scores_mean
             train_scores_std = self._user_models[x.user_id].train_scores_std
 
@@ -259,24 +252,25 @@ class TrainAEStage(MultiMessageStage):
                 file_list = sorted(file_list)
 
             user_to_df = self._source_stage_class.files_to_dfs_per_user(file_list,
-                                                                     self._config.ae.userid_column_name,
-                                                                     self._feature_columns,
-                                                                     self._config.ae.userid_filter)
+                                                                        self._config.ae.userid_column_name,
+                                                                        self._feature_columns,
+                                                                        self._config.ae.userid_filter)
 
             for user_id, df in user_to_df.items():
-                self._user_models[user_id] = _UserModelManager(self._config,
-                                                               user_id,
-                                                               True,
-                                                               self._train_epochs,
-                                                               self._train_max_history,
-                                                               self._seed)
+                if len(df.index) >= self._min_train_rows:
+                    self._user_models[user_id] = _UserModelManager(self._config,
+                                                                   user_id,
+                                                                   True,
+                                                                   self._train_epochs,
+                                                                   self._train_max_history,
+                                                                   self._seed)
 
-                # Derive features here
-                df = self._source_stage_class.derive_features(df, self._feature_columns)
-                df = df.dropna(thresh=2, axis=1, how='all')
+                    # Derive features here
+                    df = self._source_stage_class.derive_features(df, self._feature_columns)
+                    df = df.dropna(thresh=2, axis=1, how='all')
 
-                if len(df.columns) >= self._config.ae.min_train_features:
-                    self._user_models[user_id].train(df)
+                    if len(df.columns) >= self._config.ae.min_train_features:
+                        self._user_models[user_id].train(df)
 
             # Save trained user models
             if self._models_output_filename is not None:
@@ -294,7 +288,12 @@ class TrainAEStage(MultiMessageStage):
 
                 model, scores_mean, scores_std = get_model_fn(x)
 
-                full_message = MultiAEMessage(meta=x, mess_offset=0, mess_count=x.count, model=model, train_scores_mean=scores_mean, train_scores_std=scores_std)
+                full_message = MultiAEMessage(meta=x,
+                                              mess_offset=0,
+                                              mess_count=x.count,
+                                              model=model,
+                                              train_scores_mean=scores_mean,
+                                              train_scores_std=scores_std)
 
                 to_send = []
 
