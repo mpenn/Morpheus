@@ -1,7 +1,7 @@
 accessdevicebrowser
 accessdeviceos
-locationcity
-device
+accessdevicelocationcity
+authdevicename
 result
 reason
 locincrement
