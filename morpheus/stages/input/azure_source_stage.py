@@ -33,60 +33,40 @@ class AzureSourceStage(AutoencoderSourceStage):
         return False
 
     @staticmethod
-    def change_timestamp(df):
-        df['time'] = pd.to_datetime(df['createdDateTime'])
-        df['time'] = df['time'].astype(str)
-        df['time'] = df['time'].str.split(' ').str[0]
-        df.reset_index(drop=True, inplace=True)
-        return df
-
-    @staticmethod
     def change_columns(df):
         df.columns = df.columns.str.replace('[_,.,{,},:]', '')
         df.columns = df.columns.str.strip()
         return df
 
     @staticmethod
-    def create_locincrement(df):
-        slot_list = []
-        timeslots = df['time'].unique()
-        for slot in timeslots:
-            new_df = df[df['time'] == slot]
-            new_df["locincrement"] = new_df['locationcity'].factorize()[0] + 1
-            slot_list.append(new_df)
-        if slot_list:
-            slot_df = pd.concat(slot_list)
-            return slot_df
-        df['locincrement'] = np.NaN
-        return df
-
-    @staticmethod
-    def create_appincrement(df):
-        slot_list = []
-        timeslots = df['time'].unique()
-        for slot in timeslots:
-            new_df = df[df['time'] == slot]
-            new_df["appincrement"] = new_df['appDisplayName'].factorize()[0] + 1
-            slot_list.append(new_df)
-        if slot_list:
-            slot_df = pd.concat(slot_list)
-            return slot_df
-        df['locincrement'] = np.NaN
-        return df
-
-    @staticmethod
-    def create_logcount(df):
-        df["logcount"] = df.groupby('time').cumcount()
-        return df
-
-    @staticmethod
     def derive_features(df: pd.DataFrame, feature_columns: typing.List[str]):
 
-        df = AzureSourceStage.change_timestamp(df)
+        _DEFAULT_DATE = '1970-01-01T00:00:00.000000+00:00'
+        timestamp_column = "createdDateTime"
+        city_column = "locationcity"
+        state_column = "locationstate"
+        country_column = "locationcountryOrRegion"
+        application_column = "appDisplayName"
+
         df = AzureSourceStage.change_columns(df)
-        df = AzureSourceStage.create_locincrement(df)
-        df = AzureSourceStage.create_appincrement(df)
-        df = AzureSourceStage.create_logcount(df)
+        df['time'] = pd.to_datetime(df[timestamp_column], errors='coerce')
+        df['day'] = df['time'].dt.date
+        df.fillna({'time': pd.to_datetime(_DEFAULT_DATE), 'day': pd.to_datetime(_DEFAULT_DATE).date()}, inplace = True)
+        df.sort_values(by=['time'], inplace=True)
+        overall_location_columns = [col for col in [city_column, state_column, country_column] if col is not None]
+        if len(overall_location_columns) > 0:
+            overall_location_df = df[overall_location_columns].fillna('nan')
+            df['overall_location'] = overall_location_df.apply(lambda x: ', '.join(x), axis=1)
+            df['loc_cat'] = df.groupby('day')['overall_location'].transform(lambda x: pd.factorize(x)[0] + 1)
+            df.fillna({'loc_cat': 1}, inplace = True)
+            df['locincrement'] = df.groupby('day')['loc_cat'].expanding(1).max().droplevel(0)
+            df.drop(['overall_location', 'loc_cat'], inplace=True, axis=1)
+        if application_column is not None:
+            df['app_cat'] = df.groupby('day')[application_column].transform(lambda x: pd.factorize(x)[0] + 1)
+            df.fillna({'app_cat': 1}, inplace = True)
+            df['appincrement'] = df.groupby('day')['app_cat'].expanding(1).max().droplevel(0)
+            df.drop('app_cat', inplace=True, axis=1)
+        df["logcount"]=df.groupby('day').cumcount()
 
         if (feature_columns is not None):
             df.drop(columns=df.columns.difference(feature_columns), inplace=True)
