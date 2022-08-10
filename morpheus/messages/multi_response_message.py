@@ -203,24 +203,3 @@ class MultiResponseProbsMessage(MultiResponseMessage, cpp_class=_messages.MultiR
 
         return self.get_output("probs")
 
-
-@dataclasses.dataclass
-class MultiResponseAEMessage(MultiResponseMessage, cpp_class=None):
-    """
-    A stronger typed version of `MultiResponseProbsMessage` that is used for inference workloads that return a
-    probability array. Helps ensure the proper outputs are set and eases debugging.
-    """
-
-    @property
-    def probs(self):
-        """
-        Probabilities of prediction.
-
-        Returns
-        -------
-        cupy.ndarray
-            probabilities
-
-        """
-
-        return self.get_output("probs")
