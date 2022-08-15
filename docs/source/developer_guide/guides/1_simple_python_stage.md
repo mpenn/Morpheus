@@ -31,13 +31,14 @@ Defining this stage requires us to specify the stage type. Morpheus stages conta
 import typing
 
 import srf
+
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
 class PassThruStage(SinglePortStage):
 ```
 
-There are three methods that need to be defined in our new subclass to implement the stage interface: `name`, `accepted_types`, and `_build_single`. In practice, it is often necessary to define at least one more method which will perform the actual work of the stage; by convention, this method is typically named `on_data`, which we will define in our examples.
+There are four methods that need to be defined in our new subclass to implement the stage interface: `name`, `accepted_types`, `supports_cpp_node`, and `_build_single`. In practice, it is often necessary to define at least one more method which will perform the actual work of the stage; by convention, this method is typically named `on_data`, which we will define in our examples.
 
 `name` is a property method; it should return a user-friendly name for the stage. Currently, this property is only used for debugging purposes, and there are no requirements on the content or format of the name.
 ```python
@@ -50,6 +51,12 @@ The `accepted_types` method returns a tuple of message classes that this stage a
 ```python
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any,)
+```
+
+The `supports_cpp_node` method returns a boolean indicating if the stage has a C++ implementation. Since our example only contains a Python implementation we will return `False` here.
+```python
+    def supports_cpp_node(self):
+        return False
 ```
 
 Our `on_data` method accepts the incoming message and returns a message. The returned message can be the same message instance that we received as our input or it could be a new message instance. The method is named `on_data` by convention; however, it is not part of the API. In the next section, we will register it as a callback in Morpheus.
@@ -90,13 +97,18 @@ import srf
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
+
 class PassThruStage(SinglePortStage):
+
     @property
     def name(self) -> str:
         return "pass-thru"
 
     def accepted_types(self) -> typing.Tuple:
-        return (typing.Any,)
+        return (typing.Any, )
+
+    def supports_cpp_node(self):
+        return False
 
     def on_data(self, message: typing.Any):
         # Return the message for the next stage
