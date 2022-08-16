@@ -116,7 +116,7 @@ class ConfigAutoEncoder(ConfigBase):
     userid_column_name: str = "userIdentityaccountId"
     userid_filter: str = None
     feature_scaler: str = "standard"
-    min_train_features: int = 1
+    use_generic_model: bool = False
 
 
 @dataclasses.dataclass

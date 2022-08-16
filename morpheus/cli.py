@@ -514,10 +514,10 @@ def pipeline_fil(ctx: click.Context, **kwargs):
               help=("Specifying this value will filter all incoming data to only use rows with matching User IDs. "
                     "Which column is used for the User ID is specified by `userid_column_name`"))
 @click.option('--feature_scaler', type=str, default="standard", help=("Autoencoder feature scaler"))
-@click.option('--min_train_features',
-              default=1,
-              type=click.IntRange(min=1),
-              help="Number of features trained in the model")
+@click.option('--use_generic_model',
+              default=False,
+              type=bool,
+              help=("Whether to use a generic model when user does not have minimum number of training rows"))
 @click.option('--viz_file',
               default=None,
               type=click.Path(dir_okay=False, writable=True),
@@ -554,7 +554,7 @@ def pipeline_ae(ctx: click.Context, **kwargs):
     config.ae = ConfigAutoEncoder()
     config.ae.userid_column_name = kwargs["userid_column_name"]
     config.ae.feature_scaler = kwargs["feature_scaler"]
-    config.ae.min_train_features = kwargs["min_train_features"]
+    config.ae.use_generic_model = kwargs["use_generic_model"]
 
     if ("columns_file" in kwargs and kwargs["columns_file"] is not None):
         with open(kwargs["columns_file"], "r") as lf:

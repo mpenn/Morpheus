@@ -66,9 +66,9 @@ Options:
                                   ID is specified by `userid_column_name`
   --feature_scaler TEXT           Autoencoder feature scaler  [default:
                                   standard]
-  --min_train_features INTEGER RANGE
-                                  Number of features trained in the model
-                                  [default: 1; x>=1]
+  --use_generic_model BOOLEAN     Whether to use a generic model when user does
+                                  not have minimum number of training rows
+                                  [default: False]
   --viz_file FILE                 Save a visualization of the pipeline at the
                                   specified location
   --help                          Show this message and exit.
@@ -148,13 +148,6 @@ preprocess \
 inf-pytorch \
 add-scores \
 monitor --description='Inference rate' --unit inf \
-validate \
---val_file_name=models/datasets/validation-data/hammah-user123-validation-data.csv \
---results_file_name=./cloudtrail-validation-results-ae.json \
---index_col=_index_ \
---exclude=event_dt \
---rel_tol=0.1 \
---overwrite \
 serialize \
 to-file --filename=./cloudtrail-detections.csv --overwrite
 ```

@@ -163,6 +163,7 @@ class TrainAEStage(MultiMessageStage):
 
         self._config = c
         self._feature_columns = c.ae.feature_columns
+        self._use_generic_model = c.ae.use_generic_model
         self._batch_size = c.pipeline_batch_size
         self._pretrained_filename = pretrained_filename
         self._train_data_glob: str = train_data_glob
@@ -206,11 +207,17 @@ class TrainAEStage(MultiMessageStage):
         model = None
         train_scores_mean = None
         train_scores_std = None
+        user_model = None
 
-        if (x.user_id in self._user_models):
-            model = self._user_models[x.user_id].model
-            train_scores_mean = self._user_models[x.user_id].train_scores_mean
-            train_scores_std = self._user_models[x.user_id].train_scores_std
+        if x.user_id in self._user_models:
+            user_model = self._user_models[x.user_id]
+        elif self._use_generic_model and "generic" in self._user_models.keys():
+            user_model = self._user_models["generic"]
+
+        if (user_model is not None):
+            model = user_model.model
+            train_scores_mean = user_model.train_scores_mean
+            train_scores_std = user_model.train_scores_std
 
         return model, train_scores_mean, train_scores_std
 
@@ -268,9 +275,19 @@ class TrainAEStage(MultiMessageStage):
                     # Derive features here
                     df = self._source_stage_class.derive_features(df, self._feature_columns)
                     df = df.dropna(thresh=2, axis=1, how='all')
+                    self._user_models[user_id].train(df)
 
-                    if len(df.columns) >= self._config.ae.min_train_features:
-                        self._user_models[user_id].train(df)
+            if self._use_generic_model:
+                self._user_models["generic"] = _UserModelManager(self._config,
+                                                                    "generic",
+                                                                    True,
+                                                                    self._train_epochs,
+                                                                    self._train_max_history,
+                                                                    self._seed)
+                
+                all_users_df = pd.concat(user_to_df.values())
+                all_users_df = self._source_stage_class.derive_features(all_users_df, self._feature_columns)
+                self._user_models["generic"].train(all_users_df)
 
             # Save trained user models
             if self._models_output_filename is not None:

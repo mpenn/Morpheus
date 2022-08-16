@@ -46,7 +46,6 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         self._fea_length = c.feature_length
         self._feature_columns = c.ae.feature_columns
-        self._min_features = c.ae.min_train_features
 
     @property
     def name(self) -> str:
@@ -62,8 +61,7 @@ class PreprocessAEStage(PreprocessBaseStage):
         return False
 
     @staticmethod
-    def pre_process_batch(x: MultiAEMessage, fea_len: int, feature_columns: typing.List[str],
-                          min_features: int) -> MultiInferenceAEMessage:
+    def pre_process_batch(x: MultiAEMessage, fea_len: int, feature_columns: typing.List[str]) -> MultiInferenceAEMessage:
         """
         This function performs pre-processing for autoencoder.
 
@@ -89,7 +87,7 @@ class PreprocessAEStage(PreprocessBaseStage):
 
         memory = None
 
-        if autoencoder is not None and len(meta_df.columns) >= min_features:
+        if autoencoder is not None:
             data = autoencoder.prepare_df(meta_df)
             input = autoencoder.build_input_tensor(data)
             input = cp.asarray(input.detach())
@@ -117,8 +115,7 @@ class PreprocessAEStage(PreprocessBaseStage):
     def _get_preprocess_fn(self) -> typing.Callable[[MultiMessage], MultiInferenceMessage]:
         return partial(PreprocessAEStage.pre_process_batch,
                        fea_len=self._fea_length,
-                       feature_columns=self._feature_columns,
-                       min_features=self._min_features)
+                       feature_columns=self._feature_columns)
 
     def _get_preprocess_node(self, builder: srf.Builder):
         raise NotImplementedError("No C++ node for AE")
