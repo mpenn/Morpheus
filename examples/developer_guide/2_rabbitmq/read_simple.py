@@ -19,12 +19,12 @@ import os
 import psutil
 from from_rabbitmq import RabbitMQSourceStage
 
+from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
-from morpheus.pipeline.file_types import FileTypes
-from morpheus.pipeline.general_stages import MonitorStage
-from morpheus.pipeline.output.to_file import WriteToFileStage
-from morpheus.utils.logging import configure_logging
+from morpheus.stages.general.monitor_stage import MonitorStage
+from morpheus.stages.output.write_to_file_stage import WriteToFileStage
+from morpheus.utils.logger import configure_logging
 
 
 def run_pipeline():
@@ -48,6 +48,7 @@ def run_pipeline():
 
     # Run the pipeline
     pipeline.run()
+
 
 if __name__ == "__main__":
     run_pipeline()
