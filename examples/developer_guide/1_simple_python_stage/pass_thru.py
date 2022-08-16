@@ -30,7 +30,7 @@ class PassThruStage(SinglePortStage):
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any, )
 
-    def supports_cpp_node(self):
+    def supports_cpp_node(self) -> bool:
         return False
 
     def on_data(self, message: typing.Any):
