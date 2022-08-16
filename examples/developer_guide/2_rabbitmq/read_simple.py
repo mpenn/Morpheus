@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import logging
-import os
 
 import psutil
 from from_rabbitmq import RabbitMQSourceStage
