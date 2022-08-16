@@ -55,7 +55,7 @@ The `accepted_types` method returns a tuple of message classes that this stage a
 
 The `supports_cpp_node` method returns a boolean indicating if the stage has a C++ implementation. Since our example only contains a Python implementation we will return `False` here.
 ```python
-    def supports_cpp_node(self):
+    def supports_cpp_node(self) -> bool:
         return False
 ```
 
@@ -107,7 +107,7 @@ class PassThruStage(SinglePortStage):
     def accepted_types(self) -> typing.Tuple:
         return (typing.Any, )
 
-    def supports_cpp_node(self):
+    def supports_cpp_node(self) -> bool:
         return False
 
     def on_data(self, message: typing.Any):

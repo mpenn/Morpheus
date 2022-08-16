@@ -39,7 +39,7 @@ Next, we will update our `on_data` method to perform the actual work.
 We grab a reference to the incoming message's `df` attribute. It is important to note that `message` is a reference, and any changes made to it or its members (such as `df`) will be performed in place on the existing message instance.
 
 ```python
-def on_data(self, message: MessageMeta):
+def on_data(self, message: MessageMeta) -> MessageMeta:
     # Get the DataFrame from the incoming message
     df = message.df
 
@@ -62,7 +62,7 @@ def on_data(self, message: MessageMeta):
 If mutating the data frame is undesirable, we could make a call to the data frame's [copy](https://docs.rapids.ai/api/cudf/stable/api_docs/api/cudf.DataFrame.copy.html#cudf.DataFrame.copy) method and return a new `MessageMeta`. Note however that this would come at the cost of performance and increased memory usage. Our updated `on_data` method would look like this (changing the first and last lines of the method):
 
 ```python
-def on_data(self, message: MessageMeta):
+def on_data(self, message: MessageMeta) -> MessageMeta:
     # Take a copy of the DataFrame from the incoming message
     df = message.df.copy(True)
     ...
@@ -86,14 +86,18 @@ from morpheus.pipeline.stream_pair import StreamPair
 
 
 class RecipientFeaturesStage(SinglePortStage):
+
     @property
     def name(self) -> str:
         return "recipient-features"
 
     def accepted_types(self) -> typing.Tuple:
-        return (MessageMeta,)
+        return (MessageMeta, )
 
-    def on_data(self, message: MessageMeta):
+    def supports_cpp_node(self) -> bool:
+        return False
+
+    def on_data(self, message: MessageMeta) -> MessageMeta:
         # Get the DataFrame from the incoming message
         df = message.df
 
@@ -103,10 +107,8 @@ class RecipientFeaturesStage(SinglePortStage):
         df['total_recipients'] = df['to_count'] + df['bcc_count'] + df['cc_count']
 
         # Attach features to string data
-        df['data'] = (df['to_count'].astype(str) + '[SEP]' +
-                      df['bcc_count'].astype(str) + '[SEP]' +
-                      df['cc_count'].astype(str) + '[SEP]' +
-                      df['total_recipients'].astype(str) + '[SEP]' +
+        df['data'] = (df['to_count'].astype(str) + '[SEP]' + df['bcc_count'].astype(str) + '[SEP]' +
+                      df['cc_count'].astype(str) + '[SEP]' + df['total_recipients'].astype(str) + '[SEP]' +
                       df['Message'])
 
         # Return the message for the next stage
@@ -306,6 +308,7 @@ from morpheus.utils.logger import configure_logging
 
 from recipient_features_stage import RecipientFeaturesStage
 
+
 def run_pipeline():
     # Enable the default logger
     configure_logging(log_level=logging.INFO)
@@ -345,12 +348,11 @@ def run_pipeline():
 
     # Tokenize the input
     pipeline.add_stage(
-        PreprocessNLPStage(
-            config,
-            vocab_hash_file=vocab_file,
-            truncation=True,
-            do_lower_case=True,
-            add_special_tokens=False))
+        PreprocessNLPStage(config,
+                           vocab_hash_file=vocab_file,
+                           truncation=True,
+                           do_lower_case=True,
+                           add_special_tokens=False))
 
     # Add a inference stage
     pipeline.add_stage(
@@ -373,6 +375,7 @@ def run_pipeline():
 
     # Run the pipeline
     pipeline.run()
+
 
 if __name__ == "__main__":
     run_pipeline()
