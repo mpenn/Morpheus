@@ -202,4 +202,3 @@ class MultiResponseProbsMessage(MultiResponseMessage, cpp_class=_messages.MultiR
         """
 
         return self.get_output("probs")
-

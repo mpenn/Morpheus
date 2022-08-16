@@ -61,7 +61,8 @@ class PreprocessAEStage(PreprocessBaseStage):
         return False
 
     @staticmethod
-    def pre_process_batch(x: MultiAEMessage, fea_len: int, feature_columns: typing.List[str]) -> MultiInferenceAEMessage:
+    def pre_process_batch(x: MultiAEMessage, fea_len: int,
+                          feature_columns: typing.List[str]) -> MultiInferenceAEMessage:
         """
         This function performs pre-processing for autoencoder.
 

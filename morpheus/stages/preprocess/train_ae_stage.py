@@ -279,12 +279,12 @@ class TrainAEStage(MultiMessageStage):
 
             if self._use_generic_model:
                 self._user_models["generic"] = _UserModelManager(self._config,
-                                                                    "generic",
-                                                                    True,
-                                                                    self._train_epochs,
-                                                                    self._train_max_history,
-                                                                    self._seed)
-                
+                                                                 "generic",
+                                                                 True,
+                                                                 self._train_epochs,
+                                                                 self._train_max_history,
+                                                                 self._seed)
+
                 all_users_df = pd.concat(user_to_df.values())
                 all_users_df = self._source_stage_class.derive_features(all_users_df, self._feature_columns)
                 self._user_models["generic"].train(all_users_df)

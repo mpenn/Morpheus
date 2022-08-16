@@ -15,7 +15,6 @@
 import logging
 import typing
 
-import numpy as np
 import pandas as pd
 
 from morpheus.stages.input.autoencoder_source_stage import AutoencoderSourceStage
@@ -51,22 +50,22 @@ class AzureSourceStage(AutoencoderSourceStage):
         df = AzureSourceStage.change_columns(df)
         df['time'] = pd.to_datetime(df[timestamp_column], errors='coerce')
         df['day'] = df['time'].dt.date
-        df.fillna({'time': pd.to_datetime(_DEFAULT_DATE), 'day': pd.to_datetime(_DEFAULT_DATE).date()}, inplace = True)
+        df.fillna({'time': pd.to_datetime(_DEFAULT_DATE), 'day': pd.to_datetime(_DEFAULT_DATE).date()}, inplace=True)
         df.sort_values(by=['time'], inplace=True)
         overall_location_columns = [col for col in [city_column, state_column, country_column] if col is not None]
         if len(overall_location_columns) > 0:
             overall_location_df = df[overall_location_columns].fillna('nan')
             df['overall_location'] = overall_location_df.apply(lambda x: ', '.join(x), axis=1)
             df['loc_cat'] = df.groupby('day')['overall_location'].transform(lambda x: pd.factorize(x)[0] + 1)
-            df.fillna({'loc_cat': 1}, inplace = True)
+            df.fillna({'loc_cat': 1}, inplace=True)
             df['locincrement'] = df.groupby('day')['loc_cat'].expanding(1).max().droplevel(0)
             df.drop(['overall_location', 'loc_cat'], inplace=True, axis=1)
         if application_column is not None:
             df['app_cat'] = df.groupby('day')[application_column].transform(lambda x: pd.factorize(x)[0] + 1)
-            df.fillna({'app_cat': 1}, inplace = True)
+            df.fillna({'app_cat': 1}, inplace=True)
             df['appincrement'] = df.groupby('day')['app_cat'].expanding(1).max().droplevel(0)
             df.drop('app_cat', inplace=True, axis=1)
-        df["logcount"]=df.groupby('day').cumcount()
+        df["logcount"] = df.groupby('day').cumcount()
 
         if (feature_columns is not None):
             df.drop(columns=df.columns.difference(feature_columns), inplace=True)
