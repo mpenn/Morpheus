@@ -63,12 +63,15 @@ class WriteToRabbitMQStage(SinglePortStage):
     def accepted_types(self) -> typing.Tuple:
         return (MessageMeta, )
 
+    def supports_cpp_node(self) -> bool:
+        return False
+
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
         node = builder.make_sink(self.unique_name, self.on_data, self.on_error, self.on_complete)
         builder.make_edge(input_stream[0], node)
         return input_stream
 
-    def on_data(self, message: MessageMeta):
+    def on_data(self, message: MessageMeta) -> MessageMeta:
         df = message.df
         buffer = StringIO()
         df.to_json(buffer, orient='records', lines=True)

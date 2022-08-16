@@ -16,7 +16,7 @@
 import logging
 
 import psutil
-from from_rabbitmq import RabbitMQSourceStage
+from rabbitmq_source_stage import RabbitMQSourceStage
 
 from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config

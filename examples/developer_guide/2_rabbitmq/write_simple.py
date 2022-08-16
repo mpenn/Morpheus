@@ -17,13 +17,13 @@ import logging
 import os
 
 import psutil
-from to_rabbitmq import WriteToRabbitMQStage
+from write_to_rabbitmq_stage import WriteToRabbitMQStage
 
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
-from morpheus.pipeline.general_stages import MonitorStage
-from morpheus.pipeline.input.from_file import FileSourceStage
-from morpheus.utils.logging import configure_logging
+from morpheus.stages.general.monitor_stage import MonitorStage
+from morpheus.stages.input.file_source_stage import FileSourceStage
+from morpheus.utils.logger import configure_logging
 
 
 def run_pipeline():
@@ -32,7 +32,6 @@ def run_pipeline():
 
     root_dir = os.environ['MORPHEUS_ROOT']
     input_file = os.path.join(root_dir, 'examples/data/email.jsonlines')
-    #input_file = os.path.join(root_dir, '.tmp/simple.json')
 
     config = Config()
     config.num_threads = psutil.cpu_count()
@@ -41,14 +40,16 @@ def run_pipeline():
     pipeline = LinearPipeline(config)
     pipeline.set_source(FileSourceStage(config, filename=input_file, iterative=False))
 
+    pipeline.add_stage(MonitorStage(config))
+
     # Set source stage
     pipeline.add_stage(WriteToRabbitMQStage(config, host='localhost', exchange='logs'))
 
     # Add monitor to record the performance of our new stages
-    pipeline.add_stage(MonitorStage(config))
 
     # Run the pipeline
     pipeline.run()
+
 
 if __name__ == "__main__":
     run_pipeline()
