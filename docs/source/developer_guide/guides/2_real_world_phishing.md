@@ -601,8 +601,6 @@ from io import StringIO
 import srf
 import pika
 
-import cudf
-
 from morpheus.config import Config
 from morpheus.messages.message_meta import MessageMeta
 from morpheus.pipeline.single_port_stage import SinglePortStage
