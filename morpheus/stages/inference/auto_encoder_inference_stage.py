@@ -23,7 +23,6 @@ from morpheus.messages import MultiInferenceMessage
 from morpheus.messages import MultiResponseAEMessage
 from morpheus.messages import ResponseMemory
 from morpheus.messages import ResponseMemoryAE
-from morpheus.messages import ResponseMemoryProbs
 from morpheus.messages.multi_inference_ae_message import MultiInferenceAEMessage
 from morpheus.stages.inference.inference_stage import InferenceStage
 from morpheus.stages.inference.inference_stage import InferenceWorker
@@ -67,12 +66,12 @@ class _AutoEncoderInferenceWorker(InferenceWorker):
 
         # Override the default to return the response AE
         output_message = MultiResponseAEMessage(meta=x.meta,
-                                                   mess_offset=x.mess_offset,
-                                                   mess_count=x.mess_count,
-                                                   memory=memory,
-                                                   offset=x.offset,
-                                                   count=x.count,
-                                                   user_id=x.user_id)
+                                                mess_offset=x.mess_offset,
+                                                mess_count=x.mess_count,
+                                                memory=memory,
+                                                offset=x.offset,
+                                                count=x.count,
+                                                user_id=x.user_id)
 
         return output_message
 
@@ -171,8 +170,8 @@ class AutoEncoderInferenceStage(InferenceStage):
                 probs[idx, :] = cp.maximum(probs[idx, :], res.probs[i, :])
 
         return MultiResponseAEMessage(meta=inf.meta,
-                                         mess_offset=inf.mess_offset,
-                                         mess_count=inf.mess_count,
-                                         memory=memory,
-                                         offset=inf.offset,
-                                         count=inf.count)
+                                      mess_offset=inf.mess_offset,
+                                      mess_count=inf.mess_count,
+                                      memory=memory,
+                                      offset=inf.offset,
+                                      count=inf.count)

@@ -203,6 +203,7 @@ class MultiResponseProbsMessage(MultiResponseMessage, cpp_class=_messages.MultiR
 
         return self.get_output("probs")
 
+
 @dataclasses.dataclass
 class MultiResponseAEMessage(MultiResponseProbsMessage, cpp_class=None):
     """
