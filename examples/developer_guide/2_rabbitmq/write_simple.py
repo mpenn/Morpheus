@@ -40,12 +40,8 @@ def run_pipeline():
     pipeline = LinearPipeline(config)
     pipeline.set_source(FileSourceStage(config, filename=input_file, iterative=False))
 
-    pipeline.add_stage(MonitorStage(config))
-
     # Set source stage
     pipeline.add_stage(WriteToRabbitMQStage(config, host='localhost', exchange='logs'))
-
-    # Add monitor to record the performance of our new stages
 
     # Run the pipeline
     pipeline.run()

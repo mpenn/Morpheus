@@ -93,7 +93,7 @@ class RabbitMQSourceStage(SingleOutputSource):
         return super().stop()
 
     def _build_source(self, builder: srf.Builder) -> StreamPair:
-        node = builder.make_source(self.unique_name, self.source_generator())
+        node = builder.make_source(self.unique_name, self.source_generator)
         return node, MessageMeta
 
     def source_generator(self):
