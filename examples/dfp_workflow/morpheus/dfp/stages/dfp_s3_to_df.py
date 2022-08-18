@@ -44,7 +44,7 @@ class DFPS3ToDataFrameStage(SinglePortStage):
                  file_type: FileTypes,
                  input_schema: DataFrameInputSchema,
                  filter_null: bool = True,
-                 s3_cache_dir: str = "./s3_cache"):
+                 cache_dir: str = "./.cache/dfp"):
         super().__init__(c)
 
         self._input_schema: DataFrameInputSchema = input_schema
@@ -53,7 +53,7 @@ class DFPS3ToDataFrameStage(SinglePortStage):
         self._batch_cache = []
         self._file_type = file_type
         self._filter_null = filter_null
-        self._s3_cache_dir = s3_cache_dir
+        self._cache_dir = os.path.join(cache_dir, "s3_data")
 
     @property
     def name(self) -> str:
@@ -71,20 +71,14 @@ class DFPS3ToDataFrameStage(SinglePortStage):
         if (hasattr(s3_object, "DEBUG_JSON")):
             return pd.read_json(getattr(s3_object, "DEBUG_JSON"))
         else:
-            cache_location = os.path.join(self._s3_cache_dir, "raw", s3_object.bucket_name, s3_object.key + ".pkl")
+            cache_location = os.path.join(self._cache_dir, "raw", s3_object.bucket_name, s3_object.key + ".pkl")
+
+            s3_filename = f"s3://{s3_object.bucket_name}/{s3_object.key}"
 
             if (not os.path.exists(cache_location)):
 
                 # Make the directory if it doesn't exist
                 os.makedirs(os.path.dirname(cache_location), exist_ok=True)
-
-                # Download the file
-                # with open(cache_location, 'wb') as f:
-                #     s3_obj_data = s3_object.get()
-                #     for chunk in iter(lambda: s3_obj_data['Body'].read(4096), b''):
-                #         f.write(chunk)
-
-                s3_filename = f"s3://{s3_object.bucket_name}/{s3_object.key}"
 
                 logger.debug("Downloading S3 object: %s", s3_filename)
 
@@ -144,7 +138,7 @@ class DFPS3ToDataFrameStage(SinglePortStage):
             # objects_hash_hex = hex(objects_hash & (2**64 - 1))
             objects_hash_hex = hashlib.md5(json.dumps(hash_data, sort_keys=True).encode()).hexdigest()
 
-            batch_cache_location = os.path.join(self._s3_cache_dir, "batches", bucket_name, f"{objects_hash_hex}.pkl")
+            batch_cache_location = os.path.join(self._cache_dir, "batches", bucket_name, f"{objects_hash_hex}.pkl")
 
             # Return the cache if it exists
             if (os.path.exists(batch_cache_location)):
@@ -158,6 +152,10 @@ class DFPS3ToDataFrameStage(SinglePortStage):
             dfs = [self.single_object_to_dataframe(s3_object[0]) for s3_object in s3_object_batch]
 
             output_df: pd.DataFrame = pd.concat(dfs)
+
+            # After concat, we need to sort by time and reset the index
+            output_df.sort_values(self._config.ae.timestamp_column_name, ignore_index=True, inplace=True)
+
             # Save dataframe to cache future runs
             os.makedirs(os.path.dirname(batch_cache_location), exist_ok=True)
 

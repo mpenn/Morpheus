@@ -43,7 +43,7 @@ class DFPInferenceStage(SinglePortStage):
         super().__init__(c)
 
         self._client = MlflowClient()
-        self._fallback_user = "generic_user"
+        self._fallback_user = self._config.ae.fallback_username
 
         self._model_cache = {}
         self._model_cache_size_max = 10

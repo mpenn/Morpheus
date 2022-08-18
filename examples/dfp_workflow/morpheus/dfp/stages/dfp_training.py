@@ -82,7 +82,7 @@ class DFPTraining(SinglePortStage):
         #                                            batch_files=cached_batch_frames,
         #                                            model_class=DFPAutoEncoder)
 
-        # if (user == "generic_user"):
+        # if (user == self._config.ae.fallback_username):
         #     model, sample_frame = self._user_models[user].train_from_batch()
         # else:
         #     model, sample_frame = self._user_models[user].train_from_batch(filter_func=

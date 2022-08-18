@@ -72,7 +72,7 @@ from morpheus.utils.logger import configure_logging
 @click.option(
     "--cache_dir",
     type=str,
-    default="./.cache",
+    default="./.cache/dfp",
     show_envvar=True,
     help="The location to cache data such as S3 downloads and pre-processed data",
 )
@@ -240,7 +240,7 @@ def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **k
                                   file_type=FileTypes.JSON,
                                   input_schema=input_schema,
                                   filter_null=False,
-                                  s3_cache_dir=cache_dir))
+                                  cache_dir=cache_dir))
     elif (source == "file"):
         pipeline.set_source(
             MultiFileSource(config,
@@ -259,7 +259,7 @@ def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **k
 
     # Next, have a stage that will create rolling windows
     pipeline.add_stage(
-        DFPRollingWindowStage(config, window_duration="1d", min_history=300, max_history=10000, s3_cache_dir=cache_dir))
+        DFPRollingWindowStage(config, min_history=300, min_increment=300, max_history="1d", cache_dir=cache_dir))
 
     # Specify the final set of columns necessary just before pre-processing
     model_column_info = [

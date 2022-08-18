@@ -13,9 +13,7 @@
 # limitations under the License.
 
 import logging
-import time
 import typing
-from contextlib import contextmanager
 
 import numpy as np
 import srf
@@ -28,30 +26,9 @@ from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
-# Setup conda environment
-conda_env = {
-    'channels': ['defaults', 'conda-forge'],
-    'dependencies': ['python={}'.format('3.8'), 'pip'],
-    'pip': ['mlflow', 'dfencoder'],
-    'name': 'mlflow-env'
-}
+from ..utils.logging_timer import log_time
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
-
-
-@contextmanager
-def log_time(log_fn, msg: str, *args, **kwargs):
-
-    import time
-
-    start_time = time.time()
-
-    yield
-
-    duration = (time.time() - start_time) * 1000.0
-
-    # Call the log function
-    log_fn(msg.format(**{"duration": duration}), *args, **kwargs)
 
 
 class DFPSplitUsersStage(SinglePortStage):
@@ -80,75 +57,63 @@ class DFPSplitUsersStage(SinglePortStage):
         if (message is None):
             return []
 
-        start_time = time.time()
+        with log_time(logger.debug) as log_info:
 
-        if (isinstance(message, cudf.DataFrame)):
-            # Convert to pandas because cudf is slow at this
-            message = message.to_pandas()
+            if (isinstance(message, cudf.DataFrame)):
+                # Convert to pandas because cudf is slow at this
+                message = message.to_pandas()
 
-        split_dataframes: typing.List[typing.Tuple[str, cudf.DataFrame]] = []
+            split_dataframes: typing.List[typing.Tuple[str, cudf.DataFrame]] = []
 
-        # If we are skipping users, do that here
-        if (len(self._skip_users) > 0):
-            message = message[~message[self._config.ae.userid_column_name].isin(self._skip_users)]
+            # If we are skipping users, do that here
+            if (len(self._skip_users) > 0):
+                message = message[~message[self._config.ae.userid_column_name].isin(self._skip_users)]
 
-        # Split up the dataframes
-        if (self._include_generic):
-            split_dataframes.append(("generic_user", message))
+            # Split up the dataframes
+            if (self._include_generic):
+                split_dataframes.append((self._config.ae.fallback_username, message))
 
-        if (self._include_individual):
-            with log_time(logger.debug, "unique() call took {duration} ms"):
-                usernames = message[message["username"].notnull()]["username"].unique()
+            if (self._include_individual):
 
-            with log_time(logger.debug, 'set_index call took {duration} ms'):
-                df2 = message.set_index("username", append=True)
-                [x for i, x in df2.groupby(level=1, sort=False)]
+                split_dataframes.extend([
+                    (username, user_df) for username, user_df in message.groupby("username", sort=False)
+                ])
 
-            with log_time(logger.debug,
-                          '[x for i, x in message.groupby("username", sort=False)] call took {duration} ms'):
-                [x for i, x in message.groupby("username", sort=False)]
+            output_messages: typing.List[UserMessageMeta] = []
 
-            with log_time(logger.debug, "message[message['username'] == x] call took {duration} ms"):
-                split_dataframes.extend([(x, message[message['username'] == x]) for x in usernames])
+            for user_id, user_df in split_dataframes:
 
-        output_messages: typing.List[UserMessageMeta] = []
+                if (user_id in self._skip_users):
+                    continue
 
-        for user_id, user_df in split_dataframes:
+                current_user_count = self._user_index_map.get(user_id, 0)
 
-            if (user_id in self._skip_users):
-                continue
+                # Reset the index so that users see monotonically increasing indexes
+                user_df.index = range(current_user_count, current_user_count + len(user_df))
+                self._user_index_map[user_id] = current_user_count + len(user_df)
 
-            current_user_count = self._user_index_map.get(user_id, 0)
+                output_messages.append(UserMessageMeta(df=user_df, user_id=user_id))
 
-            # Reset the index so that users see monotonically increasing indexes
-            user_df.index = range(current_user_count, current_user_count + len(user_df))
-            self._user_index_map[user_id] = current_user_count + len(user_df)
+                # logger.debug("Emitting dataframe for user '%s'. Start: %s, End: %s, Count: %s",
+                #              user,
+                #              df_user[self._config.ae.timestamp_column_name].min(),
+                #              df_user[self._config.ae.timestamp_column_name].max(),
+                #              df_user[self._config.ae.timestamp_column_name].count())
 
-            output_messages.append(UserMessageMeta(df=user_df, user_id=user_id))
+            rows_per_user = [len(x.df) for x in output_messages]
 
-            # logger.debug("Emitting dataframe for user '%s'. Start: %s, End: %s, Count: %s",
-            #              user,
-            #              df_user[self._config.ae.timestamp_column_name].min(),
-            #              df_user[self._config.ae.timestamp_column_name].max(),
-            #              df_user[self._config.ae.timestamp_column_name].count())
+            log_info.set_log(
+                "Batch split users complete. Input: %s rows from %s to %s. Output: %s users, rows/user min: %s, max: %s, avg: %.2f. Duration: {duration:.2f} ms",
+                len(message),
+                message[self._config.ae.timestamp_column_name].min(),
+                message[self._config.ae.timestamp_column_name].max(),
+                len(rows_per_user),
+                np.min(rows_per_user),
+                np.max(rows_per_user),
+                np.mean(rows_per_user),
+            )
 
-        rows_per_user = [len(x.df) for x in output_messages]
-
-        duration = (time.time() - start_time) * 1000.0
-
-        logger.debug(
-            "Batch split users complete. Input: %s rows from %s to %s. Output: %s users, rows/user min: %s, max: %s, avg: %s. Duration: %s ms",
-            len(message),
-            message[self._config.ae.timestamp_column_name].min(),
-            message[self._config.ae.timestamp_column_name].max(),
-            len(rows_per_user),
-            np.min(rows_per_user),
-            np.max(rows_per_user),
-            np.mean(rows_per_user),
-            duration,
-        )
-
-        return output_messages
+            return output_messages
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
 

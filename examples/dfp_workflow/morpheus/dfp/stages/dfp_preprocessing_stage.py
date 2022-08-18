@@ -402,7 +402,7 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
             df_processed.to_parquet(cache_location)
             self._df_user_frames = self._df_user_frames.append(
                 {
-                    "username": "generic_user", "frame_path": cache_location
+                    "username": self._config.ae.fallback_username, "frame_path": cache_location
                 }, ignore_index=True)
         else:
             unique_users = df_processed["username"].unique().to_pandas().to_list()

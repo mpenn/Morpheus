@@ -78,8 +78,8 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
             experiment_name = f'/heimdall-dsp/{reg_model_name}'
             experiment = mlflow.get_experiment_by_name(experiment_name)
             if (not experiment):
-                print(f"Failed to get experiment: /heimdall-dsp/{reg_model_name}")
-                print(f"Creating...")
+                # print(f"Failed to get experiment: /heimdall-dsp/{reg_model_name}")
+                # print(f"Creating...")
                 mlflow.create_experiment(experiment_name)
                 experiment = mlflow.get_experiment_by_name(experiment_name)
 
@@ -87,7 +87,7 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                                   experiment_id=experiment.experiment_id) as run:
 
                 model_path = f"{model_path}-{run.info.run_uuid}"
-                print(f"Model path: {model_path}")
+                # print(f"Model path: {model_path}")
                 mlflow.log_param("Algorithm", "Denosing Autoencoder")
                 mlflow.log_param("Epochs", 30)
                 mlflow.log_param("Learning rate", 0.001)
@@ -113,9 +113,9 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                 # TODO(MDD) this should work with sample_input
                 model_sig = infer_signature(message.get_meta(), model.get_anomaly_score(sample_input))
 
-                print(
-                    f"Logging model:\nTracking URI: {mlflow.get_tracking_uri()}\nArtifact URI: {mlflow.get_artifact_uri()}"
-                )
+                # print(
+                #     f"Logging model:\nTracking URI: {mlflow.get_tracking_uri()}\nArtifact URI: {mlflow.get_artifact_uri()}"
+                # )
 
                 model_info = mlflow.pytorch.log_model(
                     pytorch_model=model,
@@ -125,16 +125,16 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                     signature=model_sig,
                 )
 
-                print("Model info: ")
-                print(model_info.model_uri)
-                print(model_info.artifact_path)
+                # print("Model info: ")
+                # print(model_info.model_uri)
+                # print(model_info.artifact_path)
 
                 client = MlflowClient()
 
                 # First ensure a registered model has been created
                 try:
                     create_model_response = client.create_registered_model(reg_model_name)
-                    print("Successfully registered model '%s'." % create_model_response.name, flush=True)
+                    # print("Successfully registered model '%s'." % create_model_response.name, flush=True)
                 except MlflowException as e:
                     if e.error_code == ErrorCode.Name(RESOURCE_ALREADY_EXISTS):
                         pass
@@ -142,7 +142,7 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                         raise e
 
                 model_src = RunsArtifactRepository.get_underlying_uri(model_info.model_uri)
-                print(f"Model src: {model_src}")
+                # print(f"Model src: {model_src}")
 
                 tags = {
                     "start": message.get_meta(self._config.ae.timestamp_column_name).min(),
@@ -156,11 +156,13 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                                                  run_id=run.info.run_id,
                                                  tags=tags)
 
+                logger.log("ML Flow model upload complete. User: %s, Version: %s", user, mv.version)
+
         except Exception as e:
-            traceback.print_exc()
+            logger.exception("Error trying to upload ML Flow model")
         mlflow.end_run()
 
-        print(f"Finished registering MLflow model for user: {user}", flush=True)
+        # print(f"Finished registering MLflow model for user: {user}", flush=True)
         return message
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
