@@ -87,6 +87,9 @@ class DFPPostprocessingStage(SinglePortStage):
                      message.get_meta(self._config.ae.timestamp_column_name).min(),
                      message.get_meta(self._config.ae.timestamp_column_name).max())
 
+        if (extracted_events is None):
+            return None
+
         return UserMessageMeta(extracted_events, user_id=typing.cast(UserMessageMeta, message.meta).user_id)
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:

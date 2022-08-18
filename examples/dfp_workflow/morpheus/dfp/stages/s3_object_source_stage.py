@@ -129,9 +129,9 @@ class S3BucketSourceStage(SingleOutputSource):
     """
 
     def __init__(
-            self,
-            c: Config,
-            object_generator,
+        self,
+        c: Config,
+        object_generator,
     ):
         super().__init__(c)
 

@@ -437,7 +437,11 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
 
 class DFPPreprocessingStage(SinglePortStage):
 
-    def __init__(self, c: Config, input_schema: DataFrameInputSchema, return_format: str = "data"):
+    def __init__(self,
+                 c: Config,
+                 input_schema: DataFrameInputSchema,
+                 return_format: str = "data",
+                 only_last_batch=False):
         super().__init__(c)
 
         self._cache_ids = []
@@ -446,6 +450,7 @@ class DFPPreprocessingStage(SinglePortStage):
         self._cache_path = "preprocessing"
         # self._s3_cache_dir = frame_cache_dir
         self._return_format = return_format
+        self._only_last_batch = only_last_batch
 
     @property
     def name(self) -> str:
@@ -468,99 +473,6 @@ class DFPPreprocessingStage(SinglePortStage):
 
         return pd.concat(slot_list)
 
-    @staticmethod
-    def _create_logcount(df):
-        df["logcount"] = df.groupby('time').cumcount()
-
-        return df
-
-    def _normalize_dataframe(self, df):
-
-        json_normalized = []
-        remaining_columns = list(df.columns)
-
-        for j_column in self._json_columns:
-
-            if (j_column not in remaining_columns):
-                continue
-
-            normalized = pd.json_normalize(df[j_column])
-
-            # Prefix the columns
-            normalized.rename(columns={n: f"{j_column}.{n}" for n in normalized.columns}, inplace=True)
-
-            # Reset the index otherwise there is a conflict
-            normalized.reset_index(drop=True, inplace=True)
-
-            json_normalized.append(normalized)
-
-            # Remove from the list of remaining columns
-            remaining_columns.remove(j_column)
-
-        # Also need to reset the original index
-        df.reset_index(drop=True, inplace=True)
-
-        df_normalized = pd.concat([df[remaining_columns]] + json_normalized, axis=1)
-
-        return df_normalized
-
-    def _rename_columns(self, df):
-
-        df.rename(columns=self._rename_map, inplace=True)
-
-        df.columns = df.columns.str.replace(self._remove_characters, '')
-        df.columns = df.columns.str.strip()
-
-        return df
-
-    def _process_columns_old(self, df):
-
-        per_day = df[self._config.ae.timestamp_column_name].dt.to_period("D")
-
-        # Create the per-user, per-day log count
-        df["logcount"] = df.groupby([self._config.ae.userid_column_name, per_day]).cumcount()
-
-        # # Create the per-user, per-day location increment count
-        # df["locincrement"] = df.groupby([self._config.ae.userid_column_name,
-        #                                  per_day])["locationcity"].transform(lambda x: pd.factorize(x)[0] + 1)
-
-        return df
-
-    def _process_single_column(self, ci: ColumnInfo, df: cudf.DataFrame):
-
-        if (ci.input_name not in df.columns):
-            # Generate warning?
-            # Create empty column
-            return cudf.Series(None, dtype=ci.dtype)
-
-        input_col = df[ci.input_name]
-
-        # TODO(MDD): Should we do some processing on converting types if they dont match?
-
-        if (ci.process_column is not None):
-            return ci.process_column(df)
-
-        return input_col
-
-    def _process_columns(self, df: cudf.DataFrame):
-
-        output_df = cudf.DataFrame()
-
-        # Iterate over the column info
-        for ci in self._column_info:
-            output_df[ci.name] = self._process_single_column(ci, df)
-
-        return output_df
-
-    def _get_features(self, df):
-
-        final_columns = self._config.ae.feature_columns + self._additional_columns
-        for feature in final_columns:
-            if (feature not in df.columns):
-                df[feature] = ""
-
-        return df[final_columns]
-
     def process_features(self, message: UserMessageMeta):
         if (message is None):
             return None
@@ -569,6 +481,10 @@ class DFPPreprocessingStage(SinglePortStage):
 
         # Process the columns
         df_processed = process_dataframe(message.df, self._input_schema)
+
+        # If we only want the last batch, do that here
+        if (self._only_last_batch):
+            df_processed = df_processed[df_processed["_batch_id"] == df_processed["_batch_id"].max()]
 
         # Create the multi message
         output_message = UserMessageMeta(df_processed, user_id=message.user_id)

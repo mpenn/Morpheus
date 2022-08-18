@@ -57,8 +57,10 @@ class CachedUserWindow:
     count: int = 0
     min_epoch: datetime = datetime(1970, 1, 1)
     max_epoch: datetime = datetime(1970, 1, 1)
+    batch_count: int = 0
     last_train_count: int = 0
     last_train_epoch: datetime = None
+    last_train_batch: int = 0
 
     _trained_rows: pd.Series = dataclasses.field(init=False, repr=False, default_factory=pd.DataFrame)
     _df: pd.DataFrame = dataclasses.field(init=False, repr=False, default_factory=pd.DataFrame)
@@ -71,8 +73,17 @@ class CachedUserWindow:
         # Filter the incoming df by epochs later than the current max_epoch
         filtered_df = incoming_df[incoming_df["timestamp"] > self.max_epoch]
 
+        if (len(filtered_df) == 0):
+            return
+
+        # Increment the batch count
+        self.batch_count += 1
+
         # Set the filtered index
         filtered_df.index = range(self.total_count, self.total_count + len(filtered_df))
+
+        # Use batch id to distinguish groups in the same dataframe
+        filtered_df["_batch_id"] = self.batch_count
 
         # Append just the new rows
         self._df = pd.concat([self._df, filtered_df])
@@ -86,10 +97,14 @@ class CachedUserWindow:
 
     def get_train_df(self, max_history) -> pd.DataFrame:
 
-        new_df = self.trim_dataframe(self._df, max_history=max_history)
+        new_df = self.trim_dataframe(self._df,
+                                     max_history=max_history,
+                                     last_batch=self.last_train_batch,
+                                     timestamp_column=self.timestamp_column)
 
         self.last_train_count = self.total_count
         self.last_train_epoch = datetime.now()
+        self.last_train_batch = self.batch_count
 
         self._df = new_df
 
@@ -110,13 +125,17 @@ class CachedUserWindow:
     @staticmethod
     def trim_dataframe(df: pd.DataFrame,
                        max_history: typing.Union[int, str],
+                       last_batch: int,
                        timestamp_column: str = "timestamp") -> pd.DataFrame:
         if (max_history is None):
             return df
 
+        # Want to ensure we always see data once. So any new data is preserved
+        new_batches = df[df["_batch_id"] > last_batch]
+
         # See if max history is an int
         if (isinstance(max_history, int)):
-            return df.tail(max_history)
+            return df.tail(max(max_history, len(new_batches)))
 
         # If its a string, then its a duration
         if (isinstance(max_history, str)):
@@ -126,9 +145,9 @@ class CachedUserWindow:
             time_delta = pd.Timedelta(max_history)
 
             # Calc the earliest
-            earliest = latest - time_delta
+            earliest = min(latest - time_delta, new_batches[timestamp_column].min())
 
-            return df[df['timestamp'] >= earliest]
+            return df[df[timestamp_column] >= earliest]
 
         raise RuntimeError("Unsupported max_history")
 
@@ -206,18 +225,9 @@ class DFPRollingWindowStage(SinglePortStage):
             logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
 
         if (user_cache is None):
-            user_cache = CachedUserWindow(user_id=user_id, cache_location=cache_location)
-
-        # if (user_id not in self._user_cache_map):
-        #     # Determine cache location
-        #     cache_location = os.path.join(self._cache_dir, f"{user_id}.pkl")
-
-        #     # Ensure the folder exists
-        #     os.makedirs(os.path.dirname(cache_location), exist_ok=True)
-
-        #     self._user_cache_map[user_id] = CachedUserWindow(user_id=user_id, cache_location=cache_location)
-
-        # user_cache = self._user_cache_map.get(user_id)
+            user_cache = CachedUserWindow(user_id=user_id,
+                                          cache_location=cache_location,
+                                          timestamp_column=self._config.ae.timestamp_column_name)
 
         yield user_cache
 

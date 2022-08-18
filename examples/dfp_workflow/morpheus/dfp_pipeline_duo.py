@@ -259,7 +259,13 @@ def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **k
 
     # Next, have a stage that will create rolling windows
     pipeline.add_stage(
-        DFPRollingWindowStage(config, min_history=300, min_increment=300, max_history="1d", cache_dir=cache_dir))
+        DFPRollingWindowStage(
+            config,
+            min_history=300 if is_training else 1,
+            min_increment=300 if is_training else 1,
+            # For inference, we only ever want 1 day max
+            max_history="5d" if is_training else "1d",
+            cache_dir=cache_dir))
 
     # Specify the final set of columns necessary just before pre-processing
     model_column_info = [
@@ -277,10 +283,10 @@ def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **k
         RenameColumn(name=config.ae.timestamp_column_name, dtype=datetime, input_name=config.ae.timestamp_column_name),
     ]
 
-    model_schema = DataFrameInputSchema(column_info=model_column_info)
+    model_schema = DataFrameInputSchema(column_info=model_column_info, preserve_columns=["_batch_id"])
 
     # Output is UserMessageMeta -- Cached frame set
-    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema))
+    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema, only_last_batch=not is_training))
 
     if (is_training):
 
