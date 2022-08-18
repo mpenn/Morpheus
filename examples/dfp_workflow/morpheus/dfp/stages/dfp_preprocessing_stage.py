@@ -1,3 +1,17 @@
+# Copyright (c) 2022, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import dataclasses
 import logging
 import os
@@ -51,7 +65,7 @@ class DFPInferencePreprocessingStage(SinglePortStage):
         self._remove_characters = "[_,.,{,},:]"
 
         # Get features step
-        self._additional_columns = ["timestamp"]
+        self._additional_columns = [self._config.ae.timestamp_column_name]
 
         self._column_info: typing.List[ColumnInfo] = column_info
 
@@ -123,7 +137,7 @@ class DFPInferencePreprocessingStage(SinglePortStage):
 
     def _process_columns_old(self, df):
 
-        per_day = df["timestamp"].dt.to_period("D")
+        per_day = df[self._config.ae.timestamp_column_name].dt.to_period("D")
 
         # Create the per-user, per-day log count
         df["logcount"] = df.groupby([self._config.ae.userid_column_name, per_day]).cumcount()
@@ -187,8 +201,8 @@ class DFPInferencePreprocessingStage(SinglePortStage):
 
         logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
                      len(df_in),
-                     df_processed["timestamp"].min(),
-                     df_processed["timestamp"].max(),
+                     df_processed[self._config.ae.timestamp_column_name].min(),
+                     df_processed[self._config.ae.timestamp_column_name].max(),
                      duration)
 
         return df_processed
@@ -236,7 +250,7 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
         self._remove_characters = "[_,.,{,},:]"
 
         # Get features step
-        self._additional_columns = ["timestamp"]
+        self._additional_columns = [self._config.ae.timestamp_column_name]
 
         self._column_info: typing.List[ColumnInfo] = column_info
 
@@ -308,7 +322,7 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
 
     def _process_columns_old(self, df):
 
-        per_day = df["timestamp"].dt.to_period("D")
+        per_day = df[self._config.ae.timestamp_column_name].dt.to_period("D")
 
         # Create the per-user, per-day log count
         df["logcount"] = df.groupby([self._config.ae.userid_column_name, per_day]).cumcount()
@@ -374,8 +388,8 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
 
         logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
                      len(df_in),
-                     df_processed["timestamp"].min(),
-                     df_processed["timestamp"].max(),
+                     df_processed[self._config.ae.timestamp_column_name].min(),
+                     df_processed[self._config.ae.timestamp_column_name].max(),
                      duration)
 
         self._cache_ids.append(origin_hash)
@@ -501,7 +515,7 @@ class DFPPreprocessingStage(SinglePortStage):
 
     def _process_columns_old(self, df):
 
-        per_day = df["timestamp"].dt.to_period("D")
+        per_day = df[self._config.ae.timestamp_column_name].dt.to_period("D")
 
         # Create the per-user, per-day log count
         df["logcount"] = df.groupby([self._config.ae.userid_column_name, per_day]).cumcount()
@@ -563,8 +577,8 @@ class DFPPreprocessingStage(SinglePortStage):
 
         logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
                      message.count,
-                     message.df["timestamp"].min(),
-                     message.df["timestamp"].max(),
+                     message.df[self._config.ae.timestamp_column_name].min(),
+                     message.df[self._config.ae.timestamp_column_name].max(),
                      duration)
 
         return [output_message]

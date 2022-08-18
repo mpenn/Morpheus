@@ -1,3 +1,17 @@
+# Copyright (c) 2022, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import logging
 import time
 import typing
@@ -114,9 +128,9 @@ class DFPSplitUsersStage(SinglePortStage):
 
             # logger.debug("Emitting dataframe for user '%s'. Start: %s, End: %s, Count: %s",
             #              user,
-            #              df_user["timestamp"].min(),
-            #              df_user["timestamp"].max(),
-            #              df_user["timestamp"].count())
+            #              df_user[self._config.ae.timestamp_column_name].min(),
+            #              df_user[self._config.ae.timestamp_column_name].max(),
+            #              df_user[self._config.ae.timestamp_column_name].count())
 
         rows_per_user = [len(x.df) for x in output_messages]
 
@@ -125,8 +139,8 @@ class DFPSplitUsersStage(SinglePortStage):
         logger.debug(
             "Batch split users complete. Input: %s rows from %s to %s. Output: %s users, rows/user min: %s, max: %s, avg: %s. Duration: %s ms",
             len(message),
-            message["timestamp"].min(),
-            message["timestamp"].max(),
+            message[self._config.ae.timestamp_column_name].min(),
+            message[self._config.ae.timestamp_column_name].max(),
             len(rows_per_user),
             np.min(rows_per_user),
             np.max(rows_per_user),

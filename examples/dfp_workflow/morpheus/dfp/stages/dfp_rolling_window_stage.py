@@ -1,3 +1,17 @@
+# Copyright (c) 2022, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import logging
 import os
 import time
@@ -66,7 +80,7 @@ class DFPRollingWindowStage(SinglePortStage):
         # If its a string, then its a duration
         if (isinstance(self._max_history, str)):
             # Get the latest timestamp
-            latest = df["timestamp"].max()
+            latest = df[self._config.ae.timestamp_column_name].max()
 
             time_delta = pd.Timedelta(self._max_history)
 
@@ -98,7 +112,7 @@ class DFPRollingWindowStage(SinglePortStage):
         # Concat the incoming data with the old data
         concat_df = pd.concat([existing_df, message.df])
 
-        concat_df.sort_values("timestamp", inplace=True, ignore_index=True)
+        concat_df.sort_values(self._config.ae.timestamp_column_name, inplace=True, ignore_index=True)
 
         # Trim based on the rolling criteria
         concat_df = self._trim_dataframe(concat_df)
@@ -126,11 +140,11 @@ class DFPRollingWindowStage(SinglePortStage):
                 message.user_id,
                 duration,
                 len(message.df),
-                message.df["timestamp"].min(),
-                message.df["timestamp"].max(),
+                message.df[self._config.ae.timestamp_column_name].min(),
+                message.df[self._config.ae.timestamp_column_name].max(),
                 len(result.df),
-                result.df["timestamp"].min(),
-                result.df["timestamp"].max(),
+                result.df[self._config.ae.timestamp_column_name].min(),
+                result.df[self._config.ae.timestamp_column_name].max(),
             )
         # else:
         #     logger.debug(
@@ -138,8 +152,8 @@ class DFPRollingWindowStage(SinglePortStage):
         #         message.user_id,
         #         duration,
         #         len(message.df),
-        #         message.df["timestamp"].min(),
-        #         message.df["timestamp"].max(),
+        #         message.df[self._config.ae.timestamp_column_name].min(),
+        #         message.df[self._config.ae.timestamp_column_name].max(),
         #     )
 
         return result

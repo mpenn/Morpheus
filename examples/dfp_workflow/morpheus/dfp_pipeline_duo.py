@@ -1,3 +1,17 @@
+# Copyright (c) 2022, NVIDIA CORPORATION.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import logging
 import os
 from datetime import datetime
@@ -34,7 +48,7 @@ from morpheus.config import CppConfig
 from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
-from morpheus.utils.logging import configure_logging
+from morpheus.utils.logger import configure_logging
 
 
 @click.command()
@@ -81,7 +95,7 @@ from morpheus.utils.logging import configure_logging
                     "'file:///mlruns' relative to the current directory"))
 def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **kwargs):
 
-    source = "file"
+    source = "s3"
 
     # To include the generic, we must be training all or generic
     include_generic = train_users == "all" or train_users == "generic"
