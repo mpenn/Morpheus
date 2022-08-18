@@ -1,0 +1,82 @@
+
+version: '3.3'
+
+services:
+  db:
+    restart: always
+    image: mysql/mysql-server
+    container_name: mlflow_db
+    expose:
+      - "3306"
+    networks:
+      - backend
+    environment:
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_ROOT_HOST=${MYSQL_ROOT_HOST}
+    volumes:
+      - dbdata:/var/lib/mysql
+
+  mlflow:
+    restart: always
+    build: ./mlflow
+    image: mlflow_server
+    container_name: mlflow_server
+    ports:
+      - "5000:5000"
+    networks:
+      - frontend
+      - backend
+    # environment:
+    #   - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    #   - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    #   - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    # command: mlflow server --backend-store-uri mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE} --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
+    command: mlflow server --backend-store-uri sqlite:////opt/mlflow/dbdata/mlflow.db --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
+    volumes:
+      - dbdata:/opt/mlflow/dbdata
+      - ./artifacts:/opt/mlflow/artifacts
+    depends_on:
+      - db
+
+  morpheus:
+    # restart: always
+    build: ./morpheus
+    image: dfp_morpheus
+    container_name: morpheus
+    networks:
+      - frontend
+      - backend
+    environment:
+      - VAULT_ROLE_ID=${VAULT_ROLE_ID}
+      - VAULT_SECRET_ID=${VAULT_SECRET_ID}
+    command: ./launch.sh
+    volumes:
+      # - ./.s3_cache:/work/.s3_cache
+      - ../..:/work
+    working_dir: /work/examples/dfp_workflow/morpheus
+    depends_on:
+      - mlflow
+
+  # nginx:
+  #   restart: always
+  #   build: ./nginx
+  #   image: mlflow_nginx
+  #   container_name: mlflow_nginx
+  #   ports:
+  #     - "80:80"
+  #   networks:
+  #     - frontend
+  #   depends_on:
+  #     - web
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  dbdata:
