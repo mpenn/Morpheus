@@ -24,8 +24,6 @@
 #include <glog/logging.h>  // for CHECK
 #include <rmm/device_uvector.hpp>
 #include <srf/cuda/common.hpp>
-#include <srf/memory/blob.hpp>
-#include <srf/memory/default_resources.hpp>
 #include <srf/memory/memory_kind.hpp>  // for memory_kind_type
 
 #include <algorithm>
@@ -113,8 +111,8 @@ enum class TensorStorageType
     Device
 };
 
-template <typename T>
-using HostContainer = std::vector<T, srf::memory::host_allocator<T>>;  // NOLINT(readability-identifier-naming)
+// template <typename T>
+// using HostContainer = std::vector<T, srf::memory::host_allocator<T>>;  // NOLINT(readability-identifier-naming)
 
 template <typename T>
 using DeviceContainer = rmm::device_uvector<T>;  // NOLINT(readability-identifier-naming)
@@ -333,7 +331,7 @@ template <typename T, RankType R>
     return d->unwrap();
 }
 
-#endif
+
 
 class TensorView : public srf::memory::blob
 {
@@ -362,6 +360,8 @@ class TensorView : public srf::memory::blob
     std::vector<TensorIndex> m_shape;
     std::vector<TensorIndex> m_stride;
 };
+
+#endif
 
 struct TensorObject final
 {

@@ -19,7 +19,6 @@
 
 #include "morpheus/utilities/tensor_util.hpp"
 
-#include <srf/memory/blob.hpp>       // for blob
 #include <srf/utils/type_utils.hpp>  // for DataType
 
 #include <vector>
@@ -38,6 +37,7 @@ static void set_contiguous_stride(const std::vector<TensorIndex>& shape, std::ve
     }
 }
 
+#if 0
 TensorView::TensorView(srf::memory::blob bv, DataType dtype, std::vector<TensorIndex> shape) :
   srf::memory::blob(std::move(bv)),
   m_dtype(std::move(dtype)),
@@ -85,4 +85,5 @@ const std::vector<TensorIndex>& TensorView::stride() const
 {
     return m_stride;
 }
+#endif
 }  // namespace morpheus
