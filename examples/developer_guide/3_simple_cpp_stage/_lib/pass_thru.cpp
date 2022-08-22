@@ -35,7 +35,6 @@ PassThruStage::subscribe_fn_t PassThruStage::build_operator()
     };
 }
 
-/*
 std::shared_ptr<srf::segment::Object<PassThruStage>> PassThruStageInterfaceProxy::init(srf::segment::Builder& builder,
                                                                                        const std::string& name)
 {
@@ -49,9 +48,10 @@ namespace py = pybind11;
 // Define the pybind11 module m.
 PYBIND11_MODULE(morpheus_example, m)
 {
-    py::class_<PassThruStage, srf::segment::ObjectProperties, std::shared_ptr<srf::segment::Object<PassThruStage>>>(
-        m, "PassThruStage", py::multiple_inheritance())
+    py::class_<srf::segment::Object<PassThruStage>,
+               srf::segment::ObjectProperties,
+               std::shared_ptr<srf::segment::Object<PassThruStage>>>(m, "PassThruStage", py::multiple_inheritance())
         .def(py::init<>(&PassThruStageInterfaceProxy::init), py::arg("segment"), py::arg("name"));
 }
-*/
+
 }  // namespace morpheus_example

@@ -45,12 +45,11 @@ class PassThruStage : public srf::pysrf::PythonNode<std::shared_ptr<MultiMessage
     subscribe_fn_t build_operator();
 };
 
-/*
 struct PassThruStageInterfaceProxy
 {
     static std::shared_ptr<srf::segment::Object<PassThruStage>> init(srf::segment::Builder &builder,
                                                                      const std::string &name);
 };
-*/
+
 #pragma GCC visibility pop
 }  // namespace morpheus_example
