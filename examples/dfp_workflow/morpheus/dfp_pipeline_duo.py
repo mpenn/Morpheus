@@ -14,6 +14,7 @@
 
 import logging
 import os
+import typing
 from datetime import datetime
 from datetime import timedelta
 
@@ -93,7 +94,7 @@ from morpheus.utils.logger import configure_logging
               default="http://localhost:5000",
               help=("The ML Flow tracking URI to connect to the tracking backend. If not speficied, MF Flow will use "
                     "'file:///mlruns' relative to the current directory"))
-def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **kwargs):
+def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir, sample_rate_s, **kwargs):
 
     source = "s3"
 
@@ -144,50 +145,10 @@ def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **k
         return df.groupby([config.ae.userid_column_name, per_day]).cumcount()
 
     def column_locincrement(df: cudf.DataFrame):
-
-        def per_user_calc(user_df: pd.DataFrame):
-            try:
-                city_column = "locationcity"
-                state_column = None
-                country_column = None
-
-                pdf = user_df.copy()
-
-                pdf['time'] = pd.to_datetime(pdf[config.ae.timestamp_column_name], errors='coerce')
-                pdf['day'] = pdf['time'].dt.date
-
-                pdf.sort_values(by=['time'], inplace=True)
-
-                overall_location_columns = [
-                    col for col in [city_column, state_column, country_column] if col is not None
-                ]
-
-                if len(overall_location_columns) > 0:
-                    pdf["overall_location"] = pdf[city_column].str.cat([], sep="|", na_rep="-")
-
-                    pdf['loc_cat'] = pdf.groupby('day')['overall_location'].transform(lambda x: pd.factorize(x)[0] + 1)
-
-                    pdf.fillna({'loc_cat': 1}, inplace=True)
-
-                    pdf['locincrement'] = pdf.groupby('day')['loc_cat'].expanding(1).max().droplevel(0)
-
-                    pdf.drop(['overall_location', 'loc_cat'], inplace=True, axis=1)
-
-                return pdf
-            except Exception as ex:
-                raise ex
-
         per_day = df[config.ae.timestamp_column_name].dt.to_period("D")
 
         # Simple but probably incorrect calculation
         return df.groupby([config.ae.userid_column_name, per_day, "locationcity"]).ngroup() + 1
-
-        # # Create the per-user, per-day location increment count
-        # # loc_cat = df.groupby([config.ae.userid_column_name,
-        # #                       per_day])["locationcity"].transform(lambda x: pd.factorize(x)[0] + 1)
-        # out_pdf = df.groupby(config.ae.userid_column_name).apply(lambda x: per_user_calc(x))
-
-        # return out_pdf["locincrement"]
 
     def s3_date_extractor_duo(s3_object):
         key_object = s3_object.key
@@ -246,7 +207,7 @@ def run_pipeline(train_users, skip_user, duration, cache_dir, sample_rate_s, **k
             MultiFileSource(config,
                             input_schema=input_schema,
                             filenames=list(kwargs["input_file"]),
-                            cudf_kwargs={
+                            parser_kwargs={
                                 "lines": False, "orient": "records"
                             }))
 

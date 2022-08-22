@@ -57,6 +57,8 @@ class DFPSplitUsersStage(SinglePortStage):
         if (message is None):
             return []
 
+        print("Got message: {}".format(message))
+
         with log_time(logger.debug) as log_info:
 
             if (isinstance(message, cudf.DataFrame)):

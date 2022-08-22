@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import logging
+import os
 import typing
 
 import pandas as pd
@@ -66,7 +67,7 @@ class MultiFileSource(SingleOutputSource):
         input_schema: DataFrameInputSchema,
         filenames: typing.List[str],
         file_type: FileTypes = FileTypes.Auto,
-        cudf_kwargs: dict = None,
+        parser_kwargs: dict = None,
     ):
 
         super().__init__(c)
@@ -76,7 +77,7 @@ class MultiFileSource(SingleOutputSource):
         self._input_schema = input_schema
         self._filenames = filenames
         self._file_type = file_type
-        self._cudf_kwargs = {} if cudf_kwargs is None else cudf_kwargs
+        self._parser_kwargs = {} if parser_kwargs is None else parser_kwargs
 
         self._input_count = None
         self._max_concurrent = c.num_threads
@@ -104,13 +105,15 @@ class MultiFileSource(SingleOutputSource):
                                  self._file_type,
                                  filter_nulls=True,
                                  df_type="pandas",
-                                 parser_kwargs=self._cudf_kwargs)
+                                 parser_kwargs=self._parser_kwargs)
 
             df = process_dataframe(df, self._input_schema)
 
             loaded_dfs.append(df)
 
         combined_df = pd.concat(loaded_dfs)
+
+        print("Sending {} rows".format(len(combined_df)))
 
         yield combined_df
 

@@ -17,7 +17,7 @@ services:
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_ROOT_HOST=${MYSQL_ROOT_HOST}
     volumes:
-      - dbdata:/var/lib/mysql
+      - db_data:/var/lib/mysql
 
   mlflow:
     restart: always
@@ -36,10 +36,33 @@ services:
     # command: mlflow server --backend-store-uri mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE} --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
     command: mlflow server --backend-store-uri sqlite:////opt/mlflow/dbdata/mlflow.db --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
     volumes:
-      - dbdata:/opt/mlflow/dbdata
-      - ./artifacts:/opt/mlflow/artifacts
+      - db_data:/opt/mlflow/dbdata
+      - mlflow_data:/opt/mlflow/artifacts
     depends_on:
       - db
+
+  morpheus_jupyter:
+    restart: always
+    build:
+      context: ./morpheus_jupyter
+      args:
+        - MORPHEUS_CONTAINER_VERSION=v22.08.00a-runtime
+    image: dfp_morpheus_jupyter
+    container_name: morpheus_jupyter
+    ports:
+      - "8888:8888"
+    networks:
+      - frontend
+      - backend
+    environment:
+      - VAULT_ROLE_ID=${VAULT_ROLE_ID}
+      - VAULT_SECRET_ID=${VAULT_SECRET_ID}
+    command: jupyter-lab --no-browser --allow-root --ip='*'
+    volumes:
+      - ../..:/work
+    working_dir: /work/examples/dfp_workflow
+    depends_on:
+      - mlflow
 
   morpheus:
     # restart: always
@@ -79,4 +102,5 @@ networks:
     driver: bridge
 
 volumes:
-  dbdata:
+  db_data:
+  mlflow_data:
