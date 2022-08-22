@@ -93,25 +93,42 @@ function(resolve_python_module_name MODULE_NAME)
 
   set(py_module_name ${MODULE_NAME})
 
-  if($MODULE_ROOT)
-    set(py_module_path ${MODULE_ROOT})
+  message(STATUS "--------------------------")
+  message(STATUS "MODULE_ROOT=${PYMOD_MODULE_ROOT}")
+  message(STATUS "PYMOD_OUTPUT_TARGET_NAME=${PYMOD_OUTPUT_TARGET_NAME}")
+  message(STATUS "PYMOD_OUTPUT_MODULE_NAME=${PYMOD_OUTPUT_MODULE_NAME}")
+  message(STATUS "PYMOD_OUTPUT_RELATIVE_PATH=${PYMOD_OUTPUT_RELATIVE_PATH}")
+
+  if(PYMOD_MODULE_ROOT)
+    message(STATUS "1")
+    set(py_module_path ${PYMOD_MODULE_ROOT})
   else()
+    message(STATUS "2")
     file(RELATIVE_PATH py_rel_path ${MORPHEUS_PY_ROOT} ${CMAKE_CURRENT_SOURCE_DIR})
     set(py_module_path ${py_rel_path})
   endif()
 
+
+
   # Convert the relative path to a namespace. i.e. `cuml/package/module` -> `cuml::package::module
   string(REPLACE "/" "." py_module_namespace ${py_module_path})
 
+  message(STATUS "PYMOD_OUTPUT_TARGET_NAME=${PYMOD_OUTPUT_TARGET_NAME}")
+
   if (PYMOD_OUTPUT_TARGET_NAME)
+    message(STATUS "3")
     set(${PYMOD_OUTPUT_TARGET_NAME} "${py_module_namespace}.${py_module_name}" PARENT_SCOPE)
   endif()
   if (PYMOD_OUTPUT_MODULE_NAME)
+    message(STATUS "4")
     set(${PYMOD_OUTPUT_MODULE_NAME} "${py_module_name}" PARENT_SCOPE)
   endif()
   if (PYMOD_OUTPUT_RELATIVE_PATH)
+    message(STATUS "5")
     set(${PYMOD_OUTPUT_RELATIVE_PATH} "${py_module_path}" PARENT_SCOPE)
   endif()
+
+  message(STATUS "--------------------------")
 endfunction()
 
 #[=======================================================================[
@@ -135,12 +152,23 @@ macro(add_python_module MODULE_NAME)
       "${multiValues}"
       ${ARGN})
 
+  message(STATUS "*****************************************")
+  message(STATUS "MODULE_ROOT=${PYMOD_MODULE_ROOT}")
+  message(STATUS "MODULE_NAME=${MODULE_NAME}")
+  message(STATUS "TARGET_NAME=${PYMOD_OUTPUT_TARGET}")
+  message(STATUS "SOURCE_FILES=${PYMOD_SOURCE_FILES}")
+  message(STATUS "INSTALL_DEST=${PYMOD_INSTALL_DEST}")
+  message(STATUS "OUTPUT_RELATIVE_PATH=${PYMOD_OUTPUT_RELATIVE_PATH}")
+  message(STATUS "SOURCE_RELATIVE_PATH=${PYMOD_SOURCE_RELATIVE_PATH}")
+
   resolve_python_module_name(${MODULE_NAME}
-      OUTPUT_TARGET_NAME TARGET_NAME
-      OUTPUT_MODULE_NAME MODULE_NAME
+      MODULE_ROOT ${PYMOD_MODULE_ROOT}
+      OUTPUT_TARGET_NAME ${PYMOD_OUTPUT_TARGET}
+      OUTPUT_MODULE_NAME ${PYMOD_MODULE_NAME}
       OUTPUT_RELATIVE_PATH SOURCE_RELATIVE_PATH
       )
 
+  message(STATUS "*****************************************")
   # Ensure the custom target all_python_targets has been created
   if (NOT TARGET all_python_targets)
     message(FATAL_ERROR "You must call `add_custom_target(all_python_targets)` before the first call to add_python_module")
@@ -167,9 +195,12 @@ macro(add_python_module MODULE_NAME)
   set(pymod_link_libs "")
   if (PYMOD_LINK_TARGETS)
     foreach(target IN LISTS PYMOD_LINK_TARGETS)
+      message(STATUS "linking: ${target}")
       list(APPEND pymod_link_libs ${target})
     endforeach()
   endif()
+
+  message(STATUS "linking: ${pymod_link_libs}")
 
   target_link_libraries(${TARGET_NAME}
     PUBLIC
@@ -257,6 +288,9 @@ add_cython_library
 #]=======================================================================]
 function(morpheus_add_cython_libraries MODULE_NAME)
 
+  message(STATUS "...............")
+  message(STATUS "${MODULE_NAME}")
+  message(STATUS "...............")
   add_python_module(${MODULE_NAME} IS_CYTHON ${ARGN})
 
 endfunction()

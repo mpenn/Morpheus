@@ -64,6 +64,8 @@ message(STATUS "*******************************")
 message(STATUS "CMAKE_CURRENT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}")
 message(STATUS "MORPHEUS_LIB_ROOT=${MORPHEUS_LIB_ROOT}")
+message(STATUS "MODULE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/_lib")
+
 morpheus_add_pybind11_module(
     morpheus_example
     MODULE_ROOT
