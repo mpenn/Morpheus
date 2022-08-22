@@ -19,7 +19,6 @@
 
 #include <pybind11/pybind11.h>
 #include <pysrf/utils.hpp>  // for pysrf::import
-#include <srf/segment/object.hpp>
 
 #include <exception>
 
@@ -40,9 +39,7 @@ PassThruStage::subscribe_fn_t PassThruStage::build_operator()
 std::shared_ptr<srf::segment::Object<PassThruStage>> PassThruStageInterfaceProxy::init(srf::segment::Builder& builder,
                                                                                        const std::string& name)
 {
-    auto stage = builder.construct_object<PassThruStage>(name);
-
-    return stage;
+    return builder.construct_object<PassThruStage>(name);
 }
 
 namespace py = pybind11;

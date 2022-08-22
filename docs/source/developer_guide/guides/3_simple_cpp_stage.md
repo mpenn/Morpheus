@@ -65,8 +65,7 @@ Note: `SourceT` and `SinkT` types are typically `shared_ptr`s to a Morpheus mess
 
 Note: The C++ implementation of a stage must receive and emit the same message types as the Python implementation.
 
-Note: The "Python" in the `PythonSource` & `PythonNode` class names refers to the fact that these classes read and write
-objects registered with python, not the implementation language.
+Note: The "Python" in the `PythonSource` & `PythonNode` class names refers to the fact that these classes read and write objects registered with python, not the implementation language.
 
 ## A Simple Pass Through Stage
 
@@ -78,8 +77,9 @@ To start with, we have our Morpheus and SRF-specific includes:
 
 ```cpp
 #include <morpheus/messages/multi.hpp>  // for MultiMessage
-#include <srf/segment/builder.hpp>         //for Segment
 #include <pysrf/node.hpp>               // for PythonNode
+#include <srf/segment/builder.hpp>      // for Segment Builder
+#include <srf/segment/object.hpp>       // for Segment Object
 ```
 
 We'll want to define our stage in its own namespace. In this case, we will name it `morpheus_example`, giving us a namespace and class definition that look like this:
@@ -87,6 +87,7 @@ We'll want to define our stage in its own namespace. In this case, we will name 
 ```cpp
 namespace morpheus_example {
 
+// pybind11 sets visibility to hidden by default; we want to export our symbols
 #pragma GCC visibility push(default)
 
 using namespace morpheus;
@@ -110,10 +111,10 @@ We explicitly set the visibility for the stage object in the namespace to defaul
 For simplicity, we defined `base_t` as an alias for our base class type because the definition can be quite long. Our base class type also defines a few additional type aliases for us: `subscribe_fn_t`, `sink_type_t` and `source_type_t`. The `sink_type_t` and `source_type_t` aliases are shortcuts for the sink and source types that this stage will be reading and writing. In this case both the `sink_type_t` and `source_type_t` resolve to `std::shared_ptr<MultiMessage>`. `subscribe_fn_t` (read as "subscribe function type") is an alias for:
 
 ```cpp
-std::function<rxcpp::subscription(rxcpp::observable<T>, rxcpp::subscriber<R>)>
+std::function<rxcpp::subscription(rxcpp::observable<InputT>, rxcpp::subscriber<OutputT>)>
 ```
 
-This means that a SRF subscribe function accepts an `rxcpp::observable` of type `T` and `rxcpp::subscriber` of type `R` and returns a subscription. In our case, both `T` and `R` are `std::shared_ptr<MultiMessage>`.
+This means that a SRF subscribe function accepts an `rxcpp::observable` of type `InputT` and `rxcpp::subscriber` of type `OutputT` and returns a subscription. In our case, both `InputT` and `OutputT` are `std::shared_ptr<MultiMessage>`.
 
 All Morpheus C++ stages receive an instance of a SRF Segment Builder and a name (Typically this is the Python class' `unique_name` property) when constructed from Python. Note that C++ segments don't receive an instance of the Morpheus config. Therefore, if there are any attributes in the config needed by the C++ class, it is the responsibility of the Python class to extract them and pass them in as parameters to the C++ class.
 
@@ -122,11 +123,12 @@ We will also define an interface proxy object to keep the class definition separ
 ```cpp
 struct PassThruStageInterfaceProxy
 {
-    static std::shared_ptr<srf::segment::Object<PassThruStage>> init(srf::segment::Builder &builder, const std::string &name);
+    static std::shared_ptr<srf::segment::Object<PassThruStage>> init(srf::segment::Builder &builder,
+                                                                     const std::string &name);
 };
 ```
 
-## The Complete C++ Stage Header
+### The Complete C++ Stage Header
 
 Putting it all together, our header file looks like this:
 
@@ -135,7 +137,8 @@ Putting it all together, our header file looks like this:
 
 #include <morpheus/messages/multi.hpp>  // for MultiMessage
 #include <pysrf/node.hpp>               // for PythonNode
-#include <srf/segment/builder.hpp>      //for Segment
+#include <srf/segment/builder.hpp>      // for Segment Builder
+#include <srf/segment/object.hpp>       // for Segment Object
 
 #include <memory>
 #include <string>
@@ -170,7 +173,7 @@ struct PassThruStageInterfaceProxy
 }  // namespace morpheus_example
 ```
 
-## Source Definition
+### Source Code Definition
 
 Our includes section looks like:
 
@@ -178,6 +181,7 @@ Our includes section looks like:
 #include "pass_thru.hpp"
 
 #include <pybind11/pybind11.h>
+#include <pysrf/utils.hpp>  // for pysrf::import
 
 #include <exception>
 ```
@@ -185,9 +189,7 @@ Our includes section looks like:
 The constructor for our class is responsible for passing the output of `build_operator` to our base class, as well as calling the constructor for `PythonNode`:
 
 ```cpp
-PassThruStage::PassThruStage() :
-  PythonNode(base_t::op_factory_from_sub_fn(build_operator()))
-{}
+PassThruStage::PassThruStage() : PythonNode(base_t::op_factory_from_sub_fn(build_operator())) {}
 ```
 
 We can see that the output of `build_operator()` is not passed directly to the `PythonNode` constructor and instead gets passed to `base_t::op_factory_from_sub_fn()`. This is because reactive operators can be defined two ways:
@@ -213,7 +215,7 @@ PassThruStage::subscribe_fn_t PassThruStage::build_operator()
     return [this](rxcpp::observable<sink_type_t>& input, rxcpp::subscriber<source_type_t>& output) {
         return input.subscribe(
             rxcpp::make_observer<sink_type_t>(
-                [this, &output](sink_type_t&& x) { output.on_next(std::move(x)); },
+                [this, &output](sink_type_t x) { output.on_next(std::move(x)); },
                 [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
                 [&]() { output.on_completed(); }));
     };
@@ -225,7 +227,7 @@ Note the use of `std::move` in the `on_next` function. In Morpheus, our messages
 There are situations in which a C++ stage does need to interact with Python, and therefore acquiring the GIL is a requirement. In these situations, it is important to ensure that the GIL is released before calling the `on_next` method. This is typically accomplished using pybind11's [gil_scoped_acquire](https://pybind11.readthedocs.io/en/stable/advanced/misc.html#global-interpreter-lock-gil) RAII class inside of a code block. Consider the following `on_next` lambda function from Morpheus' `SerializeStage`:
 
 ```cpp
-[this, &output](sink_type_t &&msg) {
+[this, &output](sink_type_t msg) {
     auto table_info = this->get_meta(msg);
     std::shared_ptr<MessageMeta> meta;
     {
@@ -238,7 +240,7 @@ There are situations in which a C++ stage does need to interact with Python, and
 
 We scoped the acquisition of the GIL such that it is held only for the parts of the code where it is strictly necessary. In the above example, when we exit the code block, the `gil` variable will go out of scope and release the global interpreter lock.
 
-## Python Proxy and Interface
+### Python Proxy and Interface
 
 The things that all proxy interfaces need to do are:
 1. Construct the stage using the `srf::segment::Builder::construct_object` method
@@ -248,9 +250,7 @@ The things that all proxy interfaces need to do are:
 std::shared_ptr<srf::segment::Object<PassThruStage>>
 PassThruStageInterfaceProxy::init(srf::segment::Builder& builder, const std::string& name)
 {
-    auto stage = builder.construct_object<PassThruStage>(name);
-
-    return stage;
+    return builder.construct_object<PassThruStage>(name);
 }
 ```
 
@@ -262,43 +262,43 @@ namespace py = pybind11;
 // Define the pybind11 module m.
 PYBIND11_MODULE(morpheus_example, m)
 {
-    py::class_<PassThruStage, srf::segment::ObjectProperties, std::shared_ptr<srf::segment::Object<PassThruStage>>>(
-        m, "PassThruStage", py::multiple_inheritance())
-        .def(py::init<>(&PassThruStageInterfaceProxy::init), py::arg("builder"), py::arg("name"));
+    srf::pysrf::import(m, "morpheus._lib.messages");
+
+    py::class_<srf::segment::Object<PassThruStage>,
+               srf::segment::ObjectProperties,
+               std::shared_ptr<srf::segment::Object<PassThruStage>>>(m, "PassThruStage", py::multiple_inheritance())
+        .def(py::init<>(&PassThruStageInterfaceProxy::init), py::arg("segment"), py::arg("name"));
 }
 ```
 
-## The Complete C++ Stage Implementation
+### The Complete C++ Stage Implementation
 
 ```cpp
 #include "pass_thru.hpp"
 
 #include <pybind11/pybind11.h>
+#include <pysrf/utils.hpp>  // for pysrf::import
 
 #include <exception>
 
 namespace morpheus_example {
 
-PassThruStage::PassThruStage() :
-  PythonNode(base_t::op_factory_from_sub_fn(build_operator()))
-{}
+PassThruStage::PassThruStage() : PythonNode(base_t::op_factory_from_sub_fn(build_operator())) {}
 
 PassThruStage::subscribe_fn_t PassThruStage::build_operator()
 {
-    return [this](rxcpp::observable<sink_type_t>& input, rxcpp::subscriber<source_type_t>& output) {
+    return [this](rxcpp::observable<sink_type_t> input, rxcpp::subscriber<source_type_t> output) {
         return input.subscribe(
-            rxcpp::make_observer<sink_type_t>([this, &output](sink_type_t&& x) { output.on_next(std::move(x)); },
+            rxcpp::make_observer<sink_type_t>([this, &output](sink_type_t x) { output.on_next(std::move(x)); },
                                               [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
                                               [&]() { output.on_completed(); }));
     };
 }
 
-std::shared_ptr<srf::segment::Object<PassThruStage>>
-PassThruStageInterfaceProxy::init(srf::segment::Builder& builder, const std::string& name)
+std::shared_ptr<srf::segment::Object<PassThruStage>> PassThruStageInterfaceProxy::init(srf::segment::Builder& builder,
+                                                                                       const std::string& name)
 {
-    auto stage = builder.construct_object<PassThruStage>(name);
-
-    return stage;
+    return builder.construct_object<PassThruStage>(name);
 }
 
 namespace py = pybind11;
@@ -306,20 +306,21 @@ namespace py = pybind11;
 // Define the pybind11 module m.
 PYBIND11_MODULE(morpheus_example, m)
 {
-    py::class_<PassThruStage, srf::segment::ObjectProperties, std::shared_ptr<srf::segment::Object<PassThruStage>>>(
-        m, "PassThruStage", py::multiple_inheritance())
+    srf::pysrf::import(m, "morpheus._lib.messages");
+
+    py::class_<srf::segment::Object<PassThruStage>,
+               srf::segment::ObjectProperties,
+               std::shared_ptr<srf::segment::Object<PassThruStage>>>(m, "PassThruStage", py::multiple_inheritance())
         .def(py::init<>(&PassThruStageInterfaceProxy::init), py::arg("segment"), py::arg("name"));
 }
+
 }  // namespace morpheus_example
 ```
 
-## Python Changes
+### Python Changes
 
-We need to make a few minor adjustments to our Python implementation of the `PassThruStage`. First, we import the `CppConfig` along with the new `morpheus_example` Python module we created in the previous section.
+We need to make a few minor adjustments to our Python implementation of the `PassThruStage`. First, we import new `morpheus_example` Python module we created in the previous section.
 
-```python
-from morpheus.config import CppConfig
-```
 ```python
 from _lib import morpheus_example as morpheus_example_cpp
 ```
@@ -331,12 +332,12 @@ def supports_cpp_node(self):
    return True
 
 def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
-   if self._build_cpp_node():
-      print("building cpp")
-      node = morpheus_example_cpp.PassThruStage(builder, self.unique_name)
-   else:
-      node = builder.make_node(self.unique_name, self.on_data)
+    if self._build_cpp_node():
+        print("building cpp")
+        node = morpheus_example_cpp.PassThruStage(builder, self.unique_name)
+    else:
+        node = builder.make_node(self.unique_name, self.on_data)
 
-   builder.make_edge(input_stream[0], node)
-   return node, input_stream[1]
+    builder.make_edge(input_stream[0], node)
+    return node, input_stream[1]
 ```

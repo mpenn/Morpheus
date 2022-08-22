@@ -18,9 +18,9 @@
 #pragma once
 
 #include <morpheus/messages/multi.hpp>  // for MultiMessage
-#include <morpheus/messages/multi_inference.hpp>
-#include <pysrf/node.hpp>           // for PythonNode
-#include <srf/segment/builder.hpp>  //for Segment
+#include <pysrf/node.hpp>               // for PythonNode
+#include <srf/segment/builder.hpp>      // for Segment Builder
+#include <srf/segment/object.hpp>       // for Segment Object
 
 #include <memory>
 #include <string>
