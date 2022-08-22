@@ -18,7 +18,6 @@ import typing
 import srf
 
 from _lib import morpheus_example as morpheus_example_cpp
-from morpheus.config import CppConfig
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 

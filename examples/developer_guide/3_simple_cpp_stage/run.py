@@ -23,6 +23,7 @@ from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.input.file_source_stage import FileSourceStage
+from morpheus.stages.preprocess.deserialize_stage import DeserializeStage
 from morpheus.utils.logger import configure_logging
 
 
@@ -40,6 +41,8 @@ def run_pipeline():
 
     # Set source stage
     pipeline.set_source(FileSourceStage(config, filename=input_file, iterative=False))
+
+    pipeline.add_stage(DeserializeStage(config))
 
     # Add our own stage
     pipeline.add_stage(PassThruStage(config))
