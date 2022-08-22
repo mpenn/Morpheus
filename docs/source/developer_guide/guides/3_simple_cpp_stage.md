@@ -32,7 +32,7 @@ In addition to C++ accelerated stage implementations, Morpheus also provides a C
 
 Since we are defining our pipelines in Python, it becomes the responsibility of the Python implementation to build a C++ accelerated node. This happens in the `_build_source` and `_build_single` methods. Ultimately it is the decision of a Python stage to build a Python node or a C++ node. It is perfectly acceptable to build a Python node when `morpheus.config.CppConfig.get_should_use_cpp()` is configured to `True`. It is not acceptable, however, to build a C++ node when `morpheus.config.CppConfig.get_should_use_cpp() == False`. The reason is the C++ implementations of Morpheus' messages can be consumed by Python and C++ stage implementations alike. However when `morpheus.config.CppConfig.get_should_use_cpp() == False`, the Python implementations of each message type will be used which cannot be consumed by the C++ implementations of stages.
 
-Python stages which have a C++ implementation must advertise this functionality by overriding the `supports_cpp_node` method:
+Python stages which have a C++ implementation must advertise this functionality by returning a value of `True` from the `supports_cpp_node` method:
 
 ```python
 def supports_cpp_node(self):
@@ -95,9 +95,9 @@ class PassThruStage : public srf::pysrf::PythonNode<std::shared_ptr<MultiMessage
 {
   public:
     using base_t = srf::pysrf::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiMessage>>;
-    using base_t::subscribe_fn_t;
     using base_t::sink_type_t;
     using base_t::source_type_t;
+    using base_t::subscribe_fn_t;
 
     PassThruStage();
 
@@ -134,8 +134,8 @@ Putting it all together, our header file looks like this:
 #pragma once
 
 #include <morpheus/messages/multi.hpp>  // for MultiMessage
-#include <srf/segment/builder.hpp>         //for Segment
 #include <pysrf/node.hpp>               // for PythonNode
+#include <srf/segment/builder.hpp>      //for Segment
 
 #include <memory>
 #include <string>
@@ -151,9 +151,9 @@ class PassThruStage : public srf::pysrf::PythonNode<std::shared_ptr<MultiMessage
 {
   public:
     using base_t = srf::pysrf::PythonNode<std::shared_ptr<MultiMessage>, std::shared_ptr<MultiMessage>>;
-    using base_t::subscribe_fn_t;
     using base_t::sink_type_t;
     using base_t::source_type_t;
+    using base_t::subscribe_fn_t;
 
     PassThruStage();
 
@@ -162,7 +162,8 @@ class PassThruStage : public srf::pysrf::PythonNode<std::shared_ptr<MultiMessage
 
 struct PassThruStageInterfaceProxy
 {
-    static std::shared_ptr<srf::segment::Object<PassThruStage>> init(srf::segment::Builder &builder, const std::string &name);
+    static std::shared_ptr<srf::segment::Object<PassThruStage>> init(srf::segment::Builder &builder,
+                                                                     const std::string &name);
 };
 
 #pragma GCC visibility pop
@@ -323,7 +324,7 @@ from morpheus.config import CppConfig
 from _lib import morpheus_example as morpheus_example_cpp
 ```
 
-As mentioned in the previous section, we will need to override the `supports_cpp_node` to indicate that our stage supports a C++ implementation.  Our `_build_single` method needs to be updated to build a C++ node when `morpheus.config.CppConfig.get_should_use_cpp()` is `True` using the `self._build_cpp_node()` method. The `_build_cpp_node()` method compares both `morpheus.config.CppConfig.get_should_use_cpp()` and `supports_cpp_node()` and returns `True` only when both methods return `True`.
+As mentioned in the previous section, we will need to change the return value of `supports_cpp_node` to indicate that our stage supports a C++ implementation.  Our `_build_single` method needs to be updated to build a C++ node when `morpheus.config.CppConfig.get_should_use_cpp()` is `True` using the `self._build_cpp_node()` method. The `_build_cpp_node()` method compares both `morpheus.config.CppConfig.get_should_use_cpp()` and `supports_cpp_node()` and returns `True` only when both methods return `True`.
 
 ```python
 def supports_cpp_node(self):
