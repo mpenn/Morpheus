@@ -58,57 +58,41 @@ include(deps/Configure_libcudacxx)
 set(SRF_VERSION 22.06 CACHE STRING "Which version of SRF to use")
 include(deps/Configure_srf)
 
+set(Python3_FIND_VIRTUALENV "FIRST")
+set(Python3_FIND_STRATEGY "LOCATION")
+find_package(Python3 REQUIRED COMPONENTS Development Interpreter NumPy)
 find_package(pybind11 REQUIRED)
 
-message(STATUS "*******************************")
-message(STATUS "CMAKE_CURRENT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}")
-message(STATUS "CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}")
-message(STATUS "MORPHEUS_LIB_ROOT=${MORPHEUS_LIB_ROOT}")
-morpheus_add_pybind11_module(
-    morpheus_example
-    MODULE_ROOT
-      "${CMAKE_CURRENT_SOURCE_DIR}/_lib"
-    SOURCE_FILES
-      "${CMAKE_CURRENT_SOURCE_DIR}/_lib/pass_thru.cpp"
-    INCLUDE_DIRS
-      "${MORPHEUS_LIB_ROOT}/include"
-    LINK_TARGETS
+# TODO: https://github.com/nv-morpheus/Morpheus/issues/331
+link_directories(AFTER "${Python3_SITELIB}/morpheus/_lib")
+
+pybind11_add_module(morpheus_example MODULE "${CMAKE_CURRENT_SOURCE_DIR}/_lib/pass_thru.cpp")
+
+add_library(${PROJECT_NAME}::morpheus_example ALIAS morpheus_example)
+
+target_link_libraries(morpheus_example
+    PUBLIC
+      libcudacxx::libcudacxx
       morpheus
       srf::pysrf
-    OUTPUT_TARGET
-      morpheus_example_target
-    INSTALL_DEST
-      ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-#pybind11_add_module(morpheus_example MODULE "${CMAKE_CURRENT_SOURCE_DIR}/_lib/pass_thru.cpp")
-
-#add_library(${PROJECT_NAME}::morpheus_example ALIAS morpheus_example)
-
-
-#target_link_libraries(morpheus_example
-#    PUBLIC
-#      libcudacxx::libcudacxx
-#      morpheus
-#      srf::pysrf
-#)
-
-#target_include_directories(morpheus_example
-#    PUBLIC
-#      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-#      $<BUILD_INTERFACE:${MORPHEUS_ROOT}/morpheus/_lib/include>
-#)
+target_include_directories(morpheus_example
+    PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+      $<BUILD_INTERFACE:${MORPHEUS_ROOT}/morpheus/_lib/include>
+)
 
 
-#set_target_properties(morpheus_example PROPERTIES CXX_VISIBILITY_PRESET hidden)
-#inplace_build_copy(${morpheus_example_target} "${CMAKE_CURRENT_SOURCE_DIR}/_lib")
+set_target_properties(morpheus_example PROPERTIES CXX_VISIBILITY_PRESET hidden)
+inplace_build_copy(morpheus_example "${CMAKE_CURRENT_SOURCE_DIR}/_lib")
 
 message(STATUS " Install dest: (morpheus_example) ${CMAKE_CURRENT_BINARY_DIR}")
-#install(
-#    TARGETS
-#    morpheus_example
-#    LIBRARY DESTINATION
-#      "${CMAKE_CURRENT_BINARY_DIR}"
-#)
+install(
+    TARGETS
+    morpheus_example
+    LIBRARY DESTINATION
+      "${CMAKE_CURRENT_BINARY_DIR}"
+)
 
 list(POP_BACK CMAKE_MESSAGE_CONTEXT)
