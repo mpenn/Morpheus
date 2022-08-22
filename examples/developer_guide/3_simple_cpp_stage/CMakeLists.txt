@@ -83,7 +83,6 @@ target_include_directories(morpheus_example
       $<BUILD_INTERFACE:${MORPHEUS_ROOT}/morpheus/_lib/include>
 )
 
-
 set_target_properties(morpheus_example PROPERTIES CXX_VISIBILITY_PRESET hidden)
 inplace_build_copy(morpheus_example "${CMAKE_CURRENT_SOURCE_DIR}/_lib")
 
