@@ -18,6 +18,8 @@
 #include "pass_thru.hpp"
 
 #include <pybind11/pybind11.h>
+#include <pysrf/utils.hpp>  // for pysrf::import
+#include <srf/segment/object.hpp>
 
 #include <exception>
 
@@ -48,6 +50,8 @@ namespace py = pybind11;
 // Define the pybind11 module m.
 PYBIND11_MODULE(morpheus_example, m)
 {
+    srf::pysrf::import(m, "morpheus._lib.messages");
+
     py::class_<srf::segment::Object<PassThruStage>,
                srf::segment::ObjectProperties,
                std::shared_ptr<srf::segment::Object<PassThruStage>>>(m, "PassThruStage", py::multiple_inheritance())
