@@ -91,7 +91,7 @@ AmqpClient::Channel::ptr_t m_channel;
 ```
 
 Wrapping it all together, our header file should look like this:
-`examples/rabbitmq/_lib/rabbitmq_source.hpp`
+`examples/developer_guide/4_rabbitmq_cpp_Stage/_lib/rabbitmq_source.hpp`
 
 ```cpp
 #pragma once
@@ -312,7 +312,7 @@ void RabbitMQSourceStage::close()
 ## Python Proxy & Interface
 
 ```cpp
-std::shared_ptr<RabbitMQSourceStage>
+std::shared_ptr<srf::segment::Object<RabbitMQSourceStage>>
 RabbitMQSourceStageInterfaceProxy::init(srf::segment::Builder& builder,
                                         const std::string &name,
                                         const std::string &host,
@@ -346,7 +346,7 @@ PYBIND11_MODULE(morpheus_rabbit, m)
 ```
 
 Wrapping it all together, our source file should look like:
-`examples/rabbitmq/_lib/rabbitmq_source.cpp`
+`examples/developer_guide/4_rabbitmq_cpp_Stage/_lib/rabbitmq_source.cpp`
 
 ```cpp
 #include "rabbitmq_source.hpp"
@@ -444,7 +444,6 @@ void RabbitMQSourceStage::close()
     }
 }
 
-// ************ WriteToFileStageInterfaceProxy ************* //
 std::shared_ptr<srf::segment::Object<RabbitMQSourceStage>>
 RabbitMQSourceStageInterfaceProxy::init(srf::segment::Builder& builder,
                                         const std::string &name,

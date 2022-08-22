@@ -72,6 +72,7 @@ target_link_libraries(morpheus_rabbit
 target_include_directories(morpheus_rabbit
     PUBLIC
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+      $<BUILD_INTERFACE:${MORPHEUS_ROOT}/morpheus/_lib/include>
       rabbitmq
       ${SimpleAmqpClient_SOURCE_DIR}/src
 )

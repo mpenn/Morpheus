@@ -17,16 +17,12 @@
 
 #include "rabbitmq_source.hpp"
 
-#include <neo/core/segment.hpp>
-#include <neo/core/segment_object.hpp>
-
+#include <boost/fiber/operations.hpp>  // for this_fiber::sleep_for
 #include <cudf/io/json.hpp>
 #include <cudf/table/table.hpp>
-
 #include <glog/logging.h>
 #include <pybind11/chrono.h>  // for timedelta->chrono
 #include <pybind11/pybind11.h>
-#include <boost/fiber/operations.hpp>  // for this_fiber::sleep_for
 
 #include <exception>
 #include <sstream>
@@ -34,15 +30,12 @@
 
 namespace morpheus_rabbit {
 
-RabbitMQSourceStage::RabbitMQSourceStage(const neo::Segment &segment,
-                                         const std::string &name,
-                                         const std::string &host,
+RabbitMQSourceStage::RabbitMQSourceStage(const std::string &host,
                                          const std::string &exchange,
                                          const std::string &exchange_type,
                                          const std::string &queue_name,
                                          std::chrono::milliseconds poll_interval) :
-  neo::SegmentObject(segment, name),
-  base_t(segment, name, build_observable()),
+  base_t(build_observable()),
   m_channel{AmqpClient::Channel::Create(host)},
   m_poll_interval{poll_interval}
 {
@@ -51,9 +44,9 @@ RabbitMQSourceStage::RabbitMQSourceStage(const neo::Segment &segment,
     m_channel->BindQueue(m_queue_name, exchange);
 }
 
-neo::Observable<RabbitMQSourceStage::source_type_t> RabbitMQSourceStage::build_observable()
+rxcpp::observable<RabbitMQSourceStage::source_type_t> RabbitMQSourceStage::build_observable()
 {
-    return neo::Observable<source_type_t>([this](neo::Subscriber<source_type_t> &subscriber) {
+    return rxcpp::observable<>::create<source_type_t>([this](rxcpp::subscriber<source_type_t> subscriber) {
         try
         {
             this->source_generator(subscriber);
@@ -70,13 +63,13 @@ neo::Observable<RabbitMQSourceStage::source_type_t> RabbitMQSourceStage::build_o
     });
 }
 
-void RabbitMQSourceStage::source_generator(neo::Subscriber<RabbitMQSourceStage::source_type_t> &subscriber)
+void RabbitMQSourceStage::source_generator(rxcpp::subscriber<RabbitMQSourceStage::source_type_t> subscriber)
 {
-    const std::string consumer_tag = m_channel->BasicConsume(m_queue_name, "", true, false);
+    const std::string consumer_tag = m_connection->BasicConsume(m_queue_name, "", true, false);
     while (subscriber.is_subscribed())
     {
         AmqpClient::Envelope::ptr_t envelope;
-        if (m_channel->BasicConsumeMessage(consumer_tag, envelope, 0))
+        if (m_connection->BasicConsumeMessage(consumer_tag, envelope, 0))
         {
             try
             {
@@ -87,7 +80,7 @@ void RabbitMQSourceStage::source_generator(neo::Subscriber<RabbitMQSourceStage::
             {
                 LOG(ERROR) << "Error occurred converting RabbitMQ message to Dataframe: " << e.what();
             }
-            m_channel->BasicAck(envelope);
+            m_connection->BasicAck(envelope);
         }
         else
         {
@@ -113,19 +106,18 @@ void RabbitMQSourceStage::close()
     }
 }
 
-// ************ WriteToFileStageInterfaceProxy ************* //
-std::shared_ptr<RabbitMQSourceStage> RabbitMQSourceStageInterfaceProxy::init(neo::Segment &segment,
-                                                                             const std::string &name,
-                                                                             const std::string &host,
-                                                                             const std::string &exchange,
-                                                                             const std::string &exchange_type,
-                                                                             const std::string &queue_name,
-                                                                             std::chrono::milliseconds poll_interval)
+/*
+std::shared_ptr<srf::segment::Object<RabbitMQSourceStage>> RabbitMQSourceStageInterfaceProxy::init(
+    srf::segment::Builder &builder,
+    const std::string &name,
+    const std::string &host,
+    const std::string &exchange,
+    const std::string &exchange_type,
+    const std::string &queue_name,
+    std::chrono::milliseconds poll_interval)
 {
-    auto stage =
-        std::make_shared<RabbitMQSourceStage>(segment, name, host, exchange, exchange_type, queue_name, poll_interval);
-    segment.register_node<RabbitMQSourceStage>(stage);
-    return stage;
+    return builder.construct_object<RabbitMQSourceStage>(
+        name, host, exchange, exchange_type, queue_name, poll_interval);
 }
 
 namespace py = pybind11;
@@ -133,10 +125,14 @@ namespace py = pybind11;
 // Define the pybind11 module m.
 PYBIND11_MODULE(morpheus_rabbit, m)
 {
-    py::class_<RabbitMQSourceStage, neo::SegmentObject, std::shared_ptr<RabbitMQSourceStage>>(
+    srf::pysrf::import(m, "morpheus._lib.messages");
+
+    py::class_<srf::segment::Object<RabbitMQSourceStage>,
+               srf::segment::ObjectProperties,
+               std::shared_ptr<srf::segment::Object<RabbitMQSourceStage>>>(
         m, "RabbitMQSourceStage", py::multiple_inheritance())
         .def(py::init<>(&RabbitMQSourceStageInterfaceProxy::init),
-             py::arg("segment"),
+             py::arg("builder"),
              py::arg("name"),
              py::arg("host"),
              py::arg("exchange"),
@@ -144,5 +140,5 @@ PYBIND11_MODULE(morpheus_rabbit, m)
              py::arg("queue_name")    = "",
              py::arg("poll_interval") = 100ms);
 }
-
+*/
 }  // namespace morpheus_rabbit
