@@ -35,7 +35,7 @@ RabbitMQSourceStage::RabbitMQSourceStage(const std::string &host,
                                          const std::string &exchange_type,
                                          const std::string &queue_name,
                                          std::chrono::milliseconds poll_interval) :
-  base_t(build_observable()),
+  PythonSource(build()),
   m_channel{AmqpClient::Channel::Create(host)},
   m_poll_interval{poll_interval}
 {
@@ -44,9 +44,9 @@ RabbitMQSourceStage::RabbitMQSourceStage(const std::string &host,
     m_channel->BindQueue(m_queue_name, exchange);
 }
 
-rxcpp::observable<RabbitMQSourceStage::source_type_t> RabbitMQSourceStage::build_observable()
+RabbitMQSourceStage::subscriber_fn_t RabbitMQSourceStage::build()
 {
-    return rxcpp::observable<>::create<source_type_t>([this](rxcpp::subscriber<source_type_t> subscriber) {
+    return [this](rxcpp::subscriber<source_type_t> subscriber) -> void {
         try
         {
             this->source_generator(subscriber);
@@ -60,7 +60,7 @@ rxcpp::observable<RabbitMQSourceStage::source_type_t> RabbitMQSourceStage::build
 
         close();
         subscriber.on_completed();
-    });
+    };
 }
 
 void RabbitMQSourceStage::source_generator(rxcpp::subscriber<RabbitMQSourceStage::source_type_t> subscriber)

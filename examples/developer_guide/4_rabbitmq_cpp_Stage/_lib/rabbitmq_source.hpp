@@ -40,7 +40,8 @@ class RabbitMQSourceStage : public srf::pysrf::PythonSource<std::shared_ptr<Mess
 {
   public:
     using base_t = srf::pysrf::PythonSource<std::shared_ptr<MessageMeta>>;
-    using base_t::source_type_t;
+    using typename base_t::source_type_t;
+    using typename base_t::subscriber_fn_t;
 
     RabbitMQSourceStage(const std::string &host,
                         const std::string &exchange,
@@ -51,7 +52,7 @@ class RabbitMQSourceStage : public srf::pysrf::PythonSource<std::shared_ptr<Mess
     ~RabbitMQSourceStage() override = default;
 
   private:
-    rxcpp::observable<source_type_t> build_observable();
+    subscriber_fn_t build();
     void source_generator(rxcpp::subscriber<source_type_t> sub);
     cudf::io::table_with_metadata from_json(const std::string &body) const;
     void close();
