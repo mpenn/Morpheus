@@ -53,6 +53,7 @@ cmake --build build -j --parallel ${PARALLEL_LEVEL}
 
 gpuci_logger "sccache usage for morpheus build:"
 sccache --show-stats
+sccache --zero-stats
 
 gpuci_logger "Installing Morpheus"
 cmake -DCOMPONENT=Wheel -P ${MORPHEUS_ROOT}/build/cmake_install.cmake
