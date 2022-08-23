@@ -16,12 +16,10 @@
 import logging
 import os
 
-import psutil
 from write_to_rabbitmq_stage import WriteToRabbitMQStage
 
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
-from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.input.file_source_stage import FileSourceStage
 from morpheus.utils.logger import configure_logging
 
@@ -34,7 +32,7 @@ def run_pipeline():
     input_file = os.path.join(root_dir, 'examples/data/email.jsonlines')
 
     config = Config()
-    config.num_threads = psutil.cpu_count()
+    config.num_threads = os.cpu_count()
 
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)

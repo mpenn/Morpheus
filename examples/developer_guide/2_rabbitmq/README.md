@@ -16,7 +16,7 @@ limitations under the License.
 -->
 
 # Example RabbitMQ stages
-This example inclues two stages `from_rabbitmq.RabbitMQSourceStage` and `to_rabbitmq.WriteToRabbitMQStage`
+This example inclues two stages `rabbitmq_source_stage.RabbitMQSourceStage` and `write_to_rabbitmq_stage.WriteToRabbitMQStage`
 
 ## Testing with a RabbitMQ container
 Testing can be performed locally with the RabbitMQ supplied docker image from the [RabbitMQ container registry](https://registry.hub.docker.com/_/rabbitmq/):

@@ -14,8 +14,8 @@
 # limitations under the License.
 
 import logging
+import os
 
-import psutil
 from rabbitmq_source_stage import RabbitMQSourceStage
 
 from morpheus._lib.file_types import FileTypes
@@ -31,7 +31,7 @@ def run_pipeline():
     configure_logging(log_level=logging.DEBUG)
 
     config = Config()
-    config.num_threads = psutil.cpu_count()
+    config.num_threads = os.cpu_count()
 
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)

@@ -14,24 +14,36 @@
 # limitations under the License.
 
 import logging
+import os
 
-import psutil
+import click
 from rabbitmq_source_stage import RabbitMQSourceStage
 
 from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
+from morpheus.config import CppConfig
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.utils.logger import configure_logging
 
 
-def run_pipeline():
+@click.command()
+@click.option('--use_cpp', default=True)
+@click.option(
+    "--num_threads",
+    default=os.cpu_count(),
+    type=click.IntRange(min=1),
+    help="Number of internal pipeline threads to use",
+)
+def run_pipeline(use_cpp, num_threads):
     # Enable the Morpheus logger
     configure_logging(log_level=logging.DEBUG)
 
+    CppConfig.set_should_use_cpp(use_cpp)
+
     config = Config()
-    config.num_threads = psutil.cpu_count()
+    config.num_threads = num_threads
 
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)

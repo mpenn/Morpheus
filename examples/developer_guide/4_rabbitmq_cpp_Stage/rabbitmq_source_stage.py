@@ -86,6 +86,7 @@ class RabbitMQSourceStage(SingleOutputSource):
 
     def _build_source(self, builder: srf.Builder) -> StreamPair:
         if self._build_cpp_node():
+            print("building C++ node")
             node = morpheus_rabbit_cpp.RabbitMQSourceStage(builder,
                                                            self.unique_name,
                                                            self._host,
@@ -94,6 +95,7 @@ class RabbitMQSourceStage(SingleOutputSource):
                                                            self._queue_name,
                                                            self._poll_interval)
         else:
+            print("building Python node")
             self.connect()
             node = builder.make_source(self.unique_name, self.source_generator)
         return node, MessageMeta
