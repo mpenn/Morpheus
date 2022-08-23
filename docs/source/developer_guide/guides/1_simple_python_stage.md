@@ -71,6 +71,8 @@ Finally, the `_build_single` method will be used at build time to wire our stage
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
         node = builder.make_node(self.unique_name, self.on_data)
         builder.make_edge(input_stream[0], node)
+
+        return node, input_stream[1]
 ```
 
 In most cases, a Morpheus stage will define and build a single SRF node. In some advanced cases, a stage can construct more than one node. For our purposes, a Morpheus _stage_ defines information about the type of node(s) it builds, while the _node_ is the instance of the stage that is wired into the SRF pipeline. To build the node, we will call the `make_node` method of the segment instance, passing to it our name and our `on_data` method. We used the `unique_name` property, which will take the name property which we already defined and append a unique id to it.
@@ -132,13 +134,13 @@ First we will need to import a few things from Morpheus for this example to work
 import logging
 import os
 
+from pass_thru import PassThruStage
+
 from morpheus.config import Config
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.input.file_source_stage import FileSourceStage
 from morpheus.utils.logger import configure_logging
-
-from pass_thru import PassThruStage
 ```
 
 Before constructing the pipeline, we need to do a bit of environment configuration, starting with the Morpheus logger:
@@ -200,6 +202,7 @@ from morpheus.stages.input.file_source_stage import FileSourceStage
 from morpheus.utils.logger import configure_logging
 
 from pass_thru import PassThruStage
+
 
 def run_pipeline():
     # Enable the Morpheus logger

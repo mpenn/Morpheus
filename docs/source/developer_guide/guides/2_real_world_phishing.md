@@ -123,27 +123,6 @@ class RecipientFeaturesStage(SinglePortStage):
 
 ### Testing the Preprocessing Stage
 
-To test our new stage, we will modify the pipeline from the previous guide by replacing the pass through stage with our new one.
-To do this, just update these lines from the previous guide:
-
-```python
-# Add our own stage
-pipeline.add_stage(PassThruStage(config))
-
-# Add monitor to record the performance of our new stage
-pipeline.add_stage(MonitorStage(config))
-```
-
-To:
-
-```python
-# Add our own stage
-pipeline.add_stage(RecipientFeaturesStage(config))
-
-# Add monitor to record the performance of our new stage
-pipeline.add_stage(MonitorStage(config))
-```
-
 ## Predicting Fraudulent Emails with Accelerated Machine Learning
 
 Now we'll use the `RecipientFeaturesStage` that we just made in a real-world pipeline to detect fraudulent emails. The pipeline we will be building makes use of the `TritonInferenceStage` which is a pre-defined Morpheus stage designed to support the execution of Natural Language Processing (NLP) models via NVIDIA's [Triton Inference Server framework](https://developer.nvidia.com/nvidia-triton-inference-server). NVIDIA Triton Inference Server allows for GPU accelerated ML/DL and seamless co-location and execution of a wide variety of model frameworks. For our application, we will be using the `phishing-bert-onnx` model, which is included with Morpheus in the `models/triton-model-repo/` directory.
@@ -194,15 +173,22 @@ Let's set up the paths for our input and output files. For simplicity, we assume
 import os
 
 import morpheus
+from morpheus.utils.logger import configure_logging
 
-root_dir = os.environ['MORPHEUS_ROOT']
-out_dir = os.environ.get('OUT_DIR', '/tmp')
 
-labels_file = os.path.join(morpheus.DATA_DIR, 'labels_phishing.txt')
-vocab_file = os.path.join(morpheus.DATA_DIR, 'bert-base-uncased-hash.txt')
+def run_pipeline():
+    # Enable the default logger
+    configure_logging(log_level=logging.INFO)
 
-input_file = os.path.join(root_dir, 'examples/data/email_with_addresses.jsonlines')
-results_file = os.path.join(out_dir, 'detections.jsonlines')
+    triton_url = os.environ.get('TRITON_URL', 'localhost:8001')
+    root_dir = os.environ['MORPHEUS_ROOT']
+    out_dir = os.environ.get('OUT_DIR', '/tmp')
+
+    labels_file = os.path.join(morpheus.DATA_DIR, 'labels_phishing.txt')
+    vocab_file = os.path.join(morpheus.DATA_DIR, 'bert-base-uncased-hash.txt')
+
+    input_file = os.path.join(root_dir, 'examples/data/email_with_addresses.jsonlines')
+    results_file = os.path.join(out_dir, 'detections.jsonlines')
 ```
 
 To start, we will need to instantiate and set a few members of the `Config` class. This object is used for configuration options that are global to the pipeline as a whole. We will provide this object to each stage along with stage-specific configuration parameters.
