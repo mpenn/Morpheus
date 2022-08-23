@@ -53,7 +53,7 @@ class RabbitMQSourceStage : public srf::pysrf::PythonSource<std::shared_ptr<Mess
 
   private:
     subscriber_fn_t build();
-    void source_generator(rxcpp::subscriber<source_type_t> sub);
+    void source_generator(rxcpp::subscriber<source_type_t> subscriber);
     cudf::io::table_with_metadata from_json(const std::string &body) const;
     void close();
 

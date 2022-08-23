@@ -212,12 +212,11 @@ The `build_operator` method defines an observer who is subscribed to our input `
 ```cpp
 PassThruStage::subscribe_fn_t PassThruStage::build_operator()
 {
-    return [this](rxcpp::observable<sink_type_t>& input, rxcpp::subscriber<source_type_t>& output) {
+    return [this](rxcpp::observable<sink_type_t> input, rxcpp::subscriber<source_type_t> output) {
         return input.subscribe(
-            rxcpp::make_observer<sink_type_t>(
-                [this, &output](sink_type_t x) { output.on_next(std::move(x)); },
-                [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
-                [&]() { output.on_completed(); }));
+            rxcpp::make_observer<sink_type_t>([this, &output](sink_type_t x) { output.on_next(std::move(x)); },
+                                              [&](std::exception_ptr error_ptr) { output.on_error(error_ptr); },
+                                              [&]() { output.on_completed(); }));
     };
 }
 ```
@@ -247,8 +246,8 @@ The things that all proxy interfaces need to do are:
 2. Return a `shared_ptr` to the stage wrapped in a `srf::segment::Object`
 
 ```cpp
-std::shared_ptr<srf::segment::Object<PassThruStage>>
-PassThruStageInterfaceProxy::init(srf::segment::Builder& builder, const std::string& name)
+std::shared_ptr<srf::segment::Object<PassThruStage>> PassThruStageInterfaceProxy::init(srf::segment::Builder& builder,
+                                                                                       const std::string& name)
 {
     return builder.construct_object<PassThruStage>(name);
 }
@@ -330,10 +329,11 @@ As mentioned in the previous section, we will need to change the return value of
 ```python
 def supports_cpp_node(self):
    return True
-
+```
+```python
 def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
     if self._build_cpp_node():
-        print("building cpp")
+        print("building C++ node")
         node = morpheus_example_cpp.PassThruStage(builder, self.unique_name)
     else:
         node = builder.make_node(self.unique_name, self.on_data)

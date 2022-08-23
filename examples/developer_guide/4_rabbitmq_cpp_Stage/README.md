@@ -16,7 +16,9 @@ limitations under the License.
 -->
 
 # Example RabbitMQ stages
-This example builds upon the `examples/developer_guide/2_rabbitmq` example adding a C++ implementation for the `RabbitMQSourceStage`.
+This example builds upon the `examples/developer_guide/2_2_rabbitmq` example adding a C++ implementation for the `RabbitMQSourceStage`.
+
+This example adds two flags to the `read_simple.py` script. A `--use_cpp` flag which defaults to `True` and a `--num_threads` flag which defaults to the number of cores on the system as returned by `os.cpu_count()`.
 
 ## Testing with a RabbitMQ container
 Testing can be performed locally with the RabbitMQ supplied docker image from the [RabbitMQ container registry](https://registry.hub.docker.com/_/rabbitmq/):

@@ -40,7 +40,7 @@ class PassThruStage(SinglePortStage):
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
         if self._build_cpp_node():
-            print("building cpp node")
+            print("building C++ node")
             node = morpheus_example_cpp.PassThruStage(builder, self.unique_name)
         else:
             node = builder.make_node(self.unique_name, self.on_data)

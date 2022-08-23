@@ -21,7 +21,7 @@
 #include <cudf/io/json.hpp>
 #include <cudf/table/table.hpp>
 #include <glog/logging.h>
-#include <pybind11/chrono.h>  // for timedelta->chrono
+#include <pybind11/chrono.h>  // for timedelta->chrono conversions
 #include <pybind11/pybind11.h>
 
 #include <exception>
