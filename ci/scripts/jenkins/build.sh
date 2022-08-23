@@ -19,7 +19,12 @@ set -e
 source ${WORKSPACE}/ci/scripts/jenkins/common.sh
 
 gpuci_logger "Creating conda env"
-rm -rf ${MORPHEUS_ROOT}/.cache/ ${MORPHEUS_ROOT}/build/
+rm -rf ${MORPHEUS_ROOT}/.cache/ \
+       ${MORPHEUS_ROOT}/build/ \
+       ${MORPHEUS_ROOT}/examples/developer_guide/3_simple_cpp_stage/build \
+       ${MORPHEUS_ROOT}/examples/developer_guide/4_rabbitmq_cpp_Stage/.cache \
+       ${MORPHEUS_ROOT}/examples/developer_guide/4_rabbitmq_cpp_Stage/build
+
 conda config --add pkgs_dirs /opt/conda/pkgs
 conda config --env --add channels conda-forge
 conda config --env --set channel_alias ${CONDA_CHANNEL_ALIAS:-"https://conda.anaconda.org"}
@@ -51,6 +56,17 @@ sccache --show-stats
 
 gpuci_logger "Installing Morpheus"
 cmake -DCOMPONENT=Wheel -P ${MORPHEUS_ROOT}/build/cmake_install.cmake
+
+gpuci_logger "Building C++ Examples"
+pushd ${MORPHEUS_ROOT}/examples/developer_guide/3_simple_cpp_stage
+cmake -B build -G Ninja -DCCACHE_PROGRAM_PATH=$(which sccache) .
+cmake --build build --parallel ${PARALLEL_LEVEL}
+popd
+
+pushd ${MORPHEUS_ROOT}/examples/developer_guide/4_rabbitmq_cpp_Stage
+cmake -B build -G Ninja -DCCACHE_PROGRAM_PATH=$(which sccache) .
+cmake --build build --parallel ${PARALLEL_LEVEL}
+popd
 
 gpuci_logger "Archiving results"
 mamba pack --quiet --force --ignore-missing-files --n-threads ${PARALLEL_LEVEL} -n morpheus -o ${WORKSPACE_TMP}/conda_env.tar.gz
