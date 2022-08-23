@@ -65,11 +65,11 @@ RabbitMQSourceStage::subscriber_fn_t RabbitMQSourceStage::build()
 
 void RabbitMQSourceStage::source_generator(rxcpp::subscriber<RabbitMQSourceStage::source_type_t> subscriber)
 {
-    const std::string consumer_tag = m_connection->BasicConsume(m_queue_name, "", true, false);
+    const std::string consumer_tag = m_channel->BasicConsume(m_queue_name, "", true, false);
     while (subscriber.is_subscribed())
     {
         AmqpClient::Envelope::ptr_t envelope;
-        if (m_connection->BasicConsumeMessage(consumer_tag, envelope, 0))
+        if (m_channel->BasicConsumeMessage(consumer_tag, envelope, 0))
         {
             try
             {
@@ -80,7 +80,7 @@ void RabbitMQSourceStage::source_generator(rxcpp::subscriber<RabbitMQSourceStage
             {
                 LOG(ERROR) << "Error occurred converting RabbitMQ message to Dataframe: " << e.what();
             }
-            m_connection->BasicAck(envelope);
+            m_channel->BasicAck(envelope);
         }
         else
         {
@@ -106,7 +106,6 @@ void RabbitMQSourceStage::close()
     }
 }
 
-/*
 std::shared_ptr<srf::segment::Object<RabbitMQSourceStage>> RabbitMQSourceStageInterfaceProxy::init(
     srf::segment::Builder &builder,
     const std::string &name,
@@ -140,5 +139,5 @@ PYBIND11_MODULE(morpheus_rabbit, m)
              py::arg("queue_name")    = "",
              py::arg("poll_interval") = 100ms);
 }
-*/
+
 }  // namespace morpheus_rabbit
