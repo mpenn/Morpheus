@@ -86,25 +86,19 @@ class RabbitMQSourceStage(SingleOutputSource):
     def supports_cpp_node(self) -> bool:
         return False
 
-    def stop(self):
-        # Indicate we need to stop
-        self._stop_requested = True
-
-        return super().stop()
-
     def _build_source(self, builder: srf.Builder) -> StreamPair:
-        node = builder.make_source(self.unique_name, self.source_generator)
+        node = builder.make_source_f(self.unique_name, self.source_generator)
         return node, MessageMeta
 
-    def source_generator(self):
+    def source_generator(self, subscriber: srf.Subscriber):
         try:
-            while not self._stop_requested:
+            while subscriber.is_subscribed():
                 (method_frame, header_frame, body) = self._channel.basic_get(self._queue_name)
                 if method_frame is not None:
                     try:
                         buffer = StringIO(body.decode("utf-8"))
                         df = cudf.io.read_json(buffer, orient='records', lines=True)
-                        yield MessageMeta(df=df)
+                        subscriber.on_next(MessageMeta(df=df))
                     except Exception as ex:
                         logger.exception("Error occurred converting RabbitMQ message to Dataframe: {}".format(ex))
                     finally:
