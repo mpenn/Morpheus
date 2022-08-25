@@ -48,6 +48,7 @@ from morpheus.config import ConfigAutoEncoder
 from morpheus.config import CppConfig
 from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline import LinearPipeline
+from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.utils.logger import configure_logging
 
@@ -193,7 +194,10 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
                                                                      end_date=end_time)))
 
         pipeline.add_stage(
-            DFPS3BatcherStage(config, sampling_rate_s=sample_rate_s, date_conversion_func=s3_date_extractor_duo))
+            DFPS3BatcherStage(config,
+                              period="Q",
+                              sampling_rate_s=sample_rate_s,
+                              date_conversion_func=s3_date_extractor_duo))
 
         # Output is S3 Buckets. Convert to DataFrames. This caches downloaded S3 data
         pipeline.add_stage(
@@ -211,6 +215,8 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
                                 "lines": False, "orient": "records"
                             }))
 
+    pipeline.add_stage(MonitorStage(config, description="Input data rate"))
+
     # This will split users or just use one single user
     pipeline.add_stage(
         DFPSplitUsersStage(config,
@@ -223,9 +229,9 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         DFPRollingWindowStage(
             config,
             min_history=300 if is_training else 1,
-            min_increment=300 if is_training else 1,
+            min_increment=300 if is_training else 0,
             # For inference, we only ever want 1 day max
-            max_history="5d" if is_training else "1d",
+            max_history="60d" if is_training else "1d",
             cache_dir=cache_dir))
 
     # Specify the final set of columns necessary just before pre-processing
@@ -253,11 +259,15 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
 
         pipeline.add_stage(DFPTraining(config))
 
+        pipeline.add_stage(MonitorStage(config, description="Training rate", smoothing=0.001))
+
         pipeline.add_stage(DFPMLFlowModelWriterStage(config))
     else:
         pipeline.add_stage(DFPInferenceStage(config))
 
-        pipeline.add_stage(DFPPostprocessingStage(config))
+        pipeline.add_stage(MonitorStage(config, description="Inference rate", smoothing=0.001))
+
+        pipeline.add_stage(DFPPostprocessingStage(config, z_score_threshold=5.0))
 
         if (source == "file"):
             pipeline.add_stage(WriteToFileStage(config, filename="dfp_detections.csv", overwrite=True))

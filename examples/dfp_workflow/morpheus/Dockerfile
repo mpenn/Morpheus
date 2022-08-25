@@ -1,13 +1,32 @@
 ARG MORPHEUS_CONTAINER=nvcr.io/nvidia/morpheus/morpheus
 ARG MORPHEUS_CONTAINER_VERSION=v22.06.00-runtime
+ARG ADDITIONAL_GROUPS
+ARG FIXUID_VERSION=0.5.1
 
 FROM ${MORPHEUS_CONTAINER}:${MORPHEUS_CONTAINER_VERSION} as common_base
 
+# Install fixuid
+RUN curl -SsL https://github.com/boxboat/fixuid/releases/download/v0.5.1/fixuid-0.5.1-linux-amd64.tar.gz | tar -C /usr/bin -xzf - && \
+    chown root:root /usr/bin/fixuid && chmod 4755 /usr/bin/fixuid && mkdir -p /etc/fixuid && \
+    bash -c 'echo -e "\
+user: morpheus\n\
+group: morpheus\n\
+paths:\n\
+  - /home/morpheus\n\
+  - /opt/conda/envs/morpheus\n\
+" | tee /etc/fixuid/config.yml >/dev/null' && \
+    \
+    # Add a non-root user
+    useradd \
+      --uid 1000 --shell /bin/bash \
+      --user-group ${ADDITIONAL_GROUPS} \
+      --create-home --home-dir /home/morpheus \
+      morpheus
+
 # Fix the entrypoint to work with different WORKDIR
-ENTRYPOINT [ "/opt/conda/bin/tini", "--", "/workspace/docker/entrypoint.sh" ]
+ENTRYPOINT [ "/opt/conda/bin/tini", "--", "fixuid", "-q", "/workspace/docker/entrypoint.sh" ]
 
 SHELL ["/bin/bash", "-c"]
-ENV UBA_COMMON="uba-autoencoder-common"
 
 # Install vault
 RUN apt-get update \
@@ -50,12 +69,14 @@ RUN source activate morpheus \
 # COPY ${UBA_COMMON}/morpheus_pipeline/* \
 #      /work/dfp/morpheus_pipeline/
 
+USER morpheus
+
 FROM common_base as base
 
 WORKDIR /work/examples/dfp_workflow/morpheus
 
 # This will get used by pipelines for the --s3_cache option
-ENV DFP_S3_CACHE="/work/examples/dfp_workflow/morpheus/.s3_cache"
+# ENV DFP_S3_CACHE="/work/examples/dfp_workflow/morpheus/.s3_cache"
 
 # Copy the sources
 COPY . ./

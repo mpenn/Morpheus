@@ -57,15 +57,13 @@ class DFPSplitUsersStage(SinglePortStage):
         if (message is None):
             return []
 
-        print("Got message: {}".format(message))
-
         with log_time(logger.debug) as log_info:
 
             if (isinstance(message, cudf.DataFrame)):
                 # Convert to pandas because cudf is slow at this
                 message = message.to_pandas()
 
-            split_dataframes: typing.List[typing.Tuple[str, cudf.DataFrame]] = []
+            split_dataframes: typing.Dict[str, cudf.DataFrame] = {}
 
             # If we are skipping users, do that here
             if (len(self._skip_users) > 0):
@@ -73,20 +71,25 @@ class DFPSplitUsersStage(SinglePortStage):
 
             # Split up the dataframes
             if (self._include_generic):
-                split_dataframes.append((self._config.ae.fallback_username, message))
+                split_dataframes[self._config.ae.fallback_username] = message
 
             if (self._include_individual):
 
-                split_dataframes.extend([
-                    (username, user_df) for username, user_df in message.groupby("username", sort=False)
-                ])
+                split_dataframes.update(
+                    {username: user_df
+                     for username, user_df in message.groupby("username", sort=False)})
 
             output_messages: typing.List[UserMessageMeta] = []
 
-            for user_id, user_df in split_dataframes:
+            for user_id in sorted(split_dataframes.keys()):
+
+                # if (user_id != "!bagshaw"):
+                #     continue
 
                 if (user_id in self._skip_users):
                     continue
+
+                user_df = split_dataframes[user_id]
 
                 current_user_count = self._user_index_map.get(user_id, 0)
 
@@ -102,18 +105,23 @@ class DFPSplitUsersStage(SinglePortStage):
                 #              df_user[self._config.ae.timestamp_column_name].max(),
                 #              df_user[self._config.ae.timestamp_column_name].count())
 
+                # # TODO(MDD): Remove this!
+                # if (len(output_messages) >= 1000):
+                #     break
+
             rows_per_user = [len(x.df) for x in output_messages]
 
-            log_info.set_log(
-                "Batch split users complete. Input: %s rows from %s to %s. Output: %s users, rows/user min: %s, max: %s, avg: %.2f. Duration: {duration:.2f} ms",
-                len(message),
-                message[self._config.ae.timestamp_column_name].min(),
-                message[self._config.ae.timestamp_column_name].max(),
-                len(rows_per_user),
-                np.min(rows_per_user),
-                np.max(rows_per_user),
-                np.mean(rows_per_user),
-            )
+            if (len(output_messages) > 0):
+                log_info.set_log(
+                    "Batch split users complete. Input: %s rows from %s to %s. Output: %s users, rows/user min: %s, max: %s, avg: %.2f. Duration: {duration:.2f} ms",
+                    len(message),
+                    message[self._config.ae.timestamp_column_name].min(),
+                    message[self._config.ae.timestamp_column_name].max(),
+                    len(rows_per_user),
+                    np.min(rows_per_user),
+                    np.max(rows_per_user),
+                    np.mean(rows_per_user),
+                )
 
             return output_messages
 

@@ -217,12 +217,16 @@ class DFPRollingWindowStage(SinglePortStage):
 
         user_cache = None
 
-        try:
-            if (os.path.exists(cache_location)):
+        if (os.path.exists(cache_location)):
+            try:
+
                 # Try to load any existing window
                 user_cache = CachedUserWindow.load(cache_location=cache_location)
-        except:
-            logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
+            except:
+                logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
+
+                # Delete the existing file to prevent this from happening again
+                os.remove(cache_location)
 
         if (user_cache is None):
             user_cache = CachedUserWindow(user_id=user_id,

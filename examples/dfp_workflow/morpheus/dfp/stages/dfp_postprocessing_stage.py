@@ -16,6 +16,7 @@ import logging
 import time
 import typing
 from datetime import date
+from datetime import datetime
 
 import numpy as np
 import srf
@@ -36,8 +37,10 @@ logger = logging.getLogger("morpheus.{}".format(__name__))
 
 class DFPPostprocessingStage(SinglePortStage):
 
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, z_score_threshold=2.0):
         super().__init__(c)
+
+        self._z_score_threshold = z_score_threshold
 
     @property
     def name(self) -> str:
@@ -60,10 +63,10 @@ class DFPPostprocessingStage(SinglePortStage):
 
         message.set_meta("z-score", z_scores)
 
-        above_threshold_df = message.get_meta()[z_scores > 2.0]
+        above_threshold_df = message.get_meta()[z_scores > self._z_score_threshold]
 
         if (not above_threshold_df.empty):
-            above_threshold_df['event_time'] = date.today().strftime('%Y-%m-%dT%H:%M:%SZ')
+            above_threshold_df['event_time'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
             above_threshold_df = above_threshold_df.replace(np.nan, 'NaN', regex=True)
 
             return above_threshold_df

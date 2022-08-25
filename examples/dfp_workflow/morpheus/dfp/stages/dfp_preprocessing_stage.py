@@ -462,17 +462,6 @@ class DFPPreprocessingStage(SinglePortStage):
     def accepted_types(self) -> typing.Tuple:
         return (UserMessageMeta, )
 
-    @staticmethod
-    def _create_lonicrement(df):
-        slot_list = []
-        timeslots = df['time'].unique()
-        for slot in timeslots:
-            new_df = df[(df['time'] == slot)]
-            new_df["locincrement"] = ((new_df['locationcity'].factorize()[0] + 1))
-            slot_list.append(new_df)
-
-        return pd.concat(slot_list)
-
     def process_features(self, message: UserMessageMeta):
         if (message is None):
             return None
@@ -504,7 +493,9 @@ class DFPPreprocessingStage(SinglePortStage):
         def node_fn(obs: srf.Observable, sub: srf.Subscriber):
             obs.pipe(ops.map(self.process_features), ops.flatten()).subscribe(sub)
 
-        stream = builder.make_node_full(self.unique_name, node_fn)
-        builder.make_edge(input_stream[0], stream)
+        node = builder.make_node_full(self.unique_name, node_fn)
+        builder.make_edge(input_stream[0], node)
 
-        return stream, UserMessageMeta
+        node.launch_options.pe_count = self._config.num_threads
+
+        return node, UserMessageMeta

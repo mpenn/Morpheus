@@ -156,7 +156,7 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                                                  run_id=run.info.run_id,
                                                  tags=tags)
 
-                logger.log("ML Flow model upload complete. User: %s, Version: %s", user, mv.version)
+                logger.debug("ML Flow model upload complete. User: %s, Version: %s", user, mv.version)
 
         except Exception as e:
             logger.exception("Error trying to upload ML Flow model")

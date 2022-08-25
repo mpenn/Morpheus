@@ -41,14 +41,14 @@ services:
     depends_on:
       - db
 
-  morpheus_jupyter:
+  jupyter:
     restart: always
     build:
       context: ./morpheus_jupyter
       args:
         - MORPHEUS_CONTAINER_VERSION=v22.08.00a-runtime
     image: dfp_morpheus_jupyter
-    container_name: morpheus_jupyter
+    container_name: jupyter
     ports:
       - "8888:8888"
     networks:
@@ -63,25 +63,40 @@ services:
     working_dir: /work/examples/dfp_workflow
     depends_on:
       - mlflow
+    profiles:
+      - dev
 
-  morpheus:
+  morpheus_training:
     # restart: always
-    build: ./morpheus
+    build:
+      context: ./morpheus
+      args:
+        - MORPHEUS_CONTAINER_VERSION=v22.08.00a-runtime
     image: dfp_morpheus
-    container_name: morpheus
+    container_name: morpheus_training
     networks:
       - frontend
       - backend
     environment:
-      - VAULT_ROLE_ID=${VAULT_ROLE_ID}
-      - VAULT_SECRET_ID=${VAULT_SECRET_ID}
-    command: ./launch.sh
+      # Colorize the terminal in the container if possible
+      TERM: "${TERM:-}"
+      # PS1: "$$(whoami):$$(pwd) $$ "
+      VAULT_ROLE_ID: "${VAULT_ROLE_ID}"
+      VAULT_SECRET_ID: "${VAULT_SECRET_ID}"
+      DFP_CACHE_DIR: "/work/.cache/dfp"
+      DFP_TRACKING_URI: "http://mlflow:5000"
+    command: ./launch.sh --train_users=generic --duration=1d
     volumes:
       # - ./.s3_cache:/work/.s3_cache
       - ../..:/work
+      # - /etc/passwd:/etc/passwd:ro
+      # - /etc/group:/etc/group:ro
     working_dir: /work/examples/dfp_workflow/morpheus
     depends_on:
       - mlflow
+    profiles:
+      - training
+    user: "${UID}:${GID}"
 
   # nginx:
   #   restart: always

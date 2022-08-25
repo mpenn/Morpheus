@@ -28,6 +28,7 @@ logger = logging.getLogger("morpheus.{}".format(__name__))
 
 
 class DFPDataLoader:
+
     def __init__(self, batch_frames, filter_func, max_rows_per_batch=1e5):
         self._aggregate_cache = None
         self._batch_frames = batch_frames
@@ -140,7 +141,7 @@ class UserModelManager(object):
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)
             scaler='standard',  # feature scaling method
             min_cats=1,  # cut off for minority categories
-            progress_bar=False,
+            progress_bar=True,
             device="cuda")
 
         # Loop each epoch
@@ -158,7 +159,7 @@ class UserModelManager(object):
                     if (batches == 0 and (df_batch.shape[0] < self._min_history)):
                         raise RuntimeError(f"Insuffient training data.")
 
-                    if (df_batch.shape[0] < 10): # If we've already trained on some data, make sure we can tts this.
+                    if (df_batch.shape[0] < 10):  # If we've already trained on some data, make sure we can tts this.
                         break
 
                     X_train, X_val = train_test_split(df_batch, shuffle=False, test_size=0.2, random_state=42)
@@ -219,13 +220,13 @@ class UserModelManager(object):
             swap_p=0.2,  # noise parameter
             lr=0.001,  # learning rate
             lr_decay=.99,  # learning decay
-            batch_size=512,
+            batch_size=16384,
             # logger='ipynb',
             verbose=False,
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)
             scaler='standard',  # feature scaling method
             min_cats=1,  # cut off for minority categories
-            progress_bar=False,
+            progress_bar=True,
             device="cuda")
 
         final_df = combined_df[combined_df.columns.intersection(self._feature_columns)]
