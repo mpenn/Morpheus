@@ -195,7 +195,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
 
         pipeline.add_stage(
             DFPS3BatcherStage(config,
-                              period="Q",
+                              period="W",
                               sampling_rate_s=sample_rate_s,
                               date_conversion_func=s3_date_extractor_duo))
 

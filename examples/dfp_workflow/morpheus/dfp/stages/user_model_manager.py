@@ -220,7 +220,7 @@ class UserModelManager(object):
             swap_p=0.2,  # noise parameter
             lr=0.001,  # learning rate
             lr_decay=.99,  # learning decay
-            batch_size=16384,
+            batch_size=4096,
             # logger='ipynb',
             verbose=False,
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)

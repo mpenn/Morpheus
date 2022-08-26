@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-import traceback
+import os
 import typing
 
 import mlflow
@@ -48,8 +48,11 @@ logger = logging.getLogger("morpheus.{}".format(__name__))
 
 class DFPMLFlowModelWriterStage(SinglePortStage):
 
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, model_prefix: str, experiment_name: str):
         super().__init__(c)
+
+        self._model_prefix = model_prefix
+        self._experiment_name = experiment_name
 
         self._batch_size = 10
         self._batch_cache = []
@@ -70,12 +73,12 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
         model: DFPAutoEncoder = message.model
 
         model_path = "dfencoder"
-        reg_model_name = f"autoencoder-HAMMAH-duo-{user}"
+        reg_model_name = f"{self._model_prefix}{user}"
 
         # Write to ML Flow
         try:
             mlflow.end_run()
-            experiment_name = f'/heimdall-dsp/{reg_model_name}'
+            experiment_name = os.path.join(self._experiment_name, reg_model_name)
             experiment = mlflow.get_experiment_by_name(experiment_name)
             if (not experiment):
                 # print(f"Failed to get experiment: /heimdall-dsp/{reg_model_name}")
