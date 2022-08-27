@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import logging
+import os
 import threading
 import time
 import typing
@@ -32,6 +33,15 @@ from .dfp_autoencoder import DFPAutoEncoder
 from .multi_dfp_message import MultiDFPMessage
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
+
+
+def get_registered_models():
+    client = MlflowClient(os.environ.get('DFP_TRACKING_URI'))
+    models = client.list_registered_models()
+    return set(model.name for model in models)
+
+
+REGISTERED_MODELS = get_registered_models()
 
 
 class ModelCache:
@@ -115,6 +125,8 @@ class UserModelMap:
                     # Our model does not exist, use fallback
                     self._child_user_model_cache = self._manager.load_user_model_cache(
                         self._fallback_user_ids[0], fallback_user_ids=self._fallback_user_ids[1:])
+                else:
+                    return model_cache
 
             # See if we have a child cache and use that
             if (self._child_user_model_cache is not None):
@@ -173,6 +185,9 @@ class ModelManager:
 
             # Cache miss. Try to check for a model
             try:
+                if reg_model_name not in REGISTERED_MODELS:
+                    raise MlflowException("")
+
                 latest_versions = client.get_latest_versions(reg_model_name)
 
                 # Default to the first returned one
