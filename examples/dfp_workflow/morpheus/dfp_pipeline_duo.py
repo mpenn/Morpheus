@@ -253,7 +253,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
     model_schema = DataFrameInputSchema(column_info=model_column_info, preserve_columns=["_batch_id"])
 
     # Output is UserMessageMeta -- Cached frame set
-    # pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema, only_new_batches=not is_training))
+    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema, only_new_batches=not is_training))
 
     model_name_formatter = "AE-duo-{user_id}"
     experiment_name = "DFP-duo-training"
@@ -269,21 +269,21 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
                                       model_name_formatter=model_name_formatter,
                                       experiment_name=experiment_name))
     else:
-        # pipeline.add_stage(DFPInferenceStage(config, model_name_formatter=model_name_formatter))
+        pipeline.add_stage(DFPInferenceStage(config, model_name_formatter=model_name_formatter))
 
         pipeline.add_stage(MonitorStage(config, description="Inference rate", smoothing=0.001))
 
-        # pipeline.add_stage(DFPPostprocessingStage(config, z_score_threshold=5.0))
+        pipeline.add_stage(DFPPostprocessingStage(config, z_score_threshold=5.0))
 
-        # if (source == "file"):
-        #     pipeline.add_stage(WriteToFileStage(config, filename="dfp_detections.csv", overwrite=True))
-        # else:
+        if (source == "file"):
+            pipeline.add_stage(WriteToFileStage(config, filename="dfp_detections.csv", overwrite=True))
+        else:
 
-        #     def print_s3_output(message: UserMessageMeta):
-        #         print("WRITER MOCK: Writing the following: ")
-        #         print(message.df)
+            def print_s3_output(message: UserMessageMeta):
+                print("WRITER MOCK: Writing the following: ")
+                print(message.df)
 
-        #     pipeline.add_stage(WriteToS3Stage(config, s3_writer=print_s3_output))
+            pipeline.add_stage(WriteToS3Stage(config, s3_writer=print_s3_output))
 
     # Run the pipeline
     pipeline.run()

@@ -229,26 +229,30 @@ class DFPRollingWindowStage(SinglePortStage):
 
         user_cache = None
 
-        if (os.path.exists(cache_location)):
-            try:
+        # if (os.path.exists(cache_location)):
+        #     try:
 
-                # Try to load any existing window
-                user_cache = CachedUserWindow.load(cache_location=cache_location)
-            except:
-                logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
+        #         # Try to load any existing window
+        #         user_cache = CachedUserWindow.load(cache_location=cache_location)
+        #     except:
+        #         logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
 
-                # Delete the existing file to prevent this from happening again
-                os.remove(cache_location)
+        #         # Delete the existing file to prevent this from happening again
+        #         os.remove(cache_location)
+
+        user_cache = self._user_cache_map.get(user_id, None)
 
         if (user_cache is None):
             user_cache = CachedUserWindow(user_id=user_id,
                                           cache_location=cache_location,
                                           timestamp_column=self._config.ae.timestamp_column_name)
 
+            self._user_cache_map[user_id] = user_cache
+
         yield user_cache
 
-        # When it returns, make sure to save
-        user_cache.save()
+        # # When it returns, make sure to save
+        # user_cache.save()
 
     def _build_window(self, message: DFPMessageMeta) -> MultiDFPMessage:
 
@@ -319,9 +323,11 @@ class DFPRollingWindowStage(SinglePortStage):
                 raise RuntimeError(("Overlapping rolling history detected. "
                                     "Rolling history can only be used with non-overlapping batches"))
 
+            train_offset = train_df.index.get_loc(first_row_idx)
+
             # Otherwise return a new message
             return MultiDFPMessage(meta=DFPMessageMeta(df=train_df, user_id=user_id),
-                                   mess_offset=first_row_idx,
+                                   mess_offset=train_offset,
                                    mess_count=found_count)
 
     def on_data(self, message: DFPMessageMeta):
