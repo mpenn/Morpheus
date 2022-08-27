@@ -59,6 +59,7 @@ class CachedUserWindow:
     min_epoch: datetime = datetime(1970, 1, 1)
     max_epoch: datetime = datetime(1970, 1, 1)
     batch_count: int = 0
+    pending_batch_count: int = 0
     last_train_count: int = 0
     last_train_epoch: datetime = None
     last_train_batch: int = 0
@@ -82,6 +83,7 @@ class CachedUserWindow:
 
         # Increment the batch count
         self.batch_count += 1
+        self.pending_batch_count += 1
 
         # Set the filtered index
         filtered_df.index = range(self.total_count, self.total_count + len(filtered_df))
@@ -108,12 +110,13 @@ class CachedUserWindow:
 
         new_df = self.trim_dataframe(self._df,
                                      max_history=max_history,
-                                     last_batch=self.last_train_batch,
+                                     last_batch=self.batch_count - self.pending_batch_count,
                                      timestamp_column=self.timestamp_column)
 
         self.last_train_count = self.total_count
         self.last_train_epoch = datetime.now()
         self.last_train_batch = self.batch_count
+        self.pending_batch_count = 0
 
         self._df = new_df
 
@@ -302,8 +305,13 @@ class DFPRollingWindowStage(SinglePortStage):
             incoming_hash = pd.util.hash_pandas_object(incoming_df.iloc[[0, -1]], index=False)
 
             # Find the index of the first and last row
-            first_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[0]].index[0].item()
-            last_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[-1]].index[0].item()
+            match = train_df[train_df["_row_hash"] == incoming_hash.iloc[0]]
+
+            if (len(match) == 0):
+                raise RuntimeError("Invalid rolling window")
+
+            first_row_idx = match.index[0].item()
+            last_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[-1]].index[-1].item()
 
             found_count = (last_row_idx - first_row_idx) + 1
 
