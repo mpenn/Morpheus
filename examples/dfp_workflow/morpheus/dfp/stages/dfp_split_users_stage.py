@@ -17,12 +17,12 @@ import typing
 
 import numpy as np
 import srf
+from .multi_dfp_message import DFPMessageMeta
 from srf.core import operators as ops
 
 import cudf
 
 from morpheus.config import Config
-from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
@@ -79,7 +79,7 @@ class DFPSplitUsersStage(SinglePortStage):
                     {username: user_df
                      for username, user_df in message.groupby("username", sort=False)})
 
-            output_messages: typing.List[UserMessageMeta] = []
+            output_messages: typing.List[DFPMessageMeta] = []
 
             for user_id in sorted(split_dataframes.keys()):
 
@@ -97,7 +97,7 @@ class DFPSplitUsersStage(SinglePortStage):
                 user_df.index = range(current_user_count, current_user_count + len(user_df))
                 self._user_index_map[user_id] = current_user_count + len(user_df)
 
-                output_messages.append(UserMessageMeta(df=user_df, user_id=user_id))
+                output_messages.append(DFPMessageMeta(df=user_df, user_id=user_id))
 
                 # logger.debug("Emitting dataframe for user '%s'. Start: %s, End: %s, Count: %s",
                 #              user,
@@ -133,4 +133,4 @@ class DFPSplitUsersStage(SinglePortStage):
         stream = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], stream)
 
-        return stream, UserMessageMeta
+        return stream, DFPMessageMeta

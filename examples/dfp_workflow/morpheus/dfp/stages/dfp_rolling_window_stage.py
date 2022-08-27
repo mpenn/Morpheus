@@ -31,11 +31,12 @@ from srf.core import operators as ops
 import cudf
 
 from morpheus.config import Config
-from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
 from ..utils.logging_timer import log_time
+from .multi_dfp_message import DFPMessageMeta
+from .multi_dfp_message import MultiDFPMessage
 
 # Setup conda environment
 conda_env = {
@@ -65,7 +66,7 @@ class CachedUserWindow:
     _trained_rows: pd.Series = dataclasses.field(init=False, repr=False, default_factory=pd.DataFrame)
     _df: pd.DataFrame = dataclasses.field(init=False, repr=False, default_factory=pd.DataFrame)
 
-    def append_dataframe(self, incoming_df: pd.DataFrame):
+    def append_dataframe(self, incoming_df: pd.DataFrame) -> bool:
 
         # # Get the row hashes
         # row_hashes = pd.util.hash_pandas_object(incoming_df)
@@ -74,13 +75,19 @@ class CachedUserWindow:
         filtered_df = incoming_df[incoming_df["timestamp"] > self.max_epoch]
 
         if (len(filtered_df) == 0):
-            return
+            # We have nothing new to add. Double check that we fit within the window
+            before_history = incoming_df[incoming_df["timestamp"] < self.min_epoch]
+
+            return len(before_history) == 0
 
         # Increment the batch count
         self.batch_count += 1
 
         # Set the filtered index
         filtered_df.index = range(self.total_count, self.total_count + len(filtered_df))
+
+        # Save the row hash to make it easier to find later. Do this before the batch so it doesnt participate
+        filtered_df["_row_hash"] = pd.util.hash_pandas_object(filtered_df, index=False)
 
         # Use batch id to distinguish groups in the same dataframe
         filtered_df["_batch_id"] = self.batch_count
@@ -94,6 +101,8 @@ class CachedUserWindow:
         if (len(self._df) > 0):
             self.min_epoch = self._df[self.timestamp_column].min()
             self.max_epoch = self._df[self.timestamp_column].max()
+
+        return True
 
     def get_train_df(self, max_history) -> pd.DataFrame:
 
@@ -184,7 +193,7 @@ class DFPRollingWindowStage(SinglePortStage):
         return False
 
     def accepted_types(self) -> typing.Tuple:
-        return (UserMessageMeta, )
+        return (DFPMessageMeta, )
 
     def _trim_dataframe(self, df: pd.DataFrame):
 
@@ -238,16 +247,20 @@ class DFPRollingWindowStage(SinglePortStage):
         # When it returns, make sure to save
         user_cache.save()
 
-    def _build_window(self, message: UserMessageMeta) -> UserMessageMeta:
+    def _build_window(self, message: DFPMessageMeta) -> MultiDFPMessage:
 
         user_id = message.user_id
 
         with self._get_user_cache(user_id) as user_cache:
 
-            incoming_df = message.df
+            incoming_df = message.get_df()
             # existing_df = user_cache.df
 
-            user_cache.append_dataframe(incoming_df=incoming_df)
+            if (not user_cache.append_dataframe(incoming_df=incoming_df)):
+                # Then our incoming dataframe wasnt even covered by the window. Generate warning
+                logger.warn(("Incoming data preceeded existing history. "
+                             "Consider deleting the rolling window cache and restarting."))
+                return None
 
             # # For the incoming one, calculate the row hash to identify duplicate rows
             # incoming_df["_row_hash"] = pd.util.hash_pandas_object(incoming_df)
@@ -285,10 +298,25 @@ class DFPRollingWindowStage(SinglePortStage):
             # Save the last train statistics
             train_df = user_cache.get_train_df(max_history=self._max_history)
 
-            # Otherwise return a new message
-            return UserMessageMeta(train_df, user_id=message.user_id)
+            # Hash the incoming data rows to find a match
+            incoming_hash = pd.util.hash_pandas_object(incoming_df.iloc[[0, -1]], index=False)
 
-    def on_data(self, message: UserMessageMeta):
+            # Find the index of the first and last row
+            first_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[0]].index[0].item()
+            last_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[-1]].index[0].item()
+
+            found_count = (last_row_idx - first_row_idx) + 1
+
+            if (found_count != len(incoming_df)):
+                raise RuntimeError(("Overlapping rolling history detected. "
+                                    "Rolling history can only be used with non-overlapping batches"))
+
+            # Otherwise return a new message
+            return MultiDFPMessage(meta=DFPMessageMeta(df=train_df, user_id=user_id),
+                                   mess_offset=first_row_idx,
+                                   mess_count=found_count)
+
+    def on_data(self, message: DFPMessageMeta):
 
         with log_time(logger.debug) as log_info:
 
@@ -303,9 +331,9 @@ class DFPRollingWindowStage(SinglePortStage):
                     len(message.df),
                     message.df[self._config.ae.timestamp_column_name].min(),
                     message.df[self._config.ae.timestamp_column_name].max(),
-                    len(result.df),
-                    result.df[self._config.ae.timestamp_column_name].min(),
-                    result.df[self._config.ae.timestamp_column_name].max(),
+                    result.mess_count,
+                    result.get_meta(self._config.ae.timestamp_column_name).min(),
+                    result.get_meta(self._config.ae.timestamp_column_name).max(),
                 )
             else:
                 # Dont print anything
@@ -321,4 +349,4 @@ class DFPRollingWindowStage(SinglePortStage):
         stream = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], stream)
 
-        return stream, UserMessageMeta
+        return stream, MultiDFPMessage

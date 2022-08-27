@@ -141,7 +141,7 @@ class UserModelManager(object):
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)
             scaler='standard',  # feature scaling method
             min_cats=1,  # cut off for minority categories
-            progress_bar=True,
+            progress_bar=False,
             device="cuda")
 
         # Loop each epoch
@@ -226,7 +226,7 @@ class UserModelManager(object):
             optimizer='sgd',  # SGD optimizer is selected(Stochastic gradient descent)
             scaler='standard',  # feature scaling method
             min_cats=1,  # cut off for minority categories
-            progress_bar=True,
+            progress_bar=False,
             device="cuda")
 
         final_df = combined_df[combined_df.columns.intersection(self._feature_columns)]

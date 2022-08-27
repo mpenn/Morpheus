@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import dataclasses
 import logging
 import os
 import time
@@ -24,16 +23,15 @@ from srf.core import operators as ops
 
 import cudf
 
-from morpheus._lib.messages import MultiMessage
 from morpheus.config import Config
-from morpheus.messages.message_meta import UserMessageMeta
-from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
 from ..utils.column_info import ColumnInfo
 from ..utils.column_info import DataFrameInputSchema
 from ..utils.column_info import process_dataframe
+from .multi_dfp_message import DFPMessageMeta
+from .multi_dfp_message import MultiDFPMessage
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
 
@@ -417,7 +415,7 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
             user_frames = []
             df_grouped = self._df_user_frames.groupby('username')
             for user_id in df_grouped.groups:
-                user_frame_message = UserMessageMeta(df=df_grouped.get_group(user_id), user_id=user_id)
+                user_frame_message = DFPMessageMeta(df=df_grouped.get_group(user_id), user_id=user_id)
                 user_frames.append(user_frame_message)
 
             return user_frames
@@ -432,7 +430,7 @@ class DFPTrainingPreprocessingStage(SinglePortStage):
         stream = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], stream)
 
-        return stream, UserMessageMeta
+        return stream, DFPMessageMeta
 
 
 class DFPPreprocessingStage(SinglePortStage):
@@ -441,7 +439,7 @@ class DFPPreprocessingStage(SinglePortStage):
                  c: Config,
                  input_schema: DataFrameInputSchema,
                  return_format: str = "data",
-                 only_last_batch=False):
+                 only_new_batches=False):
         super().__init__(c)
 
         self._cache_ids = []
@@ -450,7 +448,7 @@ class DFPPreprocessingStage(SinglePortStage):
         self._cache_path = "preprocessing"
         # self._s3_cache_dir = frame_cache_dir
         self._return_format = return_format
-        self._only_last_batch = only_last_batch
+        self._only_new_batches = only_new_batches
 
     @property
     def name(self) -> str:
@@ -460,33 +458,32 @@ class DFPPreprocessingStage(SinglePortStage):
         return False
 
     def accepted_types(self) -> typing.Tuple:
-        return (UserMessageMeta, )
+        return (MultiDFPMessage, )
 
-    def process_features(self, message: UserMessageMeta):
+    def process_features(self, message: MultiDFPMessage):
         if (message is None):
             return None
 
         start_time = time.time()
 
         # Process the columns
-        df_processed = process_dataframe(message.df, self._input_schema)
+        df_processed = process_dataframe(message.get_meta_dataframe(), self._input_schema)
 
-        # If we only want the last batch, do that here
-        if (self._only_last_batch):
-            df_processed = df_processed[df_processed["_batch_id"] == df_processed["_batch_id"].max()]
+        # Apply the new dataframe
+        message.set_meta(None, df_processed.iloc[message.mess_offset:message.mess_offset + message.mess_count])
 
-        # Create the multi message
-        output_message = UserMessageMeta(df_processed, user_id=message.user_id)
+        # # Create the multi message
+        # output_message = DFPMessageMeta(df_processed, user_id=message.user_id)
 
         duration = (time.time() - start_time) * 1000.0
 
         logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
-                     message.count,
-                     message.df[self._config.ae.timestamp_column_name].min(),
-                     message.df[self._config.ae.timestamp_column_name].max(),
+                     message.mess_count,
+                     message.get_meta(self._config.ae.timestamp_column_name).min(),
+                     message.get_meta(self._config.ae.timestamp_column_name).max(),
                      duration)
 
-        return [output_message]
+        return [message]
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
 
@@ -498,4 +495,4 @@ class DFPPreprocessingStage(SinglePortStage):
 
         node.launch_options.pe_count = self._config.num_threads
 
-        return node, UserMessageMeta
+        return node, MultiDFPMessage

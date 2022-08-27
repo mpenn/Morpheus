@@ -86,7 +86,7 @@ from morpheus.utils.logger import configure_logging
 @click.option(
     "--input_file",
     "-f",
-    type=click.Path(exists=True, dir_okay=False),
+    type=str,
     multiple=True,
     help="List of files to send to the visualization, in order",
 )
@@ -195,7 +195,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
 
         pipeline.add_stage(
             DFPS3BatcherStage(config,
-                              period="W",
+                              period="D",
                               sampling_rate_s=sample_rate_s,
                               date_conversion_func=s3_date_extractor_duo))
 
@@ -253,7 +253,10 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
     model_schema = DataFrameInputSchema(column_info=model_column_info, preserve_columns=["_batch_id"])
 
     # Output is UserMessageMeta -- Cached frame set
-    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema, only_last_batch=not is_training))
+    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema, only_new_batches=not is_training))
+
+    model_name_formatter = "AE-duo-{user_id}"
+    experiment_name = "DFP-duo-training"
 
     if (is_training):
 
@@ -261,9 +264,12 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
 
         pipeline.add_stage(MonitorStage(config, description="Training rate", smoothing=0.001))
 
-        pipeline.add_stage(DFPMLFlowModelWriterStage(config))
+        pipeline.add_stage(
+            DFPMLFlowModelWriterStage(config,
+                                      model_name_formatter=model_name_formatter,
+                                      experiment_name=experiment_name))
     else:
-        pipeline.add_stage(DFPInferenceStage(config))
+        pipeline.add_stage(DFPInferenceStage(config, model_name_formatter=model_name_formatter))
 
         pipeline.add_stage(MonitorStage(config, description="Inference rate", smoothing=0.001))
 
