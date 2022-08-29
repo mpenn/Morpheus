@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import cProfile
 import logging
 import os
-import pstats
 import threading
 import time
 import typing
@@ -25,7 +23,6 @@ import mlflow
 import srf
 from mlflow.exceptions import MlflowException
 from mlflow.tracking.client import MlflowClient
-from srf.core import operators as ops
 
 from morpheus.config import Config
 from morpheus.messages.multi_ae_message import MultiAEMessage
@@ -247,8 +244,6 @@ class DFPInferenceStage(SinglePortStage):
         self._cache_timeout_sec = 600
 
         self._model_manager = ModelManager(model_name_formatter=model_name_formatter)
-        self._do_profile = False
-        self._profilers = []
 
     @property
     def name(self) -> str:
@@ -267,9 +262,8 @@ class DFPInferenceStage(SinglePortStage):
                                                    fallback_user_ids=[self._config.ae.fallback_username])
 
     def on_data(self, message: MultiDFPMessage):
-        if self._do_profile:
-            pr = cProfile.Profile()
-            pr.enable()
+        if (not message or message.mess_count == 0):
+            return None
 
         start_time = time.time()
 
@@ -312,28 +306,10 @@ class DFPInferenceStage(SinglePortStage):
                      df_user[self._config.ae.timestamp_column_name].min(),
                      df_user[self._config.ae.timestamp_column_name].max())
 
-        if self._do_profile:
-            pr.disable()
-            self._profilers.append(pr)
-
         return output_message
 
-    def _stop_prof(self):
-        if self._do_profile:
-            s = pstats.Stats()
-            for p in reversed(self._profilers):
-                s.add(p)
-            s.dump_stats('inf_col.{}.prof'.format(time.time()))
-
-            self._profilers.clear()
-
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
-        #node = builder.make_node(self.unique_name, self.on_data)
-        def node_fn(obs: srf.Observable, sub: srf.Subscriber):
-
-            obs.pipe(ops.map(self.on_data), ops.on_completed(self._stop_prof)).subscribe(sub)
-
-        node = builder.make_node_full(self.unique_name, node_fn)
+        node = builder.make_node(self.unique_name, self.on_data)
         builder.make_edge(input_stream[0], node)
 
         node.launch_options.pe_count = self._config.num_threads
