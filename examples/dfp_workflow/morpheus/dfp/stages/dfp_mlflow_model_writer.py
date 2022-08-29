@@ -113,7 +113,8 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
                 sample_input = model.prepare_df(message.get_meta())
 
                 # TODO(MDD) this should work with sample_input
-                model_sig = infer_signature(message.get_meta(), model.get_anomaly_score(sample_input))
+                columns = [c for c in message.meta.df.columns if c != '_row_hash']
+                model_sig = infer_signature(message.get_meta(columns), model.get_anomaly_score(sample_input))
 
                 model_info = mlflow.pytorch.log_model(
                     pytorch_model=model,
