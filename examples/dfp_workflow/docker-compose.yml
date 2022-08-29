@@ -44,7 +44,7 @@ services:
   jupyter:
     restart: always
     build:
-      context: ./morpheus_jupyter
+      context: ./jupyter
       args:
         - MORPHEUS_CONTAINER_VERSION=v22.08.00a-runtime
     image: dfp_morpheus_jupyter

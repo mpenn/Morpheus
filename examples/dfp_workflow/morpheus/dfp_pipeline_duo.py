@@ -99,7 +99,7 @@ from morpheus.utils.logger import configure_logging
                     "'file:///mlruns' relative to the current directory"))
 def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir, sample_rate_s, **kwargs):
 
-    source = "s3"
+    source = "file"
 
     # To include the generic, we must be training all or generic
     include_generic = train_users == "all" or train_users == "generic"
@@ -283,7 +283,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
 
         pipeline.add_stage(MonitorStage(config, description="Inference rate", smoothing=0.001))
 
-        pipeline.add_stage(DFPPostprocessingStage(config, z_score_threshold=5.0))
+        pipeline.add_stage(DFPPostprocessingStage(config, z_score_threshold=3.0))
 
         if (source == "file"):
             pipeline.add_stage(WriteToFileStage(config, filename="dfp_detections.csv", overwrite=True))

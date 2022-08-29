@@ -35,15 +35,6 @@ from .multi_dfp_message import MultiDFPMessage
 logger = logging.getLogger("morpheus.{}".format(__name__))
 
 
-def get_registered_models():
-    client = MlflowClient(os.environ.get('DFP_TRACKING_URI'))
-    models = client.list_registered_models()
-    return set(model.name for model in models)
-
-
-REGISTERED_MODELS = get_registered_models()
-
-
 class ModelCache:
 
     def __init__(self, reg_model_name: str, model_uri: str) -> None:
@@ -156,9 +147,33 @@ class ModelManager:
         self._user_model_cache_lock = threading.Lock()
         self._model_cache_lock = threading.Lock()
 
+        self._existing_models: typing.List[str] = []
+        self._existing_models_updated = datetime(1970, 1, 1)
+
+        # Force an update of the existing models
+        self._model_exists("")
+
     @property
     def cache_timeout_sec(self):
         return self._cache_timeout_sec
+
+    def _model_exists(self, reg_model_name: str) -> bool:
+
+        now = datetime.now()
+
+        # See if the list of models needs to be updated
+        if ((now - self._existing_models_updated).seconds > self._cache_timeout_sec):
+            with self._model_cache_lock:
+
+                # Update the existing model list
+                client = MlflowClient()
+                models = client.list_registered_models()
+
+                self._existing_models = [model.name for model in models]
+
+                self._existing_models_updated = now
+
+        return reg_model_name in self._existing_models
 
     def user_id_to_model(self, user_id: str):
         return self._model_name_formatter.format(user_id=user_id)
@@ -185,8 +200,9 @@ class ModelManager:
 
             # Cache miss. Try to check for a model
             try:
-                if reg_model_name not in REGISTERED_MODELS:
-                    raise MlflowException("")
+                if (not self._model_exists(reg_model_name)):
+                    # Break early
+                    return None
 
                 latest_versions = client.get_latest_versions(reg_model_name)
 
@@ -201,7 +217,7 @@ class ModelManager:
 
                 model_cache = ModelCache(reg_model_name=reg_model_name, model_uri=latest_model_version.source)
 
-            except MlflowException:
+            except MlflowException as e:
                 # No user found
                 return None
 
@@ -312,6 +328,6 @@ class DFPInferenceStage(SinglePortStage):
         node = builder.make_node(self.unique_name, self.on_data)
         builder.make_edge(input_stream[0], node)
 
-        node.launch_options.pe_count = self._config.num_threads
+        # node.launch_options.pe_count = self._config.num_threads
 
         return node, MultiAEMessage

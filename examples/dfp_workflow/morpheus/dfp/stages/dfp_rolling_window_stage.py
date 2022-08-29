@@ -59,6 +59,7 @@ class CachedUserWindow:
     min_epoch: datetime = datetime(1970, 1, 1)
     max_epoch: datetime = datetime(1970, 1, 1)
     batch_count: int = 0
+    pending_batch_count: int = 0
     last_train_count: int = 0
     last_train_epoch: datetime = None
     last_train_batch: int = 0
@@ -82,6 +83,7 @@ class CachedUserWindow:
 
         # Increment the batch count
         self.batch_count += 1
+        self.pending_batch_count += 1
 
         # Set the filtered index
         filtered_df.index = range(self.total_count, self.total_count + len(filtered_df))
@@ -108,12 +110,13 @@ class CachedUserWindow:
 
         new_df = self.trim_dataframe(self._df,
                                      max_history=max_history,
-                                     last_batch=self.last_train_batch,
+                                     last_batch=self.batch_count - self.pending_batch_count,
                                      timestamp_column=self.timestamp_column)
 
         self.last_train_count = self.total_count
         self.last_train_epoch = datetime.now()
         self.last_train_batch = self.batch_count
+        self.pending_batch_count = 0
 
         self._df = new_df
 
@@ -226,26 +229,30 @@ class DFPRollingWindowStage(SinglePortStage):
 
         user_cache = None
 
-        if (os.path.exists(cache_location)):
-            try:
+        # if (os.path.exists(cache_location)):
+        #     try:
 
-                # Try to load any existing window
-                user_cache = CachedUserWindow.load(cache_location=cache_location)
-            except:
-                logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
+        #         # Try to load any existing window
+        #         user_cache = CachedUserWindow.load(cache_location=cache_location)
+        #     except:
+        #         logger.warning("Error loading window cache at %s", cache_location, exc_info=True)
 
-                # Delete the existing file to prevent this from happening again
-                os.remove(cache_location)
+        #         # Delete the existing file to prevent this from happening again
+        #         os.remove(cache_location)
+
+        user_cache = self._user_cache_map.get(user_id, None)
 
         if (user_cache is None):
             user_cache = CachedUserWindow(user_id=user_id,
                                           cache_location=cache_location,
                                           timestamp_column=self._config.ae.timestamp_column_name)
 
+            self._user_cache_map[user_id] = user_cache
+
         yield user_cache
 
-        # When it returns, make sure to save
-        user_cache.save()
+        # # When it returns, make sure to save
+        # user_cache.save()
 
     def _build_window(self, message: DFPMessageMeta) -> MultiDFPMessage:
 
@@ -302,8 +309,13 @@ class DFPRollingWindowStage(SinglePortStage):
             incoming_hash = pd.util.hash_pandas_object(incoming_df.iloc[[0, -1]], index=False)
 
             # Find the index of the first and last row
-            first_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[0]].index[0].item()
-            last_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[-1]].index[0].item()
+            match = train_df[train_df["_row_hash"] == incoming_hash.iloc[0]]
+
+            if (len(match) == 0):
+                raise RuntimeError("Invalid rolling window")
+
+            first_row_idx = match.index[0].item()
+            last_row_idx = train_df[train_df["_row_hash"] == incoming_hash.iloc[-1]].index[-1].item()
 
             found_count = (last_row_idx - first_row_idx) + 1
 
@@ -311,9 +323,11 @@ class DFPRollingWindowStage(SinglePortStage):
                 raise RuntimeError(("Overlapping rolling history detected. "
                                     "Rolling history can only be used with non-overlapping batches"))
 
+            train_offset = train_df.index.get_loc(first_row_idx)
+
             # Otherwise return a new message
             return MultiDFPMessage(meta=DFPMessageMeta(df=train_df, user_id=user_id),
-                                   mess_offset=first_row_idx,
+                                   mess_offset=train_offset,
                                    mess_count=found_count)
 
     def on_data(self, message: DFPMessageMeta):

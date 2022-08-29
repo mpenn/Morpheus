@@ -515,6 +515,6 @@ class DFPPreprocessingStage(SinglePortStage):
         node = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], node)
 
-        node.launch_options.pe_count = self._config.num_threads
+        # node.launch_options.pe_count = self._config.num_threads
 
         return node, MultiDFPMessage

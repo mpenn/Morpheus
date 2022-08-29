@@ -50,6 +50,9 @@ WORKDIR /work/examples/dfp_workflow/morpheus
 # # This will get used by pipelines for the --s3_cache option
 # ENV DFP_S3_CACHE="/work/examples/dfp_workflow/morpheus/.s3_cache"
 
+# Set the tracking URI for mlflow
+ENV MLFLOW_TRACKING_URI="http://mlflow:5000"
+
 # Copy the sources
 COPY . ./
 
