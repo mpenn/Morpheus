@@ -35,15 +35,6 @@ from .multi_dfp_message import MultiDFPMessage
 logger = logging.getLogger("morpheus.{}".format(__name__))
 
 
-def get_registered_models():
-    client = MlflowClient(os.environ.get('DFP_TRACKING_URI'))
-    models = client.list_registered_models()
-    return set(model.name for model in models)
-
-
-REGISTERED_MODELS = get_registered_models()
-
-
 class ModelCache:
 
     def __init__(self, reg_model_name: str, model_uri: str) -> None:

@@ -15,15 +15,11 @@
 import logging
 import time
 import typing
-from datetime import date
 from datetime import datetime
 
 import numpy as np
 import srf
 from srf.core import operators as ops
-
-import cudf
-from examples.dfp_workflow.morpheus.dfp.stages.multi_dfp_message import DFPMessageMeta
 
 from morpheus.config import Config
 from morpheus.messages.multi_ae_message import MultiAEMessage
@@ -31,6 +27,7 @@ from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
 from .dfp_autoencoder import DFPAutoEncoder
+from .multi_dfp_message import DFPMessageMeta
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
 
@@ -93,7 +90,7 @@ class DFPPostprocessingStage(SinglePortStage):
         if (extracted_events is None):
             return None
 
-        return DFPMessageMeta(extracted_events, user_id=message.user_id)
+        return DFPMessageMeta(extracted_events, user_id=message.meta.user_id)
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
 
