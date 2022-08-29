@@ -112,13 +112,13 @@ class DataFrameInputSchema:
 
 def _process_columns(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
 
-    output_df = pd.DataFrame()
+    output_df = df_in
 
     # Iterate over the column info
     for ci in input_schema.column_info:
         output_df[ci.name] = ci.process_column(df_in)
 
-    if (input_schema.preserve_columns is not None):
+    if (False and input_schema.preserve_columns is not None):
         # Get the list of remaining columns not already added
         df_in_columns = set(df_in.columns) - set(output_df.columns)
 
