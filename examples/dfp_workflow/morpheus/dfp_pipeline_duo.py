@@ -17,6 +17,7 @@ import os
 import typing
 from datetime import datetime
 from datetime import timedelta
+from functools import partial
 
 import click
 import mlflow
@@ -49,6 +50,7 @@ from morpheus.config import CppConfig
 from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
+from morpheus.stages.general.trigger_stage import TriggerStage
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.utils.logger import configure_logging
 
@@ -151,6 +153,12 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         # Simple but probably incorrect calculation
         return df.groupby([config.ae.userid_column_name, per_day, "locationcity"]).ngroup() + 1
 
+    def column_listjoin(df: cudf.DataFrame, col_name):
+        if col_name in df:
+            return df[col_name].transform(lambda x: ",".join(x)).astype('string')
+        else:
+            return pd.Series(None, dtype='string')
+
     def s3_date_extractor_duo(s3_object):
         key_object = s3_object.key
 
@@ -174,6 +182,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         RenameColumn(name="reason", dtype=str, input_name="reason"),
         RenameColumn(name="username", dtype=str, input_name="user.name"),
         RenameColumn(name=config.ae.timestamp_column_name, dtype=datetime, input_name=config.ae.timestamp_column_name),
+        CustomColumn(name="user.groups", dtype=str, process_column_fn=partial(column_listjoin, col_name="user.groups"))
     ]
 
     input_schema = DataFrameInputSchema(json_columns=["access_device", "application", "auth_device", "user"],
@@ -206,6 +215,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
                                   input_schema=input_schema,
                                   filter_null=False,
                                   cache_dir=cache_dir))
+
     elif (source == "file"):
         pipeline.set_source(
             MultiFileSource(config,
