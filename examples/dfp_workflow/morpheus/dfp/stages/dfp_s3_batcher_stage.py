@@ -18,9 +18,9 @@ import typing
 import pandas as pd
 import srf
 from srf.core import operators as ops
+from .multi_dfp_message import DFPMessageMeta
 
 from morpheus.config import Config
-from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
@@ -105,4 +105,4 @@ class DFPS3BatcherStage(SinglePortStage):
         stream = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], stream)
 
-        return stream, UserMessageMeta
+        return stream, DFPMessageMeta

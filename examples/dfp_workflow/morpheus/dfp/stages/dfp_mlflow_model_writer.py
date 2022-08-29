@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import logging
-import traceback
+import os
 import typing
 
 import mlflow
@@ -28,7 +28,6 @@ from mlflow.tracking import MlflowClient
 from srf.core import operators as ops
 
 from morpheus.config import Config
-from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
@@ -48,8 +47,11 @@ logger = logging.getLogger("morpheus.{}".format(__name__))
 
 class DFPMLFlowModelWriterStage(SinglePortStage):
 
-    def __init__(self, c: Config):
+    def __init__(self, c: Config, model_name_formatter: str, experiment_name: str):
         super().__init__(c)
+
+        self._model_name_formatter = model_name_formatter
+        self._experiment_name = experiment_name
 
         self._batch_size = 10
         self._batch_cache = []
@@ -70,12 +72,12 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
         model: DFPAutoEncoder = message.model
 
         model_path = "dfencoder"
-        reg_model_name = f"autoencoder-HAMMAH-duo-{user}"
+        reg_model_name = self._model_name_formatter.format(user_id=user)
 
         # Write to ML Flow
         try:
             mlflow.end_run()
-            experiment_name = f'/heimdall-dsp/{reg_model_name}'
+            experiment_name = os.path.join(self._experiment_name, reg_model_name)
             experiment = mlflow.get_experiment_by_name(experiment_name)
             if (not experiment):
                 # print(f"Failed to get experiment: /heimdall-dsp/{reg_model_name}")
@@ -112,10 +114,6 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
 
                 # TODO(MDD) this should work with sample_input
                 model_sig = infer_signature(message.get_meta(), model.get_anomaly_score(sample_input))
-
-                # print(
-                #     f"Logging model:\nTracking URI: {mlflow.get_tracking_uri()}\nArtifact URI: {mlflow.get_artifact_uri()}"
-                # )
 
                 model_info = mlflow.pytorch.log_model(
                     pytorch_model=model,
@@ -173,4 +171,4 @@ class DFPMLFlowModelWriterStage(SinglePortStage):
         stream = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], stream)
 
-        return stream, UserMessageMeta
+        return stream, MultiAEMessage

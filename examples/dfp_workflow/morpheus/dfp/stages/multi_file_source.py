@@ -16,12 +16,15 @@ import logging
 import os
 import typing
 
+import fsspec
+import fsspec.utils
 import pandas as pd
 import srf
 
 import cudf
 
 from morpheus._lib.file_types import FileTypes
+from morpheus._lib.file_types import determine_file_type
 from morpheus.config import Config
 from morpheus.io.deserializers import read_file_to_df
 from morpheus.pipeline.single_output_source import SingleOutputSource
@@ -93,6 +96,36 @@ class MultiFileSource(SingleOutputSource):
 
     def supports_cpp_node(self):
         return False
+
+    def _generate_frames_fsspec(self):
+
+        cached_paths = [f"filecache::{f}" for f in self._filenames if not fsspec.utils.can_be_local(f)]
+
+        fs: fsspec.core.OpenFiles = fsspec.open_files(cached_paths, filecache={'cache_storage': './.cache/s3tmp'})
+
+        loaded_dfs = []
+
+        file: fsspec.core.OpenFile
+        for file in fs:
+
+            with file as f:
+                # Read the dataframe into memory
+                df = read_file_to_df(
+                    f,
+                    file_type=determine_file_type(file.path) if self._file_type == FileTypes.Auto else self._file_type,
+                    filter_nulls=True,
+                    df_type="pandas",
+                    parser_kwargs=self._parser_kwargs)
+
+            df = process_dataframe(df, self._input_schema)
+
+            loaded_dfs.append(df)
+
+        combined_df = pd.concat(loaded_dfs)
+
+        print("Sending {} rows".format(len(combined_df)))
+
+        yield combined_df
 
     def _generate_frames(self):
 

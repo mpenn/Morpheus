@@ -23,9 +23,9 @@ import srf
 from srf.core import operators as ops
 
 import cudf
+from examples.dfp_workflow.morpheus.dfp.stages.multi_dfp_message import DFPMessageMeta
 
 from morpheus.config import Config
-from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
@@ -93,7 +93,7 @@ class DFPPostprocessingStage(SinglePortStage):
         if (extracted_events is None):
             return None
 
-        return UserMessageMeta(extracted_events, user_id=typing.cast(UserMessageMeta, message.meta).user_id)
+        return DFPMessageMeta(extracted_events, user_id=message.user_id)
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
 
@@ -103,4 +103,4 @@ class DFPPostprocessingStage(SinglePortStage):
         stream = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], stream)
 
-        return stream, UserMessageMeta
+        return stream, DFPMessageMeta

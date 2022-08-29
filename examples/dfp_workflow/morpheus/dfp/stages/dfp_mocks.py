@@ -26,10 +26,11 @@ import srf
 
 import cudf
 
+from .multi_dfp_message import DFPMessageMeta
+
 from .dfp_autoencoder import DFPAutoEncoder
 
 from morpheus.messages import MessageMeta
-from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
@@ -127,7 +128,7 @@ class DFPDuoInferenceMock(SinglePortStage):
     def accepted_types(self) -> typing.Tuple:
         return (MessageMeta, )
 
-    def on_data(self, message: UserMessageMeta):
+    def on_data(self, message: DFPMessageMeta):
         if (not message or message.df.empty):
             return None
 
