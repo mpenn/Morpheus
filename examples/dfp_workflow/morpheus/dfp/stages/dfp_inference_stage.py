@@ -169,7 +169,7 @@ class ModelManager:
                 client = MlflowClient()
                 models = client.list_registered_models()
 
-                self._existing_models = [model.name for model in models]
+                self._existing_models = set(model.name for model in models)
 
                 self._existing_models_updated = now
 
