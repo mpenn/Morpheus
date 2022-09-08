@@ -161,7 +161,8 @@ class DataFrameInputSchema:
 
 def _process_columns(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
 
-    output_df = pd.DataFrame()
+    output_df = df_in
+    orig_cols = set(df_in.columns)
 
     # Iterate over the column info
     for ci in input_schema.column_info:
@@ -172,13 +173,11 @@ def _process_columns(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
             raise
 
     if (input_schema.preserve_columns is not None):
-        # Get the list of remaining columns not already added
-        df_in_columns = set(df_in.columns) - set(output_df.columns)
+        # keep any columns that match the preserve filters
+        remove_cols = set(y for y in orig_cols if not input_schema.preserve_columns.match(y))
+        keep_cols = set(output_df.columns) - remove_cols
 
-        # Finally, keep any columns that match the preserve filters
-        match_columns = [y for y in df_in_columns if input_schema.preserve_columns.match(y)]
-
-        output_df[match_columns] = df_in[match_columns]
+        output_df = output_df[keep_cols]
 
     return output_df
 
