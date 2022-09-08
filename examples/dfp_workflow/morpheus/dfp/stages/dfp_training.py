@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import srf
 import torch
-from .multi_dfp_message import MultiDFPMessage
 from srf.core import operators as ops
 
 from morpheus.config import Config
@@ -28,6 +27,7 @@ from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
 from .dfp_autoencoder import DFPAutoEncoder
+from .multi_dfp_message import MultiDFPMessage
 from .user_model_manager import UserModelManager
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
@@ -55,7 +55,6 @@ class DFPTraining(SinglePortStage):
             return None
 
         user_id = message.user_id
-
         model_manager = UserModelManager(self._config,
                                          user_id=user_id,
                                          save_model=False,

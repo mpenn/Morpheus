@@ -19,6 +19,9 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+
+import cudf
 
 from morpheus.config import Config
 
@@ -29,7 +32,7 @@ logger = logging.getLogger("morpheus.{}".format(__name__))
 
 class DFPDataLoader:
 
-    def __init__(self, batch_frames, filter_func, max_rows_per_batch=1e5):
+    def __init__(self, batch_frames, filter_func, max_rows_per_batch=50000):
         self._aggregate_cache = None
         self._batch_frames = batch_frames
         self._current_index = 0
@@ -56,8 +59,14 @@ class DFPDataLoader:
         aggregate_rows = 0
         aggregate_frame = pd.DataFrame()
         while (True):
-            df_frame = self._filter_func(pd.read_parquet(self._batch_frames[self._current_index]))
-            self._sample_frame = df_frame.head(1)
+            df_frame = self._filter_func(pd.read_pickle(self._batch_frames[self._current_index]))
+
+            # Save the first row and the last row from every batch. Helps with statistics down the line
+            if (self._sample_frame is None):
+                self._sample_frame = df_frame.head(1)
+
+            self._sample_frame = self._sample_frame.append(df_frame.tail(1))
+
             rows = df_frame.shape[0]
 
             if (aggregate_rows + rows < self._max_rows_per_batch):
@@ -82,6 +91,10 @@ class DFPDataLoader:
                 self._aggregate_cache = aggregate_frame
 
             return aggregate_frame
+
+
+class InsufficientDataError(RuntimeError):
+    pass
 
 
 class UserModelManager(object):
@@ -148,28 +161,23 @@ class UserModelManager(object):
         logger.debug("Training AE model for user: '%s'...", self._user_id)
         loader = DFPDataLoader(self._batch_files, filter_func)
         try:
-            for current_epoch in range(self._epochs):
+            for _ in tqdm(range(self._epochs), desc="Training"):
                 batches = 0
-                print(f"epoch {current_epoch}: ", end='')
                 while (True):
                     df_batch = loader.get_next_frame()
                     if (df_batch is None):
                         break
 
                     if (batches == 0 and (df_batch.shape[0] < self._min_history)):
-                        raise RuntimeError(f"Insuffient training data.")
+                        raise InsufficientDataError(f"Insuffient training data.")
 
                     if (df_batch.shape[0] < 10):  # If we've already trained on some data, make sure we can tts this.
                         break
 
-                    X_train, X_val = train_test_split(df_batch, shuffle=False, test_size=0.2, random_state=42)
-
-                    model.fit(X_train, val=X_val)
+                    model.fit(df_batch)
                     batches += 1
-                    print('.', end='', flush=True)
 
                 loader.reset()
-                print('')
 
             if (self._save_model):
                 self._model = model
@@ -177,8 +185,11 @@ class UserModelManager(object):
             logger.debug("Training AE model for user: '%s'... Complete.", self._user_id)
 
             return model, loader.get_sample_frame()
+        except InsufficientDataError:
+            logger.debug(f"Training AE model for user: '{self._user_id}... Skipped")
+            return None, None
         except Exception as e:
-            logger.debug(f"Training AE model for user: '{self._user_id}... Skipped, {e} {self._user_id}")
+            logger.exception("Error during training for user: %s", self._user_id, exc_info=True)
             return None, None
 
     def train(self, df: pd.DataFrame) -> DFPAutoEncoder:
