@@ -476,9 +476,9 @@ class DFPPreprocessingStage(SinglePortStage):
         # # Create the multi message
         # output_message = DFPMessageMeta(df_processed, user_id=message.user_id)
 
-        duration = (time.time() - start_time) * 1000.0
-
         if logger.isEnabledFor(logging.DEBUG):
+            duration = (time.time() - start_time) * 1000.0
+
             logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
                          message.mess_count,
                          message.get_meta(self._config.ae.timestamp_column_name).min(),
