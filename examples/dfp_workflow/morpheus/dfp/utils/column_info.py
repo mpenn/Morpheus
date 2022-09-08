@@ -15,23 +15,51 @@
 import dataclasses
 import re
 import typing
-from abc import abstractmethod
+from datetime import datetime
 
 import pandas as pd
 
 import cudf
 
 
+def create_increment_col(df, column_name: str, groupby_column="username", timestamp_column="timestamp"):
+    DEFAULT_DATE = '1970-01-01T00:00:00.000000+00:00'
+
+    # Ensure we are pandas for this
+    if (isinstance(df, cudf.DataFrame)):
+        df = df.to_pandas()
+
+    time_col = pd.to_datetime(df[timestamp_column], errors='coerce', utc=True).fillna(pd.to_datetime(DEFAULT_DATE))
+
+    per_day = time_col.dt.to_period("D")
+
+    cat_col: pd.Series = df.groupby([per_day, groupby_column])[column_name].transform(lambda x: pd.factorize(x)[0] + 1)
+    cat_col.fillna(1, inplace=True)
+
+    increment_col = pd.concat([cat_col, df[groupby_column]],
+                              axis=1).groupby([per_day, groupby_column
+                                               ])[column_name].expanding(1).max().droplevel(0).droplevel(0)
+
+    return increment_col
+
+
 @dataclasses.dataclass
 class ColumnInfo:
     name: str
     dtype: str  # The final type
-    # input_name: str = None  # For renaming
-    # process_column: typing.Callable = None
 
-    @abstractmethod
+    def get_pandas_dtype(self):
+
+        if (issubclass(self.dtype, datetime)):
+            return "datetime64[ns]"
+        else:
+            return self.dtype
+
     def process_column(self, df: pd.DataFrame) -> pd.Series:
-        pass
+        if (self.name not in df.columns):
+            return pd.Series(None, index=df.index, dtype=self.get_pandas_dtype())
+
+        return df[self.name]
 
 
 @dataclasses.dataclass
@@ -49,9 +77,7 @@ class RenameColumn(ColumnInfo):
     def process_column(self, df: pd.DataFrame) -> pd.Series:
 
         if (self.input_name not in df.columns):
-            # Generate warning?
-            # Create empty column
-            return pd.Series(None, dtype=self.dtype)
+            return pd.Series(None, index=df.index, dtype=self.get_pandas_dtype())
 
         return df[self.input_name]
 
@@ -88,10 +114,31 @@ class BoolColumn(RenameColumn):
 
 
 @dataclasses.dataclass
+class DateTimeColumn(RenameColumn):
+
+    def process_column(self, df: pd.DataFrame) -> pd.Series:
+        return pd.to_datetime(super().process_column(df), infer_datetime_format=True, utc=True)
+
+
+@dataclasses.dataclass
+class IncrementColumn(DateTimeColumn):
+    groupby_column: str
+    period: str = "D"
+
+    def process_column(self, df: pd.DataFrame) -> pd.Series:
+
+        per_day = super().process_column(df).dt.to_period(self.period)
+
+        # Create the per-user, per-day log count
+        return df.groupby([self.groupby_column, per_day]).cumcount()
+
+
+@dataclasses.dataclass
 class DataFrameInputSchema:
     json_columns: typing.List[str] = dataclasses.field(default_factory=list)
     column_info: typing.List[ColumnInfo] = dataclasses.field(default_factory=list)
     preserve_columns: re.Pattern = dataclasses.field(default_factory=list)
+    row_filter: typing.Callable[[pd.DataFrame], pd.DataFrame] = None
 
     def __post_init__(self):
 
@@ -116,16 +163,11 @@ def _process_columns(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
 
     # Iterate over the column info
     for ci in input_schema.column_info:
-        output_df[ci.name] = ci.process_column(df_in)
-
-    if (False and input_schema.preserve_columns is not None):
-        # Get the list of remaining columns not already added
-        df_in_columns = set(df_in.columns) - set(output_df.columns)
-
-        # Finally, keep any columns that match the preserve filters
-        match_columns = [y for y in df_in_columns if input_schema.preserve_columns.match(y)]
-
-        output_df[match_columns] = df_in[match_columns]
+        try:
+            output_df[ci.name] = ci.process_column(df_in)
+        except Exception as e:
+            logger.exception("Failed to process column '%s'. Dataframe: \n%s", ci.name, df_in, exc_info=True)
+            raise
 
     return output_df
 
@@ -174,6 +216,14 @@ def _normalize_dataframe(df_in: pd.DataFrame, input_schema: DataFrameInputSchema
     return df_normalized
 
 
+def _filter_rows(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
+
+    if (input_schema.row_filter is None):
+        return df_in
+
+    return input_schema.row_filter(df_in)
+
+
 def process_dataframe(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
 
     # Step 1 is to normalize any columns
@@ -182,5 +232,8 @@ def process_dataframe(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
     # Step 2 is to process columns
     # df_processed = self._rename_columns(df_processed)
     df_processed = _process_columns(df_processed, input_schema)
+
+    # Step 3 is to run the row filter if needed
+    df_processed = _filter_rows(df_processed, input_schema)
 
     return df_processed
