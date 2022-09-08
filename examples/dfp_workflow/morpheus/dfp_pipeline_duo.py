@@ -37,11 +37,13 @@ from dfp.stages.s3_object_source_stage import s3_filter_duo
 from dfp.stages.s3_object_source_stage import s3_object_generator
 from dfp.stages.write_to_s3_stage import WriteToS3Stage
 from dfp.utils.column_info import BoolColumn
+from dfp.utils.column_info import ColumnInfo
 from dfp.utils.column_info import CustomColumn
 from dfp.utils.column_info import DataFrameInputSchema
+from dfp.utils.column_info import DateTimeColumn
+from dfp.utils.column_info import IncrementColumn
 from dfp.utils.column_info import RenameColumn
-
-import cudf
+from dfp.utils.column_info import create_increment_col
 
 from morpheus._lib.file_types import FileTypes
 from morpheus.config import Config
@@ -137,27 +139,9 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
     config.ae = ConfigAutoEncoder()
 
     config.ae.feature_columns = [
-        'accessdevicebrowser', 'accessdeviceos', 'device', 'result', 'reason', 'logcount', "locincrement"
+        'accessdevicebrowser', 'accessdeviceos', 'device', 'result', 'reason', 'logcount', 'locincrement'
     ]
     config.ae.userid_column_name = "username"
-
-    def column_logcount(df: cudf.DataFrame):
-        per_day = df[config.ae.timestamp_column_name].dt.to_period("D")
-
-        # Create the per-user, per-day log count
-        return df.groupby([config.ae.userid_column_name, per_day]).cumcount()
-
-    def column_locincrement(df: cudf.DataFrame):
-        per_day = df[config.ae.timestamp_column_name].dt.to_period("D")
-
-        # Simple but probably incorrect calculation
-        return df.groupby([config.ae.userid_column_name, per_day, "locationcity"]).ngroup() + 1
-
-    def column_listjoin(df: cudf.DataFrame, col_name):
-        if col_name in df:
-            return df[col_name].transform(lambda x: ",".join(x)).astype('string')
-        else:
-            return pd.Series(None, dtype='string')
 
     def s3_date_extractor_duo(s3_object):
         key_object = s3_object.key
@@ -169,7 +153,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         return ts_object
 
     # Specify the column names to ensure all data is uniform
-    column_info = [
+    source_column_info = [
         RenameColumn(name="accessdevicebrowser", dtype=str, input_name="access_device.browser"),
         RenameColumn(name="accessdeviceos", dtype=str, input_name="access_device.os"),
         RenameColumn(name="locationcity", dtype=str, input_name="auth_device.location.city"),
@@ -179,14 +163,35 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
                    input_name="result",
                    true_values=["success", "SUCCESS"],
                    false_values=["denied", "DENIED", "FRAUD"]),
-        RenameColumn(name="reason", dtype=str, input_name="reason"),
+        ColumnInfo(name="reason", dtype=str),
         RenameColumn(name="username", dtype=str, input_name="user.name"),
-        RenameColumn(name=config.ae.timestamp_column_name, dtype=datetime, input_name=config.ae.timestamp_column_name),
-        CustomColumn(name="user.groups", dtype=str, process_column_fn=partial(column_listjoin, col_name="user.groups"))
+        DateTimeColumn(name="timestamp", dtype=datetime, input_name="timestamp"),
     ]
 
-    input_schema = DataFrameInputSchema(json_columns=["access_device", "application", "auth_device", "user"],
-                                        column_info=column_info)
+    source_schema = DataFrameInputSchema(json_columns=["access_device", "application", "auth_device", "user"],
+                                         column_info=source_column_info)
+
+    # Preprocessing schema
+    preprocess_column_info = [
+        ColumnInfo(name="accessdevicebrowser", dtype=str),
+        ColumnInfo(name="accessdeviceos", dtype=str),
+        ColumnInfo(name="locationcity", dtype=str),
+        ColumnInfo(name="device", dtype=str),
+        ColumnInfo(name="result", dtype=bool),
+        ColumnInfo(name="reason", dtype=str),
+        ColumnInfo(name="username", dtype=str),
+        ColumnInfo(name=config.ae.timestamp_column_name, dtype=datetime),
+        # Derived columns
+        IncrementColumn(name="logcount",
+                        dtype=int,
+                        input_name=config.ae.timestamp_column_name,
+                        groupby_column="username"),
+        CustomColumn(name="locincrement",
+                     dtype=int,
+                     process_column_fn=partial(create_increment_col, column_name="locationcity")),
+    ]
+
+    preprocess_schema = DataFrameInputSchema(column_info=preprocess_column_info, preserve_columns=["_batch_id"])
 
     # Create a linear pipeline object
     pipeline = LinearPipeline(config)
@@ -212,14 +217,14 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         pipeline.add_stage(
             DFPS3ToDataFrameStage(config,
                                   file_type=FileTypes.JSON,
-                                  input_schema=input_schema,
+                                  input_schema=source_schema,
                                   filter_null=False,
                                   cache_dir=cache_dir))
 
     elif (source == "file"):
         pipeline.set_source(
             MultiFileSource(config,
-                            input_schema=input_schema,
+                            input_schema=source_schema,
                             filenames=list(kwargs["input_file"]),
                             parser_kwargs={
                                 "lines": False, "orient": "records"
@@ -244,26 +249,8 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
             max_history="60d" if is_training else "1d",
             cache_dir=cache_dir))
 
-    # Specify the final set of columns necessary just before pre-processing
-    model_column_info = [
-        # Input columns
-        RenameColumn(name="accessdevicebrowser", dtype=str, input_name="accessdevicebrowser"),
-        RenameColumn(name="accessdeviceos", dtype=str, input_name="accessdeviceos"),
-        RenameColumn(name="device", dtype=str, input_name="device"),
-        RenameColumn(name="result", dtype=bool, input_name="result"),
-        RenameColumn(name="reason", dtype=str, input_name="reason"),
-        # Derived columns
-        CustomColumn(name="logcount", dtype=int, process_column_fn=column_logcount),
-        CustomColumn(name="locincrement", dtype=int, process_column_fn=column_locincrement),
-        # Extra columns
-        RenameColumn(name="username", dtype=str, input_name="username"),
-        RenameColumn(name=config.ae.timestamp_column_name, dtype=datetime, input_name=config.ae.timestamp_column_name),
-    ]
-
-    model_schema = DataFrameInputSchema(column_info=model_column_info, preserve_columns=["_batch_id"])
-
     # Output is UserMessageMeta -- Cached frame set
-    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=model_schema, only_new_batches=not is_training))
+    pipeline.add_stage(DFPPreprocessingStage(config, input_schema=preprocess_schema, only_new_batches=not is_training))
 
     model_name_formatter = "AE-duo-{user_id}"
     experiment_name = "DFP-duo-training"
