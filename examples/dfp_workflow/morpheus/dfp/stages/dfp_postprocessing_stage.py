@@ -56,11 +56,9 @@ class DFPPostprocessingStage(SinglePortStage):
         # df_user = message.get_meta()
         model: DFPAutoEncoder = message.model
 
-        z_scores = (message.get_meta('anomaly_score') - model.val_loss_mean) / model.val_loss_std
+        z_scores = message.get_meta("mean_abs_z")
 
-        message.set_meta("z-score", z_scores)
-
-        above_threshold_df = message.get_meta()[z_scores > self._z_score_threshold]
+        above_threshold_df = message.get_meta()[z_scores > 2.0]
 
         if (not above_threshold_df.empty):
             above_threshold_df['event_time'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -80,12 +78,13 @@ class DFPPostprocessingStage(SinglePortStage):
 
         duration = (time.time() - start_time) * 1000.0
 
-        logger.debug("Completed postprocessing for user %s in %s ms. Event count: %s. Start: %s, End: %s",
-                     message.meta.user_id,
-                     duration,
-                     0 if extracted_events is None else len(extracted_events),
-                     message.get_meta(self._config.ae.timestamp_column_name).min(),
-                     message.get_meta(self._config.ae.timestamp_column_name).max())
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Completed postprocessing for user %s in %s ms. Event count: %s. Start: %s, End: %s",
+                         message.meta.user_id,
+                         duration,
+                         0 if extracted_events is None else len(extracted_events),
+                         message.get_meta(self._config.ae.timestamp_column_name).min(),
+                         message.get_meta(self._config.ae.timestamp_column_name).max())
 
         if (extracted_events is None):
             return None
