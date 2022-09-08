@@ -17,7 +17,6 @@ import typing
 
 import numpy as np
 import srf
-from .multi_dfp_message import DFPMessageMeta
 from srf.core import operators as ops
 
 import cudf
@@ -26,6 +25,7 @@ from morpheus.config import Config
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
+from ..messages.multi_dfp_message import DFPMessageMeta
 from ..utils.logging_timer import log_time
 
 logger = logging.getLogger("morpheus.{}".format(__name__))

@@ -15,7 +15,6 @@
 import json
 import random
 import typing
-
 from collections import defaultdict
 from datetime import date
 from datetime import datetime
@@ -26,14 +25,13 @@ import srf
 
 import cudf
 
-from .multi_dfp_message import DFPMessageMeta
-
-from .dfp_autoencoder import DFPAutoEncoder
-
 from morpheus.messages import MessageMeta
 from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
+
+from ..messages.multi_dfp_message import DFPMessageMeta
+from ..utils.dfp_autoencoder import DFPAutoEncoder
 
 
 def get_dummy_json():

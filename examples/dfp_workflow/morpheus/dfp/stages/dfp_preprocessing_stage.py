@@ -29,11 +29,11 @@ from morpheus.config import Config
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
+from ..messages.multi_dfp_message import DFPMessageMeta
+from ..messages.multi_dfp_message import MultiDFPMessage
 from ..utils.column_info import ColumnInfo
 from ..utils.column_info import DataFrameInputSchema
 from ..utils.column_info import process_dataframe
-from .multi_dfp_message import DFPMessageMeta
-from .multi_dfp_message import MultiDFPMessage
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
 
@@ -487,10 +487,10 @@ class DFPPreprocessingStage(SinglePortStage):
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
-                        message.mess_count,
-                        message.get_meta(self._config.ae.timestamp_column_name).min(),
-                        message.get_meta(self._config.ae.timestamp_column_name).max(),
-                        duration)
+                         message.mess_count,
+                         message.get_meta(self._config.ae.timestamp_column_name).min(),
+                         message.get_meta(self._config.ae.timestamp_column_name).max(),
+                         duration)
 
         if self._do_profile:
             pr.disable()

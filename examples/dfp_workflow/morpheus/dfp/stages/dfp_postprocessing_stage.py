@@ -26,8 +26,8 @@ from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
-from .dfp_autoencoder import DFPAutoEncoder
-from .multi_dfp_message import DFPMessageMeta
+from ..messages.multi_dfp_message import DFPMessageMeta
+from ..utils.dfp_autoencoder import DFPAutoEncoder
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
 

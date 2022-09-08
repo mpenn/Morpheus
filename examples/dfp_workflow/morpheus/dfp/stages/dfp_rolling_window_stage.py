@@ -34,9 +34,9 @@ from morpheus.config import Config
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
+from ..messages.multi_dfp_message import DFPMessageMeta
+from ..messages.multi_dfp_message import MultiDFPMessage
 from ..utils.logging_timer import log_time
-from .multi_dfp_message import DFPMessageMeta
-from .multi_dfp_message import MultiDFPMessage
 
 # Setup conda environment
 conda_env = {

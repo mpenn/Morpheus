@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import logging
-import os
 import threading
 import time
 import typing
@@ -32,9 +31,9 @@ from morpheus.messages.multi_ae_message import MultiAEMessage
 from morpheus.pipeline.single_port_stage import SinglePortStage
 from morpheus.pipeline.stream_pair import StreamPair
 
+from ..messages.multi_dfp_message import MultiDFPMessage
+from ..utils.dfp_autoencoder import DFPAutoEncoder
 from ..utils.logging_timer import log_time
-from .dfp_autoencoder import DFPAutoEncoder
-from .multi_dfp_message import MultiDFPMessage
 
 logger = logging.getLogger("morpheus.{}".format(__name__))
 
@@ -362,9 +361,7 @@ class DFPInferenceStage(SinglePortStage):
 
     def get_model(self, user: str) -> ModelCache:
 
-        return self._model_manager.load_user_model(self._client,
-                                                   user_id=user,
-                                                   fallback_user_ids=[self._config.ae.fallback_username])
+        return self._model_manager.load_user_model(self._client, user_id=user, fallback_user_ids=[self._fallback_user])
 
     def on_data(self, message: MultiDFPMessage):
         if (not message or message.mess_count == 0):
@@ -389,7 +386,7 @@ class DFPInferenceStage(SinglePortStage):
 
         post_model_time = time.time()
 
-        anomaly_score = loaded_model.get_anomaly_score(df_user)
+        results_df = loaded_model.get_results(df_user)
 
         # Create an output message to allow setting meta
         output_message = MultiAEMessage(message.meta,
@@ -397,7 +394,7 @@ class DFPInferenceStage(SinglePortStage):
                                         mess_count=message.mess_count,
                                         model=loaded_model)
 
-        output_message.set_meta("anomaly_score", anomaly_score)
+        output_message.set_meta(list(results_df.columns), results_df)
 
         output_message.set_meta('model_version', f"{model_cache.reg_model_name}:{model_cache.reg_model_version}")
 
