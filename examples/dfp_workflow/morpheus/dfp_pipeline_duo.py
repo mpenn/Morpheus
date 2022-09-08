@@ -277,8 +277,8 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         else:
 
             def print_s3_output(message: UserMessageMeta):
-                print("WRITER MOCK: Writing the following: ")
-                print(message.df)
+                logger.debug("WRITER MOCK: Writing the following: ")
+                logger.debug(message.df)
 
             pipeline.add_stage(WriteToS3Stage(config, s3_writer=print_s3_output))
 
