@@ -22,6 +22,8 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 
 import numpy as np
 import pandas as pd
@@ -56,8 +58,8 @@ class CachedUserWindow:
     timestamp_column: str = "timestamp"
     total_count: int = 0
     count: int = 0
-    min_epoch: datetime = datetime(1970, 1, 1)
-    max_epoch: datetime = datetime(1970, 1, 1)
+    min_epoch: datetime = datetime(1970, 1, 1, tzinfo=timezone(timedelta(hours=0)))
+    max_epoch: datetime = datetime(1970, 1, 1, tzinfo=timezone(timedelta(hours=0)))
     batch_count: int = 0
     pending_batch_count: int = 0
     last_train_count: int = 0

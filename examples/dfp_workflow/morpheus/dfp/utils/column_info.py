@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import dataclasses
+import logging
 import re
 import typing
 from datetime import datetime
@@ -20,6 +21,8 @@ from datetime import datetime
 import pandas as pd
 
 import cudf
+
+logger = logging.getLogger("morpheus.{}".format(__name__))
 
 
 def create_increment_col(df, column_name: str, groupby_column="username", timestamp_column="timestamp"):
@@ -126,7 +129,6 @@ class IncrementColumn(DateTimeColumn):
     period: str = "D"
 
     def process_column(self, df: pd.DataFrame) -> pd.Series:
-
         per_day = super().process_column(df).dt.to_period(self.period)
 
         # Create the per-user, per-day log count
@@ -159,15 +161,24 @@ class DataFrameInputSchema:
 
 def _process_columns(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
 
-    output_df = df_in
+    output_df = pd.DataFrame()
 
     # Iterate over the column info
     for ci in input_schema.column_info:
         try:
             output_df[ci.name] = ci.process_column(df_in)
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to process column '%s'. Dataframe: \n%s", ci.name, df_in, exc_info=True)
             raise
+
+    if (input_schema.preserve_columns is not None):
+        # Get the list of remaining columns not already added
+        df_in_columns = set(df_in.columns) - set(output_df.columns)
+
+        # Finally, keep any columns that match the preserve filters
+        match_columns = [y for y in df_in_columns if input_schema.preserve_columns.match(y)]
+
+        output_df[match_columns] = df_in[match_columns]
 
     return output_df
 
