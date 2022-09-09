@@ -43,6 +43,7 @@ from dfp.utils.column_info import DataFrameInputSchema
 from dfp.utils.column_info import DateTimeColumn
 from dfp.utils.column_info import IncrementColumn
 from dfp.utils.column_info import RenameColumn
+from dfp.utils.column_info import column_listjoin
 from dfp.utils.column_info import create_increment_col
 
 from morpheus._lib.file_types import FileTypes
@@ -100,7 +101,7 @@ from morpheus.utils.logger import configure_logging
                     "'file:///mlruns' relative to the current directory"))
 def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir, sample_rate_s, **kwargs):
 
-    source = "file"
+    source = "s3"
 
     # To include the generic, we must be training all or generic
     include_generic = train_users == "all" or train_users == "generic"
@@ -114,7 +115,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
     skip_users = list(skip_user)
 
     # Enable the Morpheus logger
-    configure_logging(log_level=logging.DEBUG)
+    configure_logging(log_level=logging.INFO)
 
     logger = logging.getLogger("morpheus.{}".format(__name__))
 
@@ -165,6 +166,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
         ColumnInfo(name="reason", dtype=str),
         RenameColumn(name="username", dtype=str, input_name="user.name"),
         DateTimeColumn(name="timestamp", dtype=datetime, input_name="timestamp"),
+        CustomColumn(name="user.groups", dtype=str, process_column_fn=partial(column_listjoin, col_name="user.groups"))
     ]
 
     source_schema = DataFrameInputSchema(json_columns=["access_device", "application", "auth_device", "user"],

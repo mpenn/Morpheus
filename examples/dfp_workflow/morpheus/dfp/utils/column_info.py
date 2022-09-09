@@ -46,6 +46,13 @@ def create_increment_col(df, column_name: str, groupby_column="username", timest
     return increment_col
 
 
+def column_listjoin(df, col_name):
+    if col_name in df:
+        return df[col_name].transform(lambda x: ",".join(x)).astype('string')
+    else:
+        return pd.Series(None, dtype='string')
+
+
 @dataclasses.dataclass
 class ColumnInfo:
     name: str
