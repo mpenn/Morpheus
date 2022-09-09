@@ -56,6 +56,18 @@ from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.utils.logger import configure_logging
 
+log_levels = list(logging._nameToLevel.keys())
+
+if ("NOTSET" in log_levels):
+    log_levels.remove("NOTSET")
+
+
+def _parse_log_level(ctx, param, value):
+    x = logging._nameToLevel.get(value.upper(), None)
+    if x is None:
+        raise click.BadParameter('Must be one of {}. Passed: {}'.format(", ".join(logging._nameToLevel.keys()), value))
+    return x
+
 
 @click.command()
 @click.option(
@@ -82,6 +94,17 @@ from morpheus.utils.logger import configure_logging
     show_envvar=True,
     help="The location to cache data such as S3 downloads and pre-processed data",
 )
+@click.option("--log_level",
+              default=logging.getLevelName(Config().log_level),
+              type=click.Choice(log_levels, case_sensitive=False),
+              callback=_parse_log_level,
+              help="Specify the logging level to use.")
+@click.option(
+    "--source",
+    type=click.Choice(("file", "s3")),
+    default="file",
+    help="Data source",
+)
 @click.option("--sample_rate_s",
               type=int,
               default=0,
@@ -99,10 +122,14 @@ from morpheus.utils.logger import configure_logging
               default="http://localhost:5000",
               help=("The ML Flow tracking URI to connect to the tracking backend. If not speficied, MF Flow will use "
                     "'file:///mlruns' relative to the current directory"))
-def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir, sample_rate_s, **kwargs):
-
-    source = "s3"
-
+def run_pipeline(train_users,
+                 skip_user: typing.Tuple[str],
+                 duration,
+                 cache_dir,
+                 log_level,
+                 source,
+                 sample_rate_s,
+                 **kwargs):
     # To include the generic, we must be training all or generic
     include_generic = train_users == "all" or train_users == "generic"
 
@@ -115,7 +142,7 @@ def run_pipeline(train_users, skip_user: typing.Tuple[str], duration, cache_dir,
     skip_users = list(skip_user)
 
     # Enable the Morpheus logger
-    configure_logging(log_level=logging.INFO)
+    configure_logging(log_level=log_level)
 
     logger = logging.getLogger("morpheus.{}".format(__name__))
 
