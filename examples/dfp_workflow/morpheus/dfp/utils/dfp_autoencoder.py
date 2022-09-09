@@ -110,17 +110,6 @@ class DFPAutoEncoder(dfencoder.AutoEncoder):
 
         return scaler_result
 
-    def fit(self, df, epochs=1, val=None):
-        super().fit(df, epochs, val)
-
-        # Before returning, calc quick validation stats
-        if (val is not None):
-
-            val_loss = self.get_anomaly_score(val)
-
-            self.val_loss_mean = np.mean(val_loss)
-            self.val_loss_std = np.std(val_loss)
-
     def create_numerical_col_max(self, num_names, mse_loss):
         if num_names:
             num_df = pd.DataFrame(num_names)
