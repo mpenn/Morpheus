@@ -21,8 +21,6 @@ import torch
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-import cudf
-
 from morpheus.config import Config
 
 from .dfp_autoencoder import DFPAutoEncoder

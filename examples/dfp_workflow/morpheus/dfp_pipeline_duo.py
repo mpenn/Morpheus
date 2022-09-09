@@ -52,7 +52,6 @@ from morpheus.config import CppConfig
 from morpheus.messages.message_meta import UserMessageMeta
 from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
-from morpheus.stages.general.trigger_stage import TriggerStage
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.utils.logger import configure_logging
 
