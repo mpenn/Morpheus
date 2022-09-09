@@ -32,6 +32,8 @@ from morpheus.config import CppConfig
 from morpheus.config import PipelineModes
 from morpheus.config import auto_determine_bootstrap
 from morpheus.utils.logger import configure_logging
+from morpheus.utils.logger import get_log_levels
+from morpheus.utils.logger import parse_log_level
 
 # pylint: disable=line-too-long, import-outside-toplevel, invalid-name, global-at-module-level, unused-argument
 
@@ -199,19 +201,6 @@ def get_pipeline_from_ctx(ctx):
     return ctx_dict["pipeline"]
 
 
-log_levels = list(logging._nameToLevel.keys())
-
-if ("NOTSET" in log_levels):
-    log_levels.remove("NOTSET")
-
-
-def _parse_log_level(ctx, param, value):
-    x = logging._nameToLevel.get(value.upper(), None)
-    if x is None:
-        raise click.BadParameter('Must be one of {}. Passed: {}'.format(", ".join(logging._nameToLevel.keys()), value))
-    return x
-
-
 @click.group(name="morpheus",
              chain=False,
              invoke_without_command=True,
@@ -221,8 +210,8 @@ def _parse_log_level(ctx, param, value):
 @click.option('--debug/--no-debug', default=False)
 @click.option("--log_level",
               default=logging.getLevelName(DEFAULT_CONFIG.log_level),
-              type=click.Choice(log_levels, case_sensitive=False),
-              callback=_parse_log_level,
+              type=click.Choice(get_log_levels(), case_sensitive=False),
+              callback=parse_log_level,
               help="Specify the logging level to use.")
 @click.option('--log_config_file',
               default=DEFAULT_CONFIG.log_config_file,

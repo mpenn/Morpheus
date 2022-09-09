@@ -55,18 +55,8 @@ from morpheus.pipeline import LinearPipeline
 from morpheus.stages.general.monitor_stage import MonitorStage
 from morpheus.stages.output.write_to_file_stage import WriteToFileStage
 from morpheus.utils.logger import configure_logging
-
-log_levels = list(logging._nameToLevel.keys())
-
-if ("NOTSET" in log_levels):
-    log_levels.remove("NOTSET")
-
-
-def _parse_log_level(ctx, param, value):
-    x = logging._nameToLevel.get(value.upper(), None)
-    if x is None:
-        raise click.BadParameter('Must be one of {}. Passed: {}'.format(", ".join(logging._nameToLevel.keys()), value))
-    return x
+from morpheus.utils.logger import get_log_levels
+from morpheus.utils.logger import parse_log_level
 
 
 @click.command()
@@ -96,8 +86,8 @@ def _parse_log_level(ctx, param, value):
 )
 @click.option("--log_level",
               default=logging.getLevelName(Config().log_level),
-              type=click.Choice(log_levels, case_sensitive=False),
-              callback=_parse_log_level,
+              type=click.Choice(get_log_levels(), case_sensitive=False),
+              callback=parse_log_level,
               help="Specify the logging level to use.")
 @click.option(
     "--source",
