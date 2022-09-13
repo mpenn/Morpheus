@@ -147,7 +147,7 @@ class ModelManager:
         self._user_model_cache_lock = threading.Lock()
         self._model_cache_lock = threading.Lock()
 
-        self._existing_models: typing.List[str] = []
+        self._existing_models: typing.FrozenSet[str] = frozenset()
         self._existing_models_updated = datetime(1970, 1, 1)
 
         # Force an update of the existing models
@@ -169,7 +169,7 @@ class ModelManager:
                 client = MlflowClient()
                 models = client.list_registered_models()
 
-                self._existing_models = [model.name for model in models]
+                self._existing_models = frozenset(model.name for model in models)
 
                 self._existing_models_updated = now
 

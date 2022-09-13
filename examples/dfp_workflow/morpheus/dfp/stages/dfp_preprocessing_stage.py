@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import cProfile
 import logging
 import os
+import pstats
 import time
 import typing
 
@@ -449,6 +451,8 @@ class DFPPreprocessingStage(SinglePortStage):
         # self._s3_cache_dir = frame_cache_dir
         self._return_format = return_format
         self._only_new_batches = only_new_batches
+        self._do_profile = False
+        self._profilers = []
 
     @property
     def name(self) -> str:
@@ -464,6 +468,10 @@ class DFPPreprocessingStage(SinglePortStage):
         if (message is None):
             return None
 
+        if self._do_profile:
+            pr = cProfile.Profile()
+            pr.enable()
+
         start_time = time.time()
 
         # Process the columns
@@ -477,18 +485,32 @@ class DFPPreprocessingStage(SinglePortStage):
 
         duration = (time.time() - start_time) * 1000.0
 
-        logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
-                     message.mess_count,
-                     message.get_meta(self._config.ae.timestamp_column_name).min(),
-                     message.get_meta(self._config.ae.timestamp_column_name).max(),
-                     duration)
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Preprocessed %s data for logs in %s to %s in %s ms",
+                        message.mess_count,
+                        message.get_meta(self._config.ae.timestamp_column_name).min(),
+                        message.get_meta(self._config.ae.timestamp_column_name).max(),
+                        duration)
+
+        if self._do_profile:
+            pr.disable()
+            self._profilers.append(pr)
 
         return [message]
+
+    def _stop_prof(self):
+        if self._do_profile:
+            s = pstats.Stats()
+            for p in reversed(self._profilers):
+                s.add(p)
+            s.dump_stats('preproc.prof')
+
+            self._profilers.clear()
 
     def _build_single(self, builder: srf.Builder, input_stream: StreamPair) -> StreamPair:
 
         def node_fn(obs: srf.Observable, sub: srf.Subscriber):
-            obs.pipe(ops.map(self.process_features), ops.flatten()).subscribe(sub)
+            obs.pipe(ops.map(self.process_features), ops.flatten(), ops.on_completed(self._stop_prof)).subscribe(sub)
 
         node = builder.make_node_full(self.unique_name, node_fn)
         builder.make_edge(input_stream[0], node)

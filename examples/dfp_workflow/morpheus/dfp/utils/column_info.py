@@ -112,6 +112,7 @@ class DataFrameInputSchema:
 
 def _process_columns(df_in: pd.DataFrame, input_schema: DataFrameInputSchema):
 
+    # TODO(MDD): See what causes this to have such a perf impact over using df_in
     output_df = pd.DataFrame()
 
     # Iterate over the column info

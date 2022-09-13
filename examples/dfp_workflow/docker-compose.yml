@@ -29,17 +29,13 @@ services:
     networks:
       - frontend
       - backend
-    # environment:
-    #   - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-    #   - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    #   - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
     # command: mlflow server --backend-store-uri mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE} --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
-    command: mlflow server --backend-store-uri sqlite:////opt/mlflow/dbdata/mlflow.db --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
+    command: mlflow server --gunicorn-opts "--log-level debug" --backend-store-uri sqlite:////opt/mlflow/dbdata/mlflow.db --serve-artifacts --artifacts-destination /opt/mlflow/artifacts --host 0.0.0.0
     volumes:
       - db_data:/opt/mlflow/dbdata
       - mlflow_data:/opt/mlflow/artifacts
-    depends_on:
-      - db
+    # depends_on:
+    #   - db
 
   jupyter:
     restart: always
@@ -96,6 +92,8 @@ services:
       - mlflow
     profiles:
       - training
+    cap_add:
+      - sys_nice
     user: "${UID}:${GID}"
 
   # nginx:
