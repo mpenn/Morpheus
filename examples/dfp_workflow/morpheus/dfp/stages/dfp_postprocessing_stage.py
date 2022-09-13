@@ -58,7 +58,7 @@ class DFPPostprocessingStage(SinglePortStage):
 
         z_scores = message.get_meta("mean_abs_z")
 
-        above_threshold_df = message.get_meta()[z_scores > 2.0]
+        above_threshold_df = message.get_meta()[z_scores > self._z_score_threshold]
 
         if (not above_threshold_df.empty):
             above_threshold_df['event_time'] = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
